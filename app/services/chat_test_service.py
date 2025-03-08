@@ -21,7 +21,7 @@ from langgraph.graph import StateGraph, START, END
 
 # Set up logger at the top of the file
 # Determine the environment
-environment = os.getenv("ENV", "development").lower()  # Default to "development"
+environment = os.getenv("ENVIRONMENT", "development").lower()  # Default to "development"
 # Set the logging level based on the environment
 log_level = logging.INFO if environment == "production" else logging.DEBUG
 logger = get_logger(__name__, log_level=log_level)

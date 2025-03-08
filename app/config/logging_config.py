@@ -15,11 +15,6 @@ DEFAULT_LOG_LEVEL = LogLevel.INFO
 
 # Service-specific logging settings
 SERVICE_LOG_LEVELS: Dict[str, str] = {
-    "app.services.chat_test_service": LogLevel.DEBUG,
-    "app.services.chat_service": LogLevel.DEBUG,
-    "app.services.gdrive_indexer": LogLevel.DEBUG,
-    "app.services.index_service": LogLevel.DEBUG,
-    "app.services.shopify_indexer": LogLevel.DEBUG,
     # Add other services as needed
 }
 
