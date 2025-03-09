@@ -1,69 +1,83 @@
+# ChatBot Example - RAG-Enabled Marketing Assistant
 
-# ChatBot API - Marketing Solutions
+## Overview
+This is a RAG-enabled chatbot system designed for marketing professionals and analytics experts. The chatbot helps answer questions about marketing services, blogs, products, and attribution strategies using specialized knowledge bases.
 
-## Project Overview
-The ChatBot API for Marketing Solutions is simple ChatBot built on knowledge Base collected
-over a period of time
+## Features
+- **RAG (Retrieval-Augmented Generation)**: Enhances responses with domain-specific knowledge
+- **Dual Response System**: Generates both RAG and non-RAG responses for comparison
+- **Multiple Data Sources**:
+  - Google Drive integration (docs, PDFs, slides)
+  - Shopify storefront (products, blogs)
+- **Vector Search**: Uses Pinecone and OpenAI embeddings for semantic similarity
+- **FastAPI Backend**: Robust API with configurable endpoints
+- **Advanced Logging**: Comprehensive logging for debugging and monitoring
 
-## Purpose
-The purpose of this project is to serve as a robust and customizable marketing-centric
-chatbot solution, making it easy for developers to integrate AI-powered customer
-interactions within their platforms.
+## Tech Stack
+- **Framework**: FastAPI, LangChain
+- **AI Models**: OpenAI GPT models
+- **Vector DB**: Pinecone
+- **Document Processing**: Support for PDF, DOCX, PPTX, and Markdown
+- **Testing**: Includes test suite for semantic accuracy
 
 ## Prerequisites
-Make sure you have the following system requirements:
-- Python 3.12 or higher
-- pip (Python package installer)
-- Virtual Environment (recommended)
+- Python 3.12+
+- OpenAI API key
+- Pinecone API key
+- (Optional) Google Drive API credentials
+- (Optional) Shopify API credentials
 
-## Installation Steps
-1. Clone the repository: 
+## Installation
+1. Clone the repository:
    ```bash
-   git clone 
-   cd <repository_folder>
+   git clone <repository-url>
+   cd ChatBotExample
    ```
-2. Set up a virtual environment:
+
+2. Create and activate a virtual environment:
    ```bash
-   python3 -m venv venv
-   source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
+
 3. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
 
-## Usage Examples
-Here is a simple example of how to use the API:
-
-1. Start the API server:
-   ```bash
-   python app.py
+4. Configure environment variables:
    ```
-2. Send a test request to the chatbot endpoint (e.g., via Postman or curl):
-   ```bash
-   curl -X POST -H "Content-Type: application/json" \
-   -d '{"message": "Hello, what can you do for marketing?"}' \
-   http://localhost:5000/chat
+   # Create a .env file with your API keys
+   OPENAI_API_KEY=your_openai_key
+   PINECONE_API_KEY=your_pinecone_key
+   PINECONE_ENVIRONMENT=your_pinecone_env
+   PINECONE_INDEX=your_index_name
    ```
-3. The API will respond with an appropriate marketing-specific suggestion or answer.
 
-## Features
-- **Intelligent Responses**: Tailored for marketing queries.
-- **Lead Generation**: Provides insights and actionable steps for lead engagement.
-- **Personalization**: Adaptive responses based on user data and preferences.
+5. Additional setup for data sources:
+   - For Google Drive: See [Google Drive Setup Guide](./setup/README.GoogleDriveSetup.md)
+   - For Shopify: Configure Shopify API keys in your environment variables
 
-## Contribution Guidelines
-We welcome contributions to this project. Please follow these steps:
+## Usage
+1. Start the server:
+   ```bash
+   python -m app.main
+   ```
 
-1. Fork the repository.
-2. Create a branch for your feature or bugfix.
-3. Commit your changes and submit a pull request.
+2. The API will be available at `http://localhost:8005`
+
+3. API Endpoints:
+   - `/chat`: Submit chat messages
+   - `/health`: Check server status
+   - Various indexing endpoints for document management
+
+## Development
+- **Environment**: Set `ENVIRONMENT=development` for development mode with auto-reload
+- **Logging**: Adjust log levels in `app/config/logging_config.py`
+- **Testing**: Run test suite with included chat test data
 
 ## License
 This project is licensed under the [MIT License](LICENSE).
 
-## Contact
-For questions or support, reach out to:
-
-Email: [your-email@example.com]
-```
+## Contributing
+Contributions are welcome! Please feel free to submit a Pull Request.
