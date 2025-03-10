@@ -359,15 +359,25 @@ class ChatTestService:
         logger.debug("Created LLM client with structured output for comparison")
 
         # Get the best scores for each approach
-        rag_score = max(
-            state.get("rag_test_results", {}).get("weighted_similarity", 0),
-            state.get("rag_llm_results", {}).get("normalized_score", 0)
-        )
+        # Safely calculate rag_score
+        if state.get("rag_llm_results"):  # Check if rag_llm_results exists and is not None
+            rag_score = max(
+                state.get("rag_test_results", {}).get("weighted_similarity", 0),
+                state["rag_llm_results"].get("normalized_score", 0)  # Safely access normalized_score
+            )
+        else:
+            # If rag_llm_results does not exist, fall back to rag_test_results only
+            rag_score = state.get("rag_test_results", {}).get("weighted_similarity", 0)
 
-        no_rag_score = max(
-            state.get("no_rag_test_results", {}).get("weighted_similarity", 0),
-            state.get("no_rag_llm_results", {}).get("normalized_score", 0)
-        )
+        # Safely calculate no_rag_score
+        if state.get("no_rag_llm_results"):  # Check if no_rag_llm_results exists and is not None
+            no_rag_score = max(
+                state.get("no_rag_test_results", {}).get("weighted_similarity", 0),
+                state["no_rag_llm_results"].get("normalized_score", 0)  # Safely access normalized_score
+            )
+        else:
+            # If no_rag_llm_results does not exist, fall back to no_rag_test_results only
+            no_rag_score = state.get("no_rag_test_results", {}).get("weighted_similarity", 0)
 
         logger.debug(f"Best scores - RAG: {rag_score:.4f}, non-RAG: {no_rag_score:.4f}")
 
@@ -575,18 +585,26 @@ class ChatTestService:
             # Determine overall passed status (if either passed)
             overall_passed = final_state.get("rag_passed", False) or final_state.get("no_rag_passed", False)
 
+            if final_state.get("rag_llm_results"):  # Check if rag_llm_results exists and is not None
+                rag_score = max(
+                    final_state.get("rag_test_results", {}).get("weighted_similarity", 0),
+                    final_state["rag_llm_results"].get("normalized_score", 0)  # Safely access normalized_score
+                )
+            else:
+                # If rag_llm_results does not exist, fall back to rag_test_results only
+                rag_score = final_state.get("rag_test_results", {}).get("weighted_similarity", 0)
+
+                # Safely calculate no_rag_score
+            if final_state.get("no_rag_llm_results"):  # Check if no_rag_llm_results exists and is not None
+                no_rag_score = max(
+                    final_state.get("no_rag_test_results", {}).get("weighted_similarity", 0),
+                    final_state["no_rag_llm_results"].get("normalized_score", 0)  # Safely access normalized_score
+                )
+            else:
+                # If no_rag_llm_results does not exist, fall back to no_rag_test_results only
+                no_rag_score = final_state.get("no_rag_test_results", {}).get("weighted_similarity", 0)
+
             # Get the best similarity score from all tests
-            rag_score = max(
-                final_state.get("rag_test_results", {}).get("weighted_similarity", 0),
-                final_state.get("rag_llm_results", {}).get("normalized_score", 0)
-            )
-
-            no_rag_score = max(
-                final_state.get("no_rag_test_results", {}).get("weighted_similarity", 0),
-                final_state.get("no_rag_llm_results", {}).get("normalized_score", 0)
-            )
-
-            # Get the better of the two scores
             similarity_score = max(rag_score, no_rag_score)
 
             # Build response

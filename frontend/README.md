@@ -27,17 +27,15 @@ This is a React frontend for the RAG-enabled Marketing ChatBot application. It p
 3. The application will be available at http://localhost:3000
 
 ## Configuration
-
 The application is configured to proxy API requests to http://localhost:8005 where the backend should be running. You can modify this in the `package.json` file if your backend is running on a different port.
 
 ## Pages
-
 - **Chat**: Main chat interface with the marketing bot
   - Switch between RAG, Standard, and Compare modes
   - View both knowledge-enhanced and standard AI responses
   - Messages retain both response types for later comparison
 - **Test Chat**: Run test scenarios and analyze results
-  - Run automated test suites against semantic benchmarks
+  - Run either a single prompt or an automated test suites against semantic benchmarks
   - Compare RAG vs standard model performance metrics
   - View detailed side-by-side response comparisons
 - **Google Drive Indexing**: Manage Google Drive document indexing
@@ -48,22 +46,18 @@ The application is configured to proxy API requests to http://localhost:8005 whe
   - Filter and manage indexed content by type
 
 ## Technologies Used
-
 - React.js
 - Material UI for components
 - Axios for API requests
 - React Router for navigation
 
 ## Development Notes
-
 - The application uses React's context API for state management
 - Material UI's theming system is used for styling
 - The proxy setting in package.json handles CORS issues during development
 
 ## Response Mode Handling
-
 The chat interface provides three distinct modes for viewing AI responses:
-
 1. **RAG Mode**: Shows only responses enhanced with the knowledge base
 2. **Standard Mode**: Shows only the base AI responses without knowledge enhancement
 3. **Compare Mode**: Shows both responses side-by-side for direct comparison
@@ -71,7 +65,6 @@ The chat interface provides three distinct modes for viewing AI responses:
 The interface maintains both response types internally, allowing you to switch views even after receiving responses. This is useful for analyzing how much the RAG process improves or changes responses.
 
 ## Session Management
-
 - Each conversation has a unique session ID
 - The backend maintains conversation history for each session
 - Session-specific context helps improve response relevance
