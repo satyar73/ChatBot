@@ -24,9 +24,10 @@ from app.models.chat_test_models import (
 )
 from app.services.chat_service import ChatService
 from app.services.chat_test_service import ChatTestService
+from app.services.cache_service import chat_cache
 
 # Initialize router
-router = APIRouter(prefix="/chat", tags=["chat"])
+router = APIRouter(prefix="/chat", tags=["chat", "cache"])
 
 # Dependency to get the chat service
 def get_chat_service():
@@ -159,3 +160,54 @@ async def run_batch_test(
             status_code=500,
             detail=f"Batch test execution failed: {str(e)}"
         )
+
+# Cache management routes
+@router.get("/cache/stats", tags=["cache"])
+async def get_cache_stats():
+    """
+    Get statistics about the cache usage.
+    
+    Returns:
+        Dictionary with cache statistics
+    """
+    return chat_cache.get_cache_stats()
+
+
+@router.delete("/cache", tags=["cache"])
+async def clear_cache(older_than_days: Optional[int] = None):
+    """
+    Clear cache entries.
+    
+    Args:
+        older_than_days: Optional, only clear entries older than this many days
+        
+    Returns:
+        Number of entries cleared
+    """
+    from app.config.cache_config import DEFAULT_CACHE_CLEANUP_DAYS
+    
+    # If older_than_days is not provided but we have a default, use it
+    if older_than_days is None and DEFAULT_CACHE_CLEANUP_DAYS > 0:
+        # Log that we're using the default
+        chat_cache.logger.info(f"Using default cache cleanup age: {DEFAULT_CACHE_CLEANUP_DAYS} days")
+        entries_cleared = chat_cache.clear_cache(DEFAULT_CACHE_CLEANUP_DAYS)
+        return {
+            "message": f"Cleared {entries_cleared} cache entries older than {DEFAULT_CACHE_CLEANUP_DAYS} days",
+            "older_than_days": DEFAULT_CACHE_CLEANUP_DAYS,
+            "entries_cleared": entries_cleared
+        }
+    
+    # Otherwise, clear as specified (or all if older_than_days is None)
+    entries_cleared = chat_cache.clear_cache(older_than_days)
+    
+    if older_than_days is None:
+        return {
+            "message": f"Cleared all cache entries ({entries_cleared} entries)",
+            "entries_cleared": entries_cleared
+        }
+    else:
+        return {
+            "message": f"Cleared {entries_cleared} cache entries older than {older_than_days} days",
+            "older_than_days": older_than_days,
+            "entries_cleared": entries_cleared
+        }

@@ -1,13 +1,33 @@
 import os
+import sys
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import chat_routes, index_routes
-from app.utils.logging_utils import configure_logging, update_logger_levels, get_logger
-from app.config.logging_config import (
-    SERVICE_LOG_LEVELS,
-    DEVELOPMENT_LOG_LEVELS,
-    PRODUCTION_LOG_LEVELS
-)
+
+# Add project root to path if needed to enable both running from app dir or project root
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+# Try imports with both absolute and relative paths
+try:
+    # First try as if running from project root
+    from app.routes import chat_routes, index_routes
+    from app.utils.logging_utils import configure_logging, update_logger_levels, get_logger
+    from app.config.logging_config import (
+        SERVICE_LOG_LEVELS,
+        DEVELOPMENT_LOG_LEVELS,
+        PRODUCTION_LOG_LEVELS
+    )
+except ImportError:
+    # If that fails, try relative imports (when running from app dir)
+    from routes import chat_routes, index_routes
+    from utils.logging_utils import configure_logging, update_logger_levels, get_logger
+    from config.logging_config import (
+        SERVICE_LOG_LEVELS,
+        DEVELOPMENT_LOG_LEVELS,
+        PRODUCTION_LOG_LEVELS
+    )
 
 # Initialize logging first
 configure_logging()

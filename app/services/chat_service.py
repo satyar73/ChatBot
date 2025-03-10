@@ -5,9 +5,12 @@ from typing import Dict, List, Optional, Any
 import logging
 import os
 import sys
+import time
+import json
 from app.agents.chat_agents import agent_manager
 from app.models.chat_models import ChatHistory, ResponseContent, ResponseMessage, Source, Message
 from app.utils.logging_utils import get_logger, diagnose_logger, ensure_debug_logging
+from app.services.cache_service import chat_cache
 
 # Determine the environment
 environment = os.getenv("ENVIRONMENT", "development").lower()  # Default to "development"
@@ -29,6 +32,7 @@ class ChatService:
     async def chat(self, data: Message) -> ResponseMessage:
         """
         Process chat message and return response with both RAG and non-RAG outputs.
+        Uses cache to avoid redundant API calls for identical queries.
 
         Args:
             data: Message object containing user input and session ID
@@ -36,40 +40,99 @@ class ChatService:
         Returns:
             ResponseMessage with RAG and non-RAG responses and sources
         """
+        start_time = time.time()
         user_input = data.message
         session_id = data.session_id
+        cache_hit = False
+        
+        # Log the incoming request
+        self.logger.info(f"Chat request: session={session_id}, input_length={len(user_input)}")
 
         # Get or create chat history for the session
         if session_id not in self.chat_histories:
             self.chat_histories[session_id] = ChatHistory()
         chat_history = self.chat_histories[session_id]
+        
+        # Generate query hash for cache lookup
+        query_hash = chat_cache.generate_query_hash(
+            query=user_input,
+            history=chat_history.get_messages(),
+            session_id=session_id
+        )
+        
+        # Check cache for existing response
+        cached_response, cache_hit = chat_cache.get_cached_response(query_hash)
+        
+        if cache_hit:
+            self.logger.info(f"Cache hit for query_hash={query_hash}")
+            
+            # Extract cached data
+            rag_output = cached_response["rag_response"]
+            no_rag_output = cached_response["no_rag_response"]
+            sources = cached_response.get("sources", [])
+            
+            # Add the user message and the cached response to chat history
+            chat_history.add_user_message(user_input)
+            chat_history.add_ai_message(rag_output)
+            
+            # Format message history
+            formatted_history = self._format_history(chat_history.get_messages())
+            
+            # Create response content with cached data
+            response_content = ResponseContent(
+                input=user_input,
+                history=formatted_history,
+                output=rag_output,
+                no_rag_output=no_rag_output,
+                intermediate_steps=[]  # No intermediate steps for cached responses
+            )
+            
+            # Log cache hit stats
+            response_time = time.time() - start_time
+            chat_cache.log_cache_access(
+                session_id=session_id,
+                user_input=user_input,
+                query_hash=query_hash,
+                cache_hit=True,
+                response_time=response_time
+            )
+            
+            return ResponseMessage(
+                response=response_content,
+                sources=sources
+            )
+        
+        # Cache miss - need to generate a new response
+        self.logger.info(f"Cache miss for query_hash={query_hash}, generating new response")
+        
+        # Add user message to history
         chat_history.add_user_message(user_input)
-
-        self.logger.debug(f"chat call with input: {user_input[:50]}...")
-        self.logger.debug(f"chat history length: {len(chat_history.get_messages())}")
+        
         # Generate response using agent executor with RAG
+        self.logger.debug(f"Requesting RAG response for: {user_input[:50]}...")
         rag_response = await agent_manager.rag_agent.ainvoke(
             {"input": user_input, "history": chat_history.get_messages()},
             include_run_info=True
         )
-
         self.logger.debug(f"RAG response received, length: {len(str(rag_response))}")
+        
         # Generate response using agent executor without RAG
+        self.logger.debug("Requesting non-RAG response...")
         no_rag_response = await agent_manager.standard_agent.ainvoke(
             {"input": user_input, "history": chat_history.get_messages()},
             include_run_info=True
         )
-        self.logger.debug(f"NO RAG response received, length: {len(str(no_rag_response))}")
-
+        self.logger.debug(f"Non-RAG response received, length: {len(str(no_rag_response))}")
+        
         # Extract sources from the RAG response
         sources = self._format_sources(rag_response)
-
+        
         # Save AI's message to chat history (using the RAG response as primary)
         chat_history.add_ai_message(rag_response['output'])
-
+        
         # Format message history for response
         formatted_history = self._format_history(chat_history.get_messages())
-
+        
         # Create the response content
         response_content = ResponseContent(
             input=user_input,
@@ -78,7 +141,28 @@ class ChatService:
             no_rag_output=no_rag_response['output'],
             intermediate_steps=rag_response.get('intermediate_steps', [])
         )
-
+        
+        # Cache the generated response
+        chat_cache.cache_response(
+            query_hash=query_hash,
+            user_input=user_input,
+            rag_response=rag_response['output'],
+            no_rag_response=no_rag_response['output'],
+            sources=sources
+        )
+        
+        # Log cache miss stats
+        response_time = time.time() - start_time
+        chat_cache.log_cache_access(
+            session_id=session_id,
+            user_input=user_input,
+            query_hash=query_hash,
+            cache_hit=False,
+            response_time=response_time
+        )
+        
+        self.logger.info(f"Response generated and cached in {response_time:.2f}s")
+        
         return ResponseMessage(
             response=response_content,
             sources=sources
