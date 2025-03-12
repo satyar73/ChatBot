@@ -93,28 +93,24 @@ const useChatActions = () => {
         // Show both responses side by side
         const assistantMessages = [];
         
-        if (ragResponse) {
-          assistantMessages.push({ 
+        assistantMessages.push({
             role: 'assistant', 
-            content: ragResponse, 
+            content: ragResponse || "No RAG response available",
+            hiddenContent: standardResponse || "No standard response available",
             type: 'rag' 
-          });
-        }
-        
-        if (standardResponse) {
-          assistantMessages.push({ 
+        });
+
+       assistantMessages.push({
             role: 'assistant', 
-            content: standardResponse, 
-            type: 'standard' 
-          });
-        }
-        
-        if (assistantMessages.length > 0) {
-          dispatch({ 
+            content: standardResponse || "No standard response available",
+            hiddenContent: ragResponse || "No RAG response available",
+            type: 'standard'
+        });
+
+       dispatch({
             type: ACTIONS.ADD_ASSISTANT_MESSAGES, 
             payload: assistantMessages 
-          });
-        }
+        });
       } else if (state.responseMode === "rag") {
         // Only show RAG response but store both if available
         dispatch({ 

@@ -89,7 +89,7 @@ export const ChatProvider = ({ children }) => {
     const reformatMessages = () => {
       // Create a new message array to avoid mutation
       const newMessages = [];
-      
+
       // Process each message based on response mode
       for (const msg of state.messages) {
         // Skip null/undefined messages
@@ -110,21 +110,39 @@ export const ChatProvider = ({ children }) => {
               newMessages.push(msg);
               continue;
             }
-            
+
+            // This means that the initial call was either RAG or STANDARD mode
             // If message has hidden content, split into two messages
             if (msg.hiddenContent) {
               if (msg.originalMode === 'rag') {
                 // RAG content is primary, standard is hidden
-                newMessages.push({ role: 'assistant', content: msg.content, type: 'rag' });
-                newMessages.push({ role: 'assistant', content: msg.hiddenContent, type: 'standard' });
+                newMessages.push({
+                          role: 'assistant',
+                          content: msg.content,
+                          hiddenContent: msg.hiddenContent,
+                          type: 'rag' });
+                newMessages.push({
+                          role: 'assistant',
+                          content: msg.hiddenContent,
+                          hiddenContent: msg.content,
+                          type: 'standard' });
               } else {
                 // Standard content is primary, RAG is hidden
-                newMessages.push({ role: 'assistant', content: msg.hiddenContent, type: 'rag' });
-                newMessages.push({ role: 'assistant', content: msg.content, type: 'standard' });
+                newMessages.push({
+                          role: 'assistant',
+                          content: msg.hiddenContent,
+                          hiddenContent: msg.content,
+                          type: 'rag' });
+                newMessages.push({
+                          role: 'assistant',
+                          content: msg.content,
+                          hiddenContent: msg.hiddenContent,
+                          type: 'standard' });
               }
               continue;
             }
-            
+
+            console.assert(false, 'Message should have hidden content');
             // If no hidden content, just use existing content (single mode message)
             newMessages.push({ ...msg, type: 'standard' });
             continue;
@@ -132,15 +150,22 @@ export const ChatProvider = ({ children }) => {
           
           // CASE 2: RAG mode
           if (state.responseMode === 'rag') {
-            // If it's a typed message in compare mode, only keep RAG messages
             if (msg.type) {
+              // If it's a typed message in compare mode, only keep RAG messages
               if (msg.type === 'rag') {
-                newMessages.push({ role: 'assistant', content: msg.content });
+                newMessages.push({
+                    role: 'assistant',
+                    content: msg.content,
+                    hiddenContent: msg.hiddenContent,
+                    originalMode: 'rag'
+                 });
               }
               continue;
             }
-            
+
+            // it is a typed message however not in compare mode
             // If it has hiddenContent, use the right content based on originalMode
+            // always convert it to RAG type message
             if (msg.hiddenContent) {
               if (msg.originalMode === 'rag') {
                 // RAG is already the primary content
@@ -161,7 +186,8 @@ export const ChatProvider = ({ children }) => {
               }
               continue;
             }
-            
+
+            console.assert(false, 'Message should have hidden content');
             // No type or hidden content, keep as is
             newMessages.push(msg);
             continue;
@@ -169,15 +195,22 @@ export const ChatProvider = ({ children }) => {
           
           // CASE 3: Standard mode
           if (state.responseMode === 'standard') {
-            // If it's a typed message in compare mode, only keep standard messages
             if (msg.type) {
+              // If it's a typed message in compare mode, only keep standard messages
               if (msg.type === 'standard') {
-                newMessages.push({ role: 'assistant', content: msg.content });
+                newMessages.push({
+                    role: 'assistant',
+                    content: msg.content,
+                    hiddenContent: msg.hiddenContent,
+                    originalMode: 'standard'
+                });
               }
               continue;
             }
-            
+
+            // it is a typed message however not in compare mode
             // If it has hiddenContent, use the right content based on originalMode
+            // always convert it to standard type message
             if (msg.hiddenContent) {
               if (msg.originalMode === 'standard') {
                 // Standard is already the primary content
@@ -198,12 +231,14 @@ export const ChatProvider = ({ children }) => {
               }
               continue;
             }
-            
+
+            console.assert(false, "Message should have hidden content");
             // No type or hidden content, keep as is
             newMessages.push(msg);
           }
         } else {
           // Any other role, just keep it
+          console.assert(false, 'Unknown role');
           newMessages.push(msg);
         }
       }
