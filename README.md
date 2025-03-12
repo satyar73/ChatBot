@@ -68,7 +68,34 @@ This is a RAG-enabled chatbot system designed for marketing professionals and an
 
 There are multiple ways to run the application:
 
-### Option 1: From the project root directory
+### Option 1: Using Docker (Recommended)
+The easiest way to run the application is using Docker Compose:
+
+1. Make sure you have Docker and Docker Compose installed on your system
+2. Copy the `.env.example` file to `.env` and fill in your API keys:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your API keys
+   ```
+3. Build and start the containers:
+   ```bash
+   docker-compose up -d
+   ```
+4. The application will be available at:
+   - Frontend: http://localhost
+   - Backend API: http://localhost:8005
+
+To stop the containers:
+```bash
+docker-compose down
+```
+
+To view logs:
+```bash
+docker-compose logs -f
+```
+
+### Option 2: From the project root directory
 ```bash
 # Run the convenience script
 python run.py
@@ -80,7 +107,7 @@ python -m app
 uvicorn app:app --port 8005 --reload
 ```
 
-### Option 2: From inside the app directory
+### Option 3: From inside the app directory
 ```bash
 cd app
 
@@ -93,7 +120,7 @@ uvicorn main:app --port 8005 --reload
 
 The API will be available at `http://localhost:8005`
 
-3. API Endpoints:
+### API Endpoints:
    - `/chat`: Submit chat messages
    - `/health`: Check server status
    - Various indexing endpoints for document management

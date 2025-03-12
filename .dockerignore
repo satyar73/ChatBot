@@ -1,0 +1,46 @@
+# Version control
+.git
+.gitignore
+
+# Docker configuration
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+.env
+*.pyc
+
+# Node
+frontend/node_modules
+frontend/npm-debug.log
+frontend/build
+frontend/.env
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local data
+data/cache/chat_cache.db
+
+# Logs
+*.log
+
+# Documentation
+docs/
+*.md
+
+# Cache
+.cache/
+__pycache__/
