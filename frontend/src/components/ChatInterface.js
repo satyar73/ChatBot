@@ -1,3 +1,51 @@
+/**
+ * ChatInterface Component - A dynamic chat application built with React and Material-UI.
+ *
+ * Key Features:
+ * 1. **Dynamic Chat Messages**:
+ *    - Chat messages (user and assistant) are stored in the `messages` state.
+ *    - Messages are rendered dynamically, and the display adjusts based on message type (e.g., user, assistant, RAG, Standard).
+ *
+ * 2. **Response Modes**:
+ *    - The chatbot supports three response modes:
+ *      1. RAG (Retrieval-Augmented Generation): Advanced AI-generated responses.
+ *      2. Standard: Basic responses without advanced augmentation.
+ *      3. Compare: Displays both RAG and Standard responses side-by-side for comparison.
+ *    - The mode can be toggled using buttons, and chat messages are dynamically updated for the chosen mode.
+ *
+ * 3. **React Tools (Hooks)**:
+ *    - `useState`: Manages state for messages, user input, loading status, response modes, errors, etc.
+ *    - `useEffect`: Automatically reacts to changes:
+ *      - Scrolls the chat box to the bottom when new messages are added.
+ *      - Updates the displayed messages when the response mode is changed.
+ *    - `useRef`: References the bottom of the chat box for smooth scrolling.
+ *
+ * 4. **handleSendMessage Function**:
+ *    - Triggered when the user sends a message.
+ *    - Sends the user's message and the selected mode to the backend API (`chatApi.sendMessage`).
+ *    - Processes and formats the chatbot's response before adding it to the chat.
+ *    - Displays error messages if something goes wrong (e.g., network issues).
+ *
+ * 5. **Error Handling**:
+ *    - Errors during communication with the API are caught and displayed as a popup notification (Snackbar).
+ *
+ * 6. **Chat Display**:
+ *    - Messages are styled dynamically based on type:
+ *      - User messages are right-aligned with a specific background color.
+ *      - Assistant messages are categorized and visually differentiated for RAG, Standard, and Compare modes.
+ *    - Circular loaders are displayed when waiting for responses.
+ *
+ * 7. **Mode-Specific Message Processing**:
+ *    - When the mode is changed, the `useEffect` hook evaluates previous messages and adjusts the display.
+ *    - It ensures the right content (RAG, Standard, or both) is displayed based on the selected mode formatting.
+ *
+ * 8. **Additional Features**:
+ *    - Real-time updates ensure a smooth user experience.
+ *    - A clear button allows users to reset the chat and start fresh.
+ *
+ * Overall, this component creates a flexible and robust chat interface that dynamically adapts to user interactions and different response modes.
+ */
+
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Box, TextField, Button, Paper, Typography, Avatar, 
@@ -19,8 +67,6 @@ const ChatInterface = () => {
   const [error, setError] = useState(null);
   const chatEndRef = useRef(null);
 
-  // Scroll to the bottom of the chat when messages update
-  // Scroll to bottom when messages update
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -31,7 +77,8 @@ const ChatInterface = () => {
     setMessages(prevMessages => {
       // Create a new message array to avoid mutation
       const newMessages = [];
-      
+
+      console.log("Processing messages for mode change:", prevMessages);
       // Process each message based on response mode
       for (const msg of prevMessages) {
         // Skip null/undefined messages
@@ -52,21 +99,37 @@ const ChatInterface = () => {
               newMessages.push(msg);
               continue;
             }
-            
             // If message has hidden content, split into two messages
             if (msg.hiddenContent) {
               if (msg.originalMode === 'rag') {
                 // RAG content is primary, standard is hidden
-                newMessages.push({ role: 'assistant', content: msg.content, type: 'rag' });
-                newMessages.push({ role: 'assistant', content: msg.hiddenContent, type: 'standard' });
+                newMessages.push({
+                  role: 'assistant',
+                  content: msg.content,
+                  hiddenContent: msg.hiddenContent,
+                  type: 'rag' });
+                newMessages.push({
+                  role: 'assistant',
+                  content: msg.hiddenContent,
+                  hiddenContent: msg.content,
+                  type: 'standard' });
               } else {
-                // Standard content is primary, RAG is hidden
-                newMessages.push({ role: 'assistant', content: msg.hiddenContent, type: 'rag' });
-                newMessages.push({ role: 'assistant', content: msg.content, type: 'standard' });
+                  // Standard content is primary, RAG is hidden
+                  newMessages.push({
+                      role: 'assistant',
+                      content: msg.hiddenContent,
+                      hiddenContent: msg.content,
+                      type: 'rag' });
+                  newMessages.push({
+                    role: 'assistant',
+                    content: msg.content,
+                    hiddenContent: msg.content,
+                    type: 'standard' });
               }
               continue;
             }
-            
+
+            console.assert(false, "Message should have hidden content");
             // If no hidden content, just use existing content (single mode message)
             newMessages.push({ ...msg, type: 'standard' });
             continue;
@@ -77,8 +140,14 @@ const ChatInterface = () => {
             // If it's a typed message in compare mode, only keep RAG messages
             if (msg.type) {
               if (msg.type === 'rag') {
-                newMessages.push({ role: 'assistant', content: msg.content });
+                newMessages.push({
+                  role: 'assistant',
+                  content: msg.content,
+                  hiddenContent: msg.hiddenContent,
+                  originalMode: responseMode
+                  });
               }
+              // 'standard' nodes will get dropped
               continue;
             }
             
@@ -103,7 +172,8 @@ const ChatInterface = () => {
               }
               continue;
             }
-            
+
+            console.assert(false, "Message should have hidden content or a type");
             // No type or hidden content, keep as is
             newMessages.push(msg);
             continue;
@@ -114,8 +184,14 @@ const ChatInterface = () => {
             // If it's a typed message in compare mode, only keep standard messages
             if (msg.type) {
               if (msg.type === 'standard') {
-                newMessages.push({ role: 'assistant', content: msg.content });
+                newMessages.push({
+                  role: 'assistant',
+                  content: msg.content,
+                  hiddenContent: msg.hiddenContent,
+                  originalMode: responseMode
+                });
               }
+              // in this case rag node will be dropped
               continue;
             }
             
@@ -140,7 +216,8 @@ const ChatInterface = () => {
               }
               continue;
             }
-            
+
+            console.assert(false, "Message should have hidden content or a type");
             // No type or hidden content, keep as is
             newMessages.push(msg);
           }
@@ -189,73 +266,13 @@ const ChatInterface = () => {
       // Check if we have a response.response object (nested structure)
       if (response.response && typeof response.response === 'object') {
         // Primary output based on the selected mode
-        if (response.response.output) {
-          if (responseMode === 'rag' || responseMode === 'compare') {
-            ragResponse = response.response.output;
-          } else {
-            standardResponse = response.response.output;
-          }
-        }
-        
-        // Secondary output (no_rag_output for RAG mode, or the opposite)
-        if (response.response.no_rag_output) {
-          if (responseMode === 'rag' || responseMode === 'compare') {
-            standardResponse = response.response.no_rag_output;
-          } else {
-            // For standard mode, if no_rag_output exists, it might actually be the RAG response
-            ragResponse = response.response.no_rag_output;
-          }
-        }
-      } 
-      // Check top-level fields as fallback
-      else if (response.output) {
-        if (responseMode === 'rag' || responseMode === 'compare') {
-          ragResponse = response.output;
-        } else {
-          standardResponse = response.output;
-        }
-      } 
-      else if (response.no_rag_output) {
-        standardResponse = response.no_rag_output;
-      }
-      else if (response.rag_response) {
-        ragResponse = response.rag_response;
-      }
-      else if (response.standard_response) {
-        standardResponse = response.standard_response;
-      }
-      else if (response.response && typeof response.response === 'string') {
-        // Simple string response - assign to the current mode
-        if (responseMode === 'rag') {
-          ragResponse = response.response;
-        } else if (responseMode === 'standard') {
-          standardResponse = response.response;
-        } else {
-          // For compare mode, set both
-          ragResponse = response.response;
-          standardResponse = response.response;
-        }
-      }
-      else if (response.message) {
-        // Another potential format
-        if (responseMode === 'rag') {
-          ragResponse = response.message;
-        } else if (responseMode === 'standard') {
-          standardResponse = response.message;
-        } else {
-          // For compare mode, set both
-          ragResponse = response.message;
-          standardResponse = response.message;
-        }
+        ragResponse = response.response.output;
+        standardResponse = response.response.no_rag_output;
       }
       else {
         // Fallback if no recognizable format
-        if (responseMode === 'rag' || responseMode === 'compare') {
-          ragResponse = "Could not extract RAG response from server data";
-        }
-        if (responseMode === 'standard' || responseMode === 'compare') {
-          standardResponse = "Could not extract standard response from server data";
-        }
+        ragResponse = "Could not extract RAG response from server data";
+        standardResponse = "Could not extract standard response from server data";
       }
       
       // Make sure we have strings, not objects
@@ -279,10 +296,18 @@ const ChatInterface = () => {
         if (responseMode === "compare") {
           // Show both responses side by side
           if (ragResponse) {
-            newMessages.push({ role: 'assistant', content: ragResponse, type: 'rag' });
+            newMessages.push({
+              role: 'assistant',
+              content: ragResponse,
+              hiddenContent: standardResponse || "No standard response available",
+              type: 'rag' });
           }
           if (standardResponse) {
-            newMessages.push({ role: 'assistant', content: standardResponse, type: 'standard' });
+            newMessages.push({
+              role: 'assistant',
+              content: standardResponse,
+              hiddenContent: ragResponse || "No RAG response available",
+              type: 'standard' });
           }
         } else if (responseMode === "rag") {
           // Only show RAG response but store both if available
