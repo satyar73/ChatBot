@@ -49,10 +49,34 @@ The application is configured to proxy API requests to http://localhost:8005 whe
 - Axios for API requests
 - React Router for navigation
 
+## Architecture
+The application follows a modular architecture with clear separation of concerns:
+
+### 1. Context (State Management)
+- Each feature has its own context provider (`ChatContext`, `GoogleDriveContext`, etc.)
+- Contexts use the reducer pattern for predictable state updates
+- Actions are defined as constants for consistent state changes
+
+### 2. Custom Hooks (Business Logic)
+- Feature-specific hooks encapsulate business logic (`useChatActions`, `useGoogleDriveActions`, etc.)
+- API interactions and complex logic are isolated from UI components
+- Hooks use React's `useCallback` for optimized performance
+
+### 3. UI Components (Presentation)
+- Components are focused on presentation with minimal logic
+- Each component has a single responsibility
+- Components receive data and callbacks via props or context
+
+### 4. Pages (Composition)
+- Pages act as composition layers, bringing together components
+- Context providers wrap page content
+- Features are modular and independently maintainable
+
 ## Development Notes
 - The application uses React's context API for state management
 - Material UI's theming system is used for styling
 - The proxy setting in package.json handles CORS issues during development
+- The codebase follows the principle of separation of concerns
 
 ## Response Mode Handling
 The chat interface provides three distinct modes for viewing AI responses:
@@ -74,3 +98,30 @@ The frontend includes comprehensive error handling for API issues:
 - Detailed error messages for failed requests
 - Automatic session recovery when possible
 - Graceful fallbacks for backend service issues
+
+## Directory Structure
+
+```
+src/
+├── components/        # UI components
+│   ├── indexing/      # Components for indexing interfaces
+│   ├── testing/       # Components for testing interface
+│   └── ...            # Chat interface components
+├── context/           # Context providers for state management
+│   ├── indexing/      # Indexing-specific contexts
+│   ├── TestingContext.js
+│   └── ChatContext.js
+├── hooks/             # Custom hooks for business logic
+│   ├── indexing/      # Indexing-specific hooks
+│   ├── useTestingActions.js
+│   └── useChatActions.js
+├── pages/             # Main page components
+│   ├── ChatPage.js
+│   ├── TestingPage.js
+│   ├── GoogleDriveIndexingPage.js
+│   └── ShopifyIndexingPage.js
+└── services/          # API services
+    └── api.js         # API client and endpoints
+```
+
+This structure follows best practices for React application organization, making the codebase more maintainable, testable, and scalable.
