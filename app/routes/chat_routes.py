@@ -46,14 +46,18 @@ def get_test_service():
 @router.post("/", response_model=ResponseMessage)
 async def chat(data: Message, chat_service: ChatService = Depends(get_chat_service)) -> ResponseMessage:
     """
-    Process chat message and return both RAG and non-RAG responses.
+    Process chat message and return responses based on the specified mode.
 
     Args:
-        data: Message object containing user input and session ID
+        data: Message object containing user input, session ID, and mode
+              Mode can be "rag", "no_rag", or "compare"
         chat_service: ChatService instance from dependency
 
     Returns:
-        ResponseMessage containing both RAG and non-RAG responses with sources
+        ResponseMessage containing responses based on the specified mode:
+        - "rag": Only RAG-based response
+        - "no_rag": Only standard (non-RAG) response
+        - "compare": Both RAG and non-RAG responses
     """
     return await chat_service.chat(data)
 

@@ -11,17 +11,25 @@ import SpeedIcon from '@mui/icons-material/Speed';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 
+// Width of the side bar, change if the length of the menu items become too
+// big
 const drawerWidth = 240;
 
 function AppLayout() {
+  // State to manage the open/close toggle for mobile drawer
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // React Router hooks to get the current location and navigate to a new page.
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Toggle the state of the mobile drawer (open/close)
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
   };
 
+  // Menu item definitions for the side drawer
+  // Each item includes text, an icon, and a corresponding route path
   const menuItems = [
     { text: 'Chat', icon: <ChatIcon />, path: '/' },
     { text: 'Test Chat', icon: <SpeedIcon />, path: '/testing' },
@@ -29,11 +37,15 @@ function AppLayout() {
     { text: 'Shopify Indexing', icon: <ShoppingCartIcon />, path: '/shopify-indexing' },
   ];
 
+  // Drawer component containing the list of menu items
   const drawer = (
     <div>
+        {/*
+          ** App title displayed above the list Items
+          */}
       <Toolbar>
         <Typography variant="h6" noWrap component="div">
-          MarketingBot
+          Marketing Expert
         </Typography>
       </Toolbar>
       <Divider />

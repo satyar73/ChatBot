@@ -40,7 +40,8 @@ class MSquaredClient:
         # Create the request payload
         payload = {
             "message": prompt,
-            "session_id": session_id
+            "session_id": session_id,
+            "mode" : "compare"
         }
 
         try:

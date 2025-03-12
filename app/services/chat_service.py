@@ -43,6 +43,8 @@ class ChatService:
         start_time = time.time()
         user_input = data.message
         session_id = data.session_id
+        mode = getattr(data, "mode", "rag")
+
         cache_hit = False
         
         # Log the incoming request
@@ -61,8 +63,15 @@ class ChatService:
         )
         
         # Check cache for existing response
+        cached_rag_response, cached_no_rag_response = (None, None)
         cached_response, cache_hit = chat_cache.get_cached_response(query_hash)
-        
+        if cache_hit and ((mode != "no_rag" and cached_response["rag_response"] is None)
+                    or (mode != "rag" and cached_response["no_rag_response"] is None)):
+                # Previous request was for a different mode
+            cached_rag_response, cached_no_rag_response = (
+            cached_response["rag_response"], cached_response["no_rag_response"])
+            cache_hit = False
+
         if cache_hit:
             self.logger.info(f"Cache hit for query_hash={query_hash}")
             
@@ -74,7 +83,7 @@ class ChatService:
             # Add the user message and the cached response to chat history
             chat_history.add_user_message(user_input)
             chat_history.add_ai_message(rag_output)
-            
+
             # Format message history
             formatted_history = self._format_history(chat_history.get_messages())
             
@@ -109,20 +118,29 @@ class ChatService:
         chat_history.add_user_message(user_input)
         
         # Generate response using agent executor with RAG
-        self.logger.debug(f"Requesting RAG response for: {user_input[:50]}...")
-        rag_response = await agent_manager.rag_agent.ainvoke(
-            {"input": user_input, "history": chat_history.get_messages()},
-            include_run_info=True
-        )
-        self.logger.debug(f"RAG response received, length: {len(str(rag_response))}")
+        if mode != "no_rag":
+            self.logger.debug(f"Requesting RAG response for: {user_input[:50]}...")
+            rag_response = await agent_manager.rag_agent.ainvoke(
+                {"input": user_input, "history": chat_history.get_messages()},
+                include_run_info=True
+            )
+            self.logger.debug(f"RAG response received, length: {len(str(rag_response))}")
+        else:
+            self.logger.debug(f"Using cached rag_response: {user_input[:50]}...")
+            rag_response = cached_rag_response
         
         # Generate response using agent executor without RAG
-        self.logger.debug("Requesting non-RAG response...")
-        no_rag_response = await agent_manager.standard_agent.ainvoke(
-            {"input": user_input, "history": chat_history.get_messages()},
-            include_run_info=True
-        )
-        self.logger.debug(f"Non-RAG response received, length: {len(str(no_rag_response))}")
+        if mode != "rag":
+            self.logger.debug(f"Requesting non-RAG response for: {user_input[:50]}...")
+            self.logger.debug("Requesting non-RAG response...")
+            no_rag_response = await agent_manager.standard_agent.ainvoke(
+                {"input": user_input, "history": chat_history.get_messages()},
+                include_run_info=True
+            )
+            self.logger.debug(f"Non-RAG response received, length: {len(str(no_rag_response))}")
+        else:
+            self.logger.debug(f"Using cached no_rag_response: {user_input[:50]}...")
+            no_rag_response = cached_no_rag_response
         
         # Extract sources from the RAG response
         sources = self._format_sources(rag_response)
@@ -141,7 +159,7 @@ class ChatService:
             no_rag_output=no_rag_response['output'],
             intermediate_steps=rag_response.get('intermediate_steps', [])
         )
-        
+
         # Cache the generated response
         chat_cache.cache_response(
             query_hash=query_hash,

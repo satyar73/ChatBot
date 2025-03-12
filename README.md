@@ -33,7 +33,7 @@ This is a RAG-enabled chatbot system designed for marketing professionals and an
 ## Installation
 1. Clone the repository:
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/satyar73/ChatBotExample/
    cd ChatBotExample
    ```
 
@@ -60,6 +60,9 @@ This is a RAG-enabled chatbot system designed for marketing professionals and an
 5. Additional setup for data sources:
    - For Google Drive: See [Google Drive Setup Guide](./setup/README.GoogleDriveSetup.md)
    - For Shopify: Configure Shopify API keys in your environment variables
+   ```
+   SHOPIFY_API_KEY=your_shopify_key_name
+   ```
 
 ## Usage
 
@@ -104,7 +107,6 @@ The API will be available at `http://localhost:8005`
 
 ## Cache System
 The application includes a SQLite-based response caching system:
-
 - **Configuration**: Customize settings in `app/config/cache_config.py`
 - **Cache Duration**: Default TTL is 24 hours (configurable)
 - **Cache Size**: Limits maximum entries to prevent unbounded growth
@@ -113,7 +115,6 @@ The application includes a SQLite-based response caching system:
 - **Management**: Clear cache via API or adjust TTL as needed
 
 ### Managing the Cache
-
 The cache can be managed through the API or using command-line tools:
 
 #### Clearing the Cache (API)

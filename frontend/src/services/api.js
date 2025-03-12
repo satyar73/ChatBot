@@ -10,19 +10,25 @@ const api = axios.create({
 });
 
 export const chatApi = {
-  sendMessage: async (message, useRag = true, sessionId = null) => {
+  sendMessage: async (message, responseMode = "rag", sessionId = null) => {
     try {
       // Generate a random session ID if not provided
       const session_id = sessionId || `session_${Math.random().toString(36).substring(2, 15)}`;
       
-      console.log(`Sending chat request with session_id: ${session_id}`);
+      console.log(`Sending chat request with session_id: ${session_id}, mode: ${responseMode}`);
       
-      // Always request RAG for comparison, the UI will decide what to show
+      // Map UI response mode to backend mode parameter
+      let mode = "rag";
+      if (responseMode === "standard") {
+        mode = "no_rag";
+      } else if (responseMode === "compare") {
+        mode = "compare";
+      }
+      
       const response = await api.post('/chat', { 
-        message, 
-        use_rag: true,  // Always true to get both responses
+        message,
         session_id,
-        comparison_mode: true  // Request both RAG and non-RAG responses if the API supports it
+        mode
       });
       
       // Return the response data along with the session ID for future requests

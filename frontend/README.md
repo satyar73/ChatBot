@@ -3,7 +3,6 @@
 This is a React frontend for the RAG-enabled Marketing ChatBot application. It provides interfaces for chatting, testing, and managing document indexing.
 
 ## Features
-
 - **Chat Interface**: Modern chat UI with support for both RAG and standard responses
 - **Response Mode Switching**: Toggle between RAG, standard, and comparison views
 - **Response Memory**: Preserves both responses for retrospective comparison
@@ -12,7 +11,6 @@ This is a React frontend for the RAG-enabled Marketing ChatBot application. It p
 - **Shopify Indexing**: Interface for adding products and articles from Shopify to the knowledge base
 
 ## Setup and Installation
-
 1. Install dependencies:
    ```
    cd frontend

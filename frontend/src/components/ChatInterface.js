@@ -166,9 +166,8 @@ const ChatInterface = () => {
     setError(null);
 
     try {
-      // Send message to API with the current session ID if we have one
-      // Always request both RAG and non-RAG responses for flexibility
-      const response = await chatApi.sendMessage(input, true, sessionId);
+      // Send message to API with the current session ID and response mode
+      const response = await chatApi.sendMessage(input, responseMode, sessionId);
       
       // Save or update the session ID for future requests
       if (response.session_id) {
@@ -189,17 +188,32 @@ const ChatInterface = () => {
       
       // Check if we have a response.response object (nested structure)
       if (response.response && typeof response.response === 'object') {
-        // This is the format you showed in your example
+        // Primary output based on the selected mode
         if (response.response.output) {
-          ragResponse = response.response.output;
+          if (responseMode === 'rag' || responseMode === 'compare') {
+            ragResponse = response.response.output;
+          } else {
+            standardResponse = response.response.output;
+          }
         }
+        
+        // Secondary output (no_rag_output for RAG mode, or the opposite)
         if (response.response.no_rag_output) {
-          standardResponse = response.response.no_rag_output;
+          if (responseMode === 'rag' || responseMode === 'compare') {
+            standardResponse = response.response.no_rag_output;
+          } else {
+            // For standard mode, if no_rag_output exists, it might actually be the RAG response
+            ragResponse = response.response.no_rag_output;
+          }
         }
       } 
       // Check top-level fields as fallback
       else if (response.output) {
-        ragResponse = response.output;
+        if (responseMode === 'rag' || responseMode === 'compare') {
+          ragResponse = response.output;
+        } else {
+          standardResponse = response.output;
+        }
       } 
       else if (response.no_rag_output) {
         standardResponse = response.no_rag_output;
@@ -211,19 +225,37 @@ const ChatInterface = () => {
         standardResponse = response.standard_response;
       }
       else if (response.response && typeof response.response === 'string') {
-        // Simple string response
-        ragResponse = response.response;
-        standardResponse = response.response;
+        // Simple string response - assign to the current mode
+        if (responseMode === 'rag') {
+          ragResponse = response.response;
+        } else if (responseMode === 'standard') {
+          standardResponse = response.response;
+        } else {
+          // For compare mode, set both
+          ragResponse = response.response;
+          standardResponse = response.response;
+        }
       }
       else if (response.message) {
         // Another potential format
-        ragResponse = response.message;
-        standardResponse = response.message;
+        if (responseMode === 'rag') {
+          ragResponse = response.message;
+        } else if (responseMode === 'standard') {
+          standardResponse = response.message;
+        } else {
+          // For compare mode, set both
+          ragResponse = response.message;
+          standardResponse = response.message;
+        }
       }
       else {
         // Fallback if no recognizable format
-        ragResponse = "Could not extract RAG response from server data";
-        standardResponse = "Could not extract standard response from server data";
+        if (responseMode === 'rag' || responseMode === 'compare') {
+          ragResponse = "Could not extract RAG response from server data";
+        }
+        if (responseMode === 'standard' || responseMode === 'compare') {
+          standardResponse = "Could not extract standard response from server data";
+        }
       }
       
       // Make sure we have strings, not objects
@@ -246,21 +278,25 @@ const ChatInterface = () => {
         // Add appropriate message(s) based on the display mode
         if (responseMode === "compare") {
           // Show both responses side by side
-          newMessages.push({ role: 'assistant', content: ragResponse, type: 'rag' });
-          newMessages.push({ role: 'assistant', content: standardResponse, type: 'standard' });
+          if (ragResponse) {
+            newMessages.push({ role: 'assistant', content: ragResponse, type: 'rag' });
+          }
+          if (standardResponse) {
+            newMessages.push({ role: 'assistant', content: standardResponse, type: 'standard' });
+          }
         } else if (responseMode === "rag") {
-          // Only show RAG response but store both
+          // Only show RAG response but store both if available
           newMessages.push({ 
             role: 'assistant', 
-            content: ragResponse,
+            content: ragResponse || "No RAG response available",
             hiddenContent: standardResponse,
             originalMode: responseMode 
           });
         } else {
-          // Only show standard response but store both
+          // Only show standard response but store both if available
           newMessages.push({ 
             role: 'assistant', 
-            content: standardResponse,
+            content: standardResponse || "No standard response available",
             hiddenContent: ragResponse,
             originalMode: responseMode
           });
