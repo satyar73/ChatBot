@@ -82,8 +82,19 @@ The easiest way to run the application is using Docker Compose:
    docker-compose up -d
    ```
 4. The application will be available at:
-   - Frontend: http://localhost
-   - Backend API: http://localhost:8005
+   - Frontend: http://localhost (this will automatically communicate with the backend)
+   - Backend API: http://localhost:8005 (also accessible directly for testing)
+
+### How the Dockerized App Works
+
+In the containerized setup:
+
+1. The React frontend runs in a container with Nginx, accessible at http://localhost
+2. The Python backend runs in a separate container, accessible at http://localhost:8005
+3. When the frontend makes API calls like `/chat` or `/index`, the Nginx server:
+   - Serves the static React files for frontend routes
+   - Proxies API requests to the backend container using Docker's internal DNS
+4. Docker Compose sets up an internal network where "backend" hostname resolves to the backend container
 
 To stop the containers:
 ```bash

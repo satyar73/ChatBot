@@ -11,6 +11,10 @@ RUN npm ci
 # Copy the rest of the frontend code
 COPY . .
 
+# Override the proxy in package.json to work in Docker
+# This is empty because Nginx will handle the proxying
+ENV REACT_APP_API_URL=""
+
 # Build the app for production
 RUN npm run build
 

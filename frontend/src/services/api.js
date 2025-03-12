@@ -1,5 +1,7 @@
 import axios from 'axios';
 
+// In Docker, this will be empty and requests will be handled by Nginx
+// In development, this can be set to http://localhost:8005
 const API_URL = process.env.REACT_APP_API_URL || '';
 
 const api = axios.create({
