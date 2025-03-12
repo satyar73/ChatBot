@@ -89,12 +89,10 @@ The application follows a modular architecture with clear separation of concerns
 - The application uses React's context API for state management
 - Material UI's theming system is used for styling
 - The proxy setting in package.json handles CORS issues during development
-- The codebase follows the principle of separation of concerns
 
 ## Response Mode Handling
 
 The chat interface provides three distinct modes for viewing AI responses:
-
 1. **RAG Mode**: Shows only responses enhanced with the knowledge base
 2. **Standard Mode**: Shows only the base AI responses without knowledge enhancement
 3. **Compare Mode**: Shows both responses side-by-side for direct comparison
@@ -110,10 +108,9 @@ This is useful for analyzing how much the RAG process improves or changes respon
 - The backend cache service can optionally consider session context when caching
 
 ## Error Handling
+The frontend includes error handling for API issues:
 
-The frontend includes comprehensive error handling for API issues:
-
-- Detailed error messages for failed requests
+- Error messages for failed requests
 - Automatic session recovery when possible
 - Graceful fallbacks for backend service issues
 
@@ -141,6 +138,3 @@ src/
 └── services/          # API services
     └── api.js         # API client and endpoints
 ```
-
-This structure follows best practices for React application organization, making the codebase more maintainable,
-testable, and scalable.
