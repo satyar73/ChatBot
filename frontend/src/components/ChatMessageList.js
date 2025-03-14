@@ -7,6 +7,7 @@ import {
   CircularProgress
 } from '@mui/material';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useChatContext } from '../context/ChatContext';
 
 const messageStyle = {
@@ -86,13 +87,14 @@ const ChatMessageList = () => {
               maxWidth: '70%',
               ...messageStyle[msg.type || msg.role]
             }}
+            className="markdown-content"
           >
             {msg.type && (
               <Typography variant="caption" sx={{ fontWeight: 'bold' }}>
                 {msg.type === 'rag' ? 'RAG Response' : 'Standard Response'}
               </Typography>
             )}
-            <ReactMarkdown>{typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}</ReactMarkdown>
           </Paper>
           
           {msg.role === 'user' && (

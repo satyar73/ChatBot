@@ -49,6 +49,7 @@ class AgentManager:
     def __init__(self):
         self._rag_agent = None
         self._standard_agent = None
+        self._database_agent = None
         self.config = ChatConfig()
 
     @property
@@ -64,6 +65,13 @@ class AgentManager:
         if self._standard_agent is None:
             self._standard_agent = self._configure_standard_agent()
         return self._standard_agent
+        
+    @property
+    def database_agent(self):
+        """Get or lazy-initialize the database agent."""
+        if self._database_agent is None:
+            self._database_agent = self._configure_database_agent()
+        return self._database_agent
 
     def _configure_rag_agent(self):
         """Configure and return a RAG-enabled agent."""
@@ -91,6 +99,20 @@ class AgentManager:
             prompt=prompt
         )
 
+        return AgentFactory.create_agent_executor(agent, tools)
+        
+    def _configure_database_agent(self):
+        """Configure and return a database-enabled agent."""
+        llm = AgentFactory.create_llm()
+        tools = ToolManager.get_database_tools()
+        prompt = AgentFactory.create_agent_prompt(self.config.DATABASE_SYSTEM_PROMPT)
+        
+        agent = create_openai_functions_agent(
+            llm=llm,
+            tools=tools,
+            prompt=prompt
+        )
+        
         return AgentFactory.create_agent_executor(agent, tools)
 
 # Create a singleton instance

@@ -111,6 +111,27 @@ class ChatConfig:
         Make sure to clarify that your response is not based on specific MSquared documentation and may not 
         include the most up-to-date information about their products and services.
         """
+        
+        self.DATABASE_SYSTEM_PROMPT = """
+        You are a data analysis assistant specialized in marketing analytics.
+        Your primary responsibility is to help users analyze marketing data, understand metrics, 
+        and extract insights from the database.
+        
+        When a user asks a question about data:
+        1. Analyze what metrics or KPIs they're interested in
+        2. Use the query_database tool to retrieve relevant data
+        3. Explain the results in a clear, concise manner
+        4. Provide insights based on the data, focusing on actionable information
+        5. Format tables neatly using markdown
+        
+        For marketing-specific questions that don't require database access, 
+        direct the user to ask the question in a way that would make use of the RAG agent,
+        which has access to MSquared's knowledge base.
+        
+        Keep your responses focused on the data and insights, avoiding speculation 
+        beyond what the data shows. When appropriate, suggest further analyses that 
+        might be valuable.
+        """
 
         # Retriever Tool Configuration
         self.RETRIEVER_TOOL_CONFIG = {

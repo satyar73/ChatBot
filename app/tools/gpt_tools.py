@@ -20,6 +20,52 @@ class ToolManager:
         now = datetime.utcnow()
         current_time = f'the current time is {now.strftime("%d-%B-%Y")}'
         return current_time
+        
+    @staticmethod
+    @tool
+    def query_database(query: str) -> str:
+        """Execute a database query and return the results.
+        The query should be specific about what data is needed.
+        Example queries:
+        - Show me top products by revenue
+        - Get customer conversion rates by month
+        - Calculate average order value by product category
+        """
+        # This is a simplified implementation - in a real system, you would:
+        # 1. Parse the natural language query
+        # 2. Translate to SQL or other database query language
+        # 3. Execute against your actual database
+        # 4. Format and return the results
+        
+        # For demo purposes, return sample data based on keywords in query
+        if "products" in query.lower() or "revenue" in query.lower():
+            return """
+            | Product          | Revenue   | Units Sold |
+            |------------------|-----------|------------|
+            | Attribution Pro  | $125,000  | 250        |
+            | Marketing Suite  | $87,500   | 350        |
+            | Analytics Basic  | $45,000   | 900        |
+            | Data Connector   | $32,500   | 650        |
+            """
+        elif "customer" in query.lower() or "conversion" in query.lower():
+            return """
+            | Month     | Visitors | Conversions | Rate  |
+            |-----------|----------|-------------|-------|
+            | January   | 25,400   | 762         | 3.0%  |
+            | February  | 28,500   | 913         | 3.2%  |
+            | March     | 32,100   | 1,091       | 3.4%  |
+            | April     | 30,800   | 956         | 3.1%  |
+            """
+        elif "average" in query.lower() or "order" in query.lower():
+            return """
+            | Category        | Avg Order Value |
+            |-----------------|-----------------|
+            | Enterprise      | $3,250          |
+            | Mid-market      | $1,125          |
+            | Small Business  | $485            |
+            """
+        else:
+            return "I don't have specific data for that query. Please try a more specific question about products, revenue, customers, or order values."
 
     @classmethod
     def configure_retriever(cls):
@@ -65,3 +111,8 @@ class ToolManager:
     def get_standard_tools(cls):
         """Get tools for standard (non-RAG) agent."""
         return [cls.get_current_time]
+        
+    @classmethod
+    def get_database_tools(cls):
+        """Get tools for database operations."""
+        return [cls.query_database, cls.get_current_time]

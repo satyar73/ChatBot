@@ -29,13 +29,17 @@ def configure_logging(log_level: Optional[str] = None) -> None:
                 "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
                 "datefmt": "%Y-%m-%d %H:%M:%S"
             },
+            "detailed": {
+                "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s - [%(filename)s:%(lineno)d]",
+                "datefmt": "%Y-%m-%d %H:%M:%S"
+            },
         },
         "handlers": {
             "console": {
-                "level": log_level,
+                "level": "DEBUG",  # Set handler to DEBUG to allow all messages
                 "class": "logging.StreamHandler",
-                "formatter": "default",
-                "stream": sys.stdout
+                "formatter": "detailed",
+                "stream": sys.stderr  # Use stderr for better Docker compatibility
             },
             # You can add a file handler here if needed
         },
@@ -49,6 +53,7 @@ def configure_logging(log_level: Optional[str] = None) -> None:
             # Application loggers
             "app": {"level": log_level, "handlers": ["console"], "propagate": False},
             "app.services": {"level": log_level, "handlers": ["console"], "propagate": False},
+            "app.services.chat_service": {"level": "DEBUG", "handlers": ["console"], "propagate": False},
             "app.services.chat_test_service": {"level": log_level, "handlers": ["console"], "propagate": False},
 
             # Third-party libraries

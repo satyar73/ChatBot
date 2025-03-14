@@ -10,10 +10,43 @@ services:
       - ./data:/app/data
       - ./.env:/app/.env
     environment:
-      - ENVIRONMENT=production
+      - ENVIRONMENT=${MODE:-production}
     networks:
       - chatbot-network
+    # Command is defined in the Dockerfile but can be overridden
+    # Use MODE=debug docker-compose up to start in debug mode
+    command: ${DEBUG_CMD:-uvicorn app.main:app --host 0.0.0.0 --port 8005}
     # Expose to host for direct API testing if needed
+    ports:
+      - "8005:8005"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8005/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # Debug configuration that mounts app code for live reloading
+  backend-debug:
+    profiles: ["debug"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chatbot-backend-debug
+    # Use the hostname 'backend' so the frontend can find it
+    hostname: backend
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env
+      - ./app:/app/app  # Mount app directory for live code changes
+    environment:
+      - ENVIRONMENT=development
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8005 --reload --log-level info
+    networks:
+      - chatbot-network
     ports:
       - "8005:8005"
     healthcheck:

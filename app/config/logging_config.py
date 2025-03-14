@@ -15,13 +15,16 @@ DEFAULT_LOG_LEVEL = LogLevel.INFO
 
 # Service-specific logging settings
 SERVICE_LOG_LEVELS: Dict[str, str] = {
-    # Add other services as needed
+    "app.services.chat_service": LogLevel.DEBUG,
+    "app.services.chat_service.ChatService": LogLevel.DEBUG
 }
 
 # You can also have environment-specific configurations
 DEVELOPMENT_LOG_LEVELS: Dict[str, str] = {
     "app": LogLevel.DEBUG,
     "app.services": LogLevel.DEBUG,
+    "app.services.chat_service": LogLevel.DEBUG,
+    "app.services.chat_service.ChatService": LogLevel.DEBUG,
     "uvicorn": LogLevel.INFO,
     "fastapi": LogLevel.DEBUG,
 }
