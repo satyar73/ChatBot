@@ -42,14 +42,18 @@ class ChatService:
         """
         # Exclusion patterns - don't route these to database agent
         exclusion_patterns = [
-            r'\bincrementality test',   # Incrementality tests should go to RAG
-            r'\bprospecting\b',         # Prospecting questions should go to RAG
-            r'\bmarketing strateg',     # Marketing strategy questions to RAG
-            r'\bmsquared\b',            # Company-specific questions to RAG
-            r'\bcase stud',             # Case studies to RAG
-            r'\bwhite paper',           # Documentation to RAG
-            r'\bbest practice',         # Best practices to RAG
-            r'\brecommend'              # Recommendation requests to RAG
+            r'\bincrementality test',    # Incrementality tests should go to RAG
+            r'\bprospecting\b',          # Prospecting questions should go to RAG
+            r'\bmarketing strateg',      # Marketing strategy questions to RAG
+            r'\bmarketing mix\b',        # Marketing mix model questions to RAG
+            r'\bmmm\b',                  # MMM questions to RAG
+            r'\bmodel\b',                # Model-related questions to RAG
+            r'\bvalidat',                # Validation questions to RAG
+            r'\bmsquared\b',             # Company-specific questions to RAG
+            r'\bcase stud',              # Case studies to RAG
+            r'\bwhite paper',            # Documentation to RAG
+            r'\bbest practice',          # Best practices to RAG
+            r'\brecommend'               # Recommendation requests to RAG
         ]
         
         self.logger.debug(f"PATTERN MATCHING: Evaluating query against exclusion patterns")
@@ -230,8 +234,14 @@ class ChatService:
                 include_run_info=True
             )
             self.logger.debug(f"AGENT ROUTING: Database response received, length: {len(str(rag_response))}")
-            # For database queries, we'll use same response for no_rag
-            no_rag_response = None
+            
+            # Always generate a no_rag response for completeness
+            self.logger.debug(f"==== AGENT ROUTING: Also generating STANDARD response for database query ====")
+            no_rag_response = await agent_manager.standard_agent.ainvoke(
+                {"input": actual_query, "history": chat_history.get_messages()},
+                include_run_info=True
+            )
+            self.logger.debug(f"AGENT ROUTING: Standard response received for database query, length: {len(str(no_rag_response))}")
         else:
             # Generate response using agent executor with RAG
             if mode != "no_rag":

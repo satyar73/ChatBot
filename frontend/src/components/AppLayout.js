@@ -45,7 +45,7 @@ function AppLayout() {
           */}
       <Toolbar>
         <Typography variant="h6" noWrap component="div">
-          Marketing Expert
+          MSquared Marketing
         </Typography>
       </Toolbar>
       <Divider />
@@ -90,7 +90,7 @@ function AppLayout() {
             <MenuIcon />
           </IconButton>
           <Typography variant="h6" noWrap component="div">
-            {menuItems.find(item => item.path === location.pathname)?.text || 'Marketing Bot'}
+            {menuItems.find(item => item.path === location.pathname)?.text || 'MSquared Chat'}
           </Typography>
         </Toolbar>
       </AppBar>
