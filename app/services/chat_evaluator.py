@@ -241,8 +241,8 @@ class ChatTesterCLI:
 async def main():
     # Check command line arguments
     if len(sys.argv) < 3:
-        print("Usage: python chat_tester.py <api_url> <csv_file> [similarity_threshold]")
-        print("Example: python chat_tester.py http://localhost:8005 test_cases.csv 0.7")
+        print("Usage: python chat_evaluator.py <api_url> <csv_file> [similarity_threshold]")
+        print("Example: python chat_evaluator.py http://localhost:8005 test_cases.csv 0.7")
         sys.exit(1)
 
     API_URL = sys.argv[1]
