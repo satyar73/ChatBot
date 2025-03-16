@@ -273,6 +273,141 @@ class TestShopifyIndexer(unittest.TestCase):
         self.assertEqual(records[0]['url'], 'https://test-store.myshopify.com/products/test-product')
         self.assertEqual(records[0]['markdown'], '# Test Product\n\nProduct description')
 
+    # Here are the three test methods that were defined outside the class before
+    @patch('app.services.shopify_indexer.Pinecone')
+    @patch('app.services.shopify_indexer.PineconeVectorStore')
+    @patch('app.services.shopify_indexer.OpenAIEmbeddings')
+    def test_index_to_pinecone_new_index(self, mock_embeddings, mock_pinecone_vectorstore, mock_pinecone):
+        """Test creating a new Pinecone index and indexing documents"""
+        # Set up necessary configs
+        self.config.PINECONE_INDEX_NAME = "test-index"
+        self.config.PINECONE_DIMENSION = 1536
+        self.config.PINECONE_CLOUD = "aws"
+        self.config.PINECONE_REGION = "us-west-2"
+        self.config.PINECONE_API_KEY = "test-pinecone-api-key"
+        self.config.OPENAI_API_KEY = "test-openai-api-key"
+        self.config.OPENAI_EMBEDDING_MODEL = "text-embedding-ada-002"
+        self.config.CHUNK_SIZE = 1000
+        self.config.CHUNK_OVERLAP = 200
+
+        # Set up mock Pinecone instance and index
+        mock_pinecone_instance = mock_pinecone.return_value
+        mock_list_indexes = MagicMock()
+        mock_list_indexes.names.return_value = []  # Empty list means index doesn't exist
+        mock_pinecone_instance.list_indexes.return_value = mock_list_indexes
+
+        # Set up mock for vector store
+        mock_vectorstore = mock_pinecone_vectorstore.from_documents.return_value
+
+        # Test data for indexing
+        test_records = [
+            {
+                "title": "Test Article",
+                "url": "https://test-store.myshopify.com/blogs/test-blog/test-article",
+                "markdown": "# Test Article\n\nThis is a test article content"
+            },
+            {
+                "title": "Test Product",
+                "url": "https://test-store.myshopify.com/products/test-product",
+                "markdown": "# Test Product\n\nThis is a test product description"
+            }
+        ]
+
+        # Add mock for ServerlessSpec
+        mock_serverless_spec = MagicMock()
+        mock_serverless_spec.return_value = MagicMock()
+        with patch('pinecone.ServerlessSpec', mock_serverless_spec):
+            # Call the method
+            result = self.indexer.index_to_pinecone(test_records)
+
+        # Verify that Pinecone was initialized with the correct API key
+        mock_pinecone.assert_called_once_with(api_key="test-pinecone-api-key")
+
+        # Verify that we checked for existing indexes
+        mock_pinecone_instance.list_indexes.assert_called_once()
+
+        # Verify that a new index was created with correct parameters
+        mock_pinecone_instance.create_index.assert_called_once()
+        create_index_call = mock_pinecone_instance.create_index.call_args
+        create_index_call = mock_pinecone_instance.create_index.call_args
+        self.assertEqual(create_index_call[1]["name"], "test-index")
+        self.assertEqual(create_index_call[1]["dimension"], 1536)
+        self.assertEqual(create_index_call[1]["metric"], "cosine")
+        # Check ServerlessSpec was passed correctly
+        self.assertEqual(create_index_call[1]["spec"].cloud, "aws")
+        self.assertEqual(create_index_call[1]["spec"].region, "us-west-2")
+
+        # Verify that OpenAI embeddings were initialized with correct parameters
+        mock_embeddings.assert_called_once_with(
+            api_key="test-openai-api-key",
+            model="text-embedding-ada-002",
+            dimensions=1536
+        )
+
+        # Verify that documents were indexed
+        mock_pinecone_vectorstore.from_documents.assert_called_once()
+        from_docs_call = mock_pinecone_vectorstore.from_documents.call_args
+        # Check the index name and API key in the from_documents call
+        self.assertEqual(from_docs_call[1]["index_name"], "test-index")
+        self.assertEqual(from_docs_call[1]["pinecone_api_key"], "test-pinecone-api-key")
+
+        # Verify the result
+        self.assertTrue(result)
+
+    @patch('app.services.shopify_indexer.Pinecone')
+    @patch('app.services.shopify_indexer.PineconeVectorStore')
+    def test_index_to_pinecone_empty_records(self, mock_pinecone_vectorstore, mock_pinecone):
+        """Test handling of empty records list"""
+        # Empty test data
+        test_records = []
+
+        # Call the method
+        result = self.indexer.index_to_pinecone(test_records)
+
+        # Verify the result - implementation dependent
+        # Some implementations might return True for empty lists (nothing to do = success)
+        # Others might return False (nothing to index = failure)
+        # Adjust as needed based on your implementation
+        self.assertTrue(result)  # Adjust based on expected behavior
+
+    @patch('app.services.shopify_indexer.Pinecone')
+    @patch('app.services.shopify_indexer.PineconeVectorStore')
+    @patch('app.services.shopify_indexer.OpenAIEmbeddings')
+    def test_index_to_pinecone_exception_handling(self, mock_embeddings, mock_pinecone_vectorstore, mock_pinecone):
+        """Test exception handling during indexing"""
+        # Set up necessary configs
+        self.config.PINECONE_API_KEY = "test-pinecone-api-key"
+        self.config.PINECONE_INDEX_NAME = "test-index"
+        self.config.PINECONE_DIMENSION = 1536
+        self.config.OPENAI_API_KEY = "test-openai-api-key"
+        self.config.OPENAI_EMBEDDING_MODEL = "text-embedding-ada-002"
+        self.config.CHUNK_SIZE = 1000
+        self.config.CHUNK_OVERLAP = 200
+
+        # Set up mock Pinecone instance and index
+        mock_pinecone_instance = mock_pinecone.return_value
+        mock_list_indexes = MagicMock()
+        mock_list_indexes.names.return_value = ["test-index"]  # Index exists
+        mock_pinecone_instance.list_indexes.return_value = mock_list_indexes
+
+        # Set up mock to raise an exception
+        mock_pinecone_vectorstore.from_documents.side_effect = Exception("Test exception")
+
+        # Test data for indexing
+        test_records = [
+            {
+                "title": "Test Article",
+                "url": "https://test-store.myshopify.com/blogs/test-blog/test-article",
+                "markdown": "# Test Article\n\nThis is a test article content"
+            }
+        ]
+
+        # Call the method
+        result = self.indexer.index_to_pinecone(test_records)
+
+        # Verify the result - should return False on exception
+        self.assertFalse(result)
+
     def test_get_blogs_real(self):
         """This test uses the real API - only run when needed"""
         blogs = self.indexer.get_blogs()
@@ -301,11 +436,22 @@ class TestShopifyIndexer(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    # Run all tests
-    unittest.main()
+    # You have two options to run the tests:
 
-    # Alternatively, to run only the real API tests:
-    # suite = unittest.TestSuite()
+    # Option 1: Run all tests
+    # unittest.main()
+
+    # Option 2: Run specific tests
+    suite = unittest.TestSuite()
+
+    # Add the specific tests you want to run
+    suite.addTest(TestShopifyIndexer('test_index_to_pinecone_new_index'))
+    suite.addTest(TestShopifyIndexer('test_index_to_pinecone_empty_records'))
+    suite.addTest(TestShopifyIndexer('test_index_to_pinecone_exception_handling'))
+
+    # Uncomment these if you want to run real API tests (be careful with these)
     # suite.addTest(TestShopifyIndexer('test_get_blogs_real'))
     # suite.addTest(TestShopifyIndexer('test_get_products_real'))
-    # unittest.TextTestRunner().run(suite)
+
+    # Run the selected tests
+    unittest.TextTestRunner().run(suite)

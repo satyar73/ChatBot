@@ -5,13 +5,26 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 # Add project root to path if needed to enable both running from app dir or project root
-project_root = Path(__file__).parent.parent
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
+project_root = Path(__file__).parent.parent.absolute()
+sys.path.insert(0, str(project_root))
+print(f"Project root path: {project_root}")
+print(f"Current sys.path: {sys.path}")
 
-# Try imports with both absolute and relative paths
-try:
-    # First try as if running from project root
+# Set default import paths
+import_base = "app"
+routes_path = f"{import_base}.routes"
+
+# Try to determine if we're running from the app directory or project root
+if os.path.exists(os.path.join(os.getcwd(), "routes")) and os.getcwd().endswith("app"):
+    # We're running from the app directory
+    import_base = ""
+    routes_path = "routes"
+    print("Running from app directory, using relative imports")
+else:
+    print("Running from project root, using absolute imports")
+
+# Import with the determined path
+if import_base:
     from app.routes import chat_routes, index_routes
     from app.utils.logging_utils import configure_logging, update_logger_levels, get_logger
     from app.config.logging_config import (
@@ -19,8 +32,7 @@ try:
         DEVELOPMENT_LOG_LEVELS,
         PRODUCTION_LOG_LEVELS
     )
-except ImportError:
-    # If that fails, try relative imports (when running from app dir)
+else:
     from routes import chat_routes, index_routes
     from utils.logging_utils import configure_logging, update_logger_levels, get_logger
     from config.logging_config import (

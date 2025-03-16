@@ -22,6 +22,8 @@ class ChatConfig:
         # Shopify API Settings
         self.SHOPIFY_API_KEY = os.getenv("SHOPIFY_API_KEY")
         self.SHOPIFY_STORE = "919904"  # MSquare shopify store id
+        self.SHOPIFY_SHOP_DOMAIN = "919904.myshopify.com"  # MSquare shopify store id
+        self.SHOPIFY_API_VERSION = "2024-04"
         self.SHOPIFY_SITE_BASE_URL = "https://msquared.club"
 
         # API Limits
