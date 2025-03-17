@@ -70,6 +70,26 @@ services:
     networks:
       - chatbot-network
     restart: unless-stopped
+    # When using debug profile, make sure we depend on backend-debug instead
+    profiles:
+      - default
+      
+  # Debug version of frontend to work with backend-debug
+  frontend-debug:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: chatbot-frontend-debug
+    ports:
+      - "80:80"
+    depends_on:
+      backend-debug:
+        condition: service_healthy
+    networks:
+      - chatbot-network
+    restart: unless-stopped
+    profiles:
+      - debug
 
 networks:
   chatbot-network:

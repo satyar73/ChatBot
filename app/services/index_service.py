@@ -1,4 +1,5 @@
 import os
+import json
 import asyncio
 from typing import Dict, Optional, Any
 import logging
@@ -99,18 +100,39 @@ class IndexService:
                     "namespaces": {k: {"vector_count": v.vector_count} for k, v in stats_raw.namespaces.items()},
                     "total_vector_count": stats_raw.total_vector_count
                 }
-
+                
+                # Try to load the Shopify content from saved files
+                content = []
+                try:
+                    # Check if product and article files exist
+                    product_path = os.path.join(self.config.OUTPUT_DIR, "products.json")
+                    article_path = os.path.join(self.config.OUTPUT_DIR, "articles.json")
+                    
+                    if os.path.exists(product_path):
+                        with open(product_path, "r") as f:
+                            products = json.load(f)
+                            content.extend(products)
+                    
+                    if os.path.exists(article_path):
+                        with open(article_path, "r") as f:
+                            articles = json.load(f)
+                            content.extend(articles)
+                except Exception as e:
+                    self.logger.warning(f"Could not load content files: {str(e)}")
+                
                 return {
                     "status": "success",
                     "exists": True,
                     "name": self.config.PINECONE_INDEX_NAME,
-                    "stats": stats
+                    "stats": stats,
+                    "content": content
                 }
             else:
                 return {
                     "status": "success",
                     "exists": False,
-                    "name": self.config.PINECONE_INDEX_NAME
+                    "name": self.config.PINECONE_INDEX_NAME,
+                    "content": []
                 }
 
         except Exception as e:

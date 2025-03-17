@@ -1,8 +1,8 @@
 import axios from 'axios';
 
-// In Docker, this will be empty and requests will be handled by Nginx
-// In development, this can be set to http://localhost:8005
-const API_URL = process.env.REACT_APP_API_URL || '';
+// In Docker, this would be empty and requests would be handled by Nginx
+// In development, we need to explicitly set the backend URL
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8005';
 
 const api = axios.create({
   baseURL: API_URL,
@@ -129,7 +129,8 @@ export const indexApi = {
   // Shopify Indexing
   indexShopify: async (shopifyDomain = null) => {
     try {
-      const response = await api.post('/index/shopify', { domain: shopifyDomain });
+      // Using the correct endpoint based on routes.py - it's just /index/
+      const response = await api.post('/index/', { store: shopifyDomain });
       return response.data;
     } catch (error) {
       console.error('Error indexing Shopify:', error);
@@ -139,7 +140,8 @@ export const indexApi = {
   
   listShopifyContent: async () => {
     try {
-      const response = await api.get('/index/shopify/content');
+      // Using the general index info endpoint
+      const response = await api.get('/index/');
       return response.data;
     } catch (error) {
       console.error('Error listing Shopify content:', error);

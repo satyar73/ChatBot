@@ -2,9 +2,7 @@
 
 ## Overview
 
-This is a RAG-enabled chatbot system designed for marketing professionals and analytics experts. The chatbot helps
-answer questions about marketing services, blogs, products, and attribution strategies using specialized knowledge
-bases.
+This is a RAG-enabled chatbot system designed for marketing professionals and analytics experts. The chatbot helps answer questions about marketing services, blogs, products, and attribution strategies using specialized knowledge bases.
 
 ## Features
 
@@ -19,6 +17,8 @@ bases.
 - **Response Caching**: Efficient local caching system for faster responses
 - **Cache Analytics**: Built-in metrics to measure cache performance
 - **Multi-Mode UI**: Toggle between RAG, standard, and side-by-side comparison views
+- **Advanced LLM Interaction Logging**: Detailed logs of tool usage, execution tracing, and response capture
+- **Robust Response Mode Handling**: Improved handling of RAG, no-RAG, and comparison modes with enhanced error resilience
 
 ## Tech Stack
 
@@ -73,14 +73,10 @@ bases.
 
 ## Usage
 
-There are multiple ways to run the application:
+### Running with Docker (Recommended)
 
-### Option 1: Using Docker (Recommended)
-
-The easiest way to run the application is using Docker Compose:
-
-1. Make sure you have Docker and Docker Compose installed on your system
-2. Copy the `.env.example` file to `.env` and fill in your API keys:
+1. Ensure Docker and Docker Compose are installed.
+2. Copy the `.env.example` file to `.env` and update it with your API keys:
    ```bash
    cp .env.example .env
    # Edit .env with your API keys
@@ -90,60 +86,30 @@ The easiest way to run the application is using Docker Compose:
    docker-compose up -d
    ```
 4. The application will be available at:
-    - Frontend: http://localhost (this will automatically communicate with the backend)
-    - Backend API: http://localhost:8005 (also accessible directly for testing)
-
-### How the Dockerized App Works
-
-In the containerized setup:
-
-1. The React frontend runs in a container with Nginx, accessible at http://localhost
-2. The Python backend runs in a separate container, accessible at http://localhost:8005
-3. When the frontend makes API calls like `/chat` or `/index`, the Nginx server:
-    - Serves the static React files for frontend routes
-    - Proxies API requests to the backend container using Docker's internal DNS
-4. Docker Compose sets up an internal network where "backend" hostname resolves to the backend container
+    - Frontend: http://localhost
+    - Backend API: http://localhost:8005
 
 To stop the containers:
-
 ```bash
 docker-compose down
 ```
 
 To view logs:
-
 ```bash
 docker-compose logs -f
 ```
 
-### Option 2: From the project root directory
-
+### Running Locally
 ```bash
-# Run the convenience script
 python run.py
+```
 
-# Or use Python module
-python -m app
-
-# Or use uvicorn directly
+or
+```bash
 uvicorn app:app --port 8005 --reload
 ```
 
-### Option 3: From inside the app directory
-
-```bash
-cd app
-
-# Use the local runner script
-python run_local.py
-
-# Or use uvicorn directly
-uvicorn main:app --port 8005 --reload
-```
-
-The API will be available at `http://localhost:8005`
-
-### API Endpoints:
+## API Endpoints
 
 - `/chat`: Submit chat messages
 - `/health`: Check server status
@@ -168,93 +134,50 @@ The application includes a SQLite-based response caching system:
 - **Analytics**: Track hit rates, response times, and time saved
 - **Management**: Clear cache via API or adjust TTL as needed
 
-### Managing the Cache
+## Managing the Cache
 
-The cache can be managed through the API or using command-line tools:
-
-#### Clearing the Cache (API)
-
-To clear the entire cache through the API:
-
+To clear the cache through the API:
 ```bash
 curl -X DELETE http://localhost:8005/chat/cache
 ```
 
-To clear only entries older than a specific number of days:
-
-```bash
-curl -X DELETE "http://localhost:8005/chat/cache?older_than_days=7"
-```
-
-#### Viewing Cache Statistics
-
-To view cache performance statistics:
-
+To view cache statistics:
 ```bash
 curl http://localhost:8005/chat/cache/stats
 ```
 
-#### Using Python to Clear the Cache
+## Advanced Logging and Error Handling
 
-```python
-import requests
+The agent system includes comprehensive logging of all LLM interactions:
 
-# Clear all cache entries
-requests.delete("http://localhost:8005/chat/cache")
+- **Detailed Tool Usage Logging**: All tool invocations are captured with input/output parameters
+- **Chain Execution Tracing**: Logs full LLM reasoning chain execution
+- **Structured JSON Logs**: Stored in `app/prompt_logs` for easy analysis
+- **Message Content Preservation**: Full message contexts are preserved for debugging
 
-# Clear entries older than 7 days
-requests.delete("http://localhost:8005/chat/cache", params={"older_than_days": 7})
-```
+The chat service now handles all response modes more reliably:
 
-#### Programmatically from Frontend
+- **No-RAG Mode Fix**: Resolved errors in "no_rag" mode
+- **Null-Safety**: Added comprehensive null checks
+- **Primary Response Selection**: Improved selection logic
+- **Error Resilience**: Graceful handling of incomplete responses
 
-The frontend includes API methods to clear the cache:
+These improvements ensure a consistent and error-free experience across all response modes.
 
-```javascript
-import {indexApi} from './services/api';
+## Testing
 
-// Clear all cache
-await indexApi.clearCache();
-
-// Clear cache entries older than 7 days
-await indexApi.clearCache(7);
-
-// Get cache statistics
-const stats = await indexApi.getCacheStats();
-console.log(stats);
-```
-
-#### Command-line Cache Management Tool
-
-The project includes a command-line tool for managing the cache:
-
+### Semantic Comparison Tests
 ```bash
-# Navigate to the tools directory
-cd tools
-
-# View cache statistics
-./manage_cache.py stats
-
-# Clear all cache entries
-./manage_cache.py clear
-
-# Clear entries older than 7 days
-./manage_cache.py clear 7
+python -m app.services.chat_evaluator http://localhost:8005 app/services/chattests.csv 0.7
 ```
 
-This tool is useful for regular maintenance or for automated cleanup scripts.
-
-## API Endpoints
-
-- **Chat**: `/chat` - Main chat endpoint with RAG capabilities
-- **Testing**: `/chat/test` - Run semantic similarity tests
-- **Cache Stats**: `/chat/cache/stats` - View cache performance metrics
-- **Clear Cache**: `/chat/cache` - Clear cache entries
+### End-to-End Tests
+```bash
+python -m app.tests.e2etest_rag
+```
 
 ## License
-
 This project is licensed under the [MIT License](LICENSE).
 
 ## Contributing
-
 Contributions are welcome! Please feel free to submit a Pull Request.

@@ -56,6 +56,10 @@ class ShopifyIndexer:
             List of blog objects containing id, handle, title, and updated_at
         """
         try:
+            # Log the URL and API key (masked) being used
+            masked_key = "***" + self.config.SHOPIFY_API_KEY[-4:] if self.config.SHOPIFY_API_KEY else "None"
+            self.logger.info(f"Fetching blogs from {self.shopify_admin_api_base}/blogs.json with API key: {masked_key}")
+            
             url = f"{self.shopify_admin_api_base}/blogs.json"
             params = {
                 'fields': 'id,updated_at,handle,title',
@@ -65,15 +69,22 @@ class ShopifyIndexer:
                 'X-Shopify-Access-Token': self.config.SHOPIFY_API_KEY
             }
             
+            # Log the full request details (except API key)
+            self.logger.info(f"Request: GET {url} with params={params}")
+            
             response = requests.get(url=url, params=params, headers=headers)
             
             if response.status_code == 200:
                 data = json.loads(response.content)
                 blogs = data.get('blogs', [])
                 self.logger.info(f"Retrieved {len(blogs)} blogs from Shopify")
+                # Log first blog for debugging if any exist
+                if blogs:
+                    self.logger.info(f"First blog: {blogs[0]}")
                 return blogs
             else:
                 self.logger.error(f"Failed to get blogs: Status code {response.status_code}")
+                self.logger.error(f"Response content: {response.content}")
                 return []
                 
         except Exception as e:
@@ -125,6 +136,10 @@ class ShopifyIndexer:
             List of product objects
         """
         try:
+            # Log the URL and API key (masked) being used
+            masked_key = "***" + self.config.SHOPIFY_API_KEY[-4:] if self.config.SHOPIFY_API_KEY else "None"
+            self.logger.info(f"Fetching products from {self.shopify_admin_api_base}/products.json with API key: {masked_key}")
+            
             url = f"{self.shopify_admin_api_base}/products.json"
             params = {
                 'status': 'active',
@@ -137,15 +152,22 @@ class ShopifyIndexer:
                 'X-Shopify-Access-Token': self.config.SHOPIFY_API_KEY
             }
             
+            # Log the full request details (except API key)
+            self.logger.info(f"Request: GET {url} with params={params}")
+            
             response = requests.get(url=url, params=params, headers=headers)
             
             if response.status_code == 200:
                 data = json.loads(response.content)
                 products = data.get('products', [])
                 self.logger.info(f"Retrieved {len(products)} products from Shopify")
+                # Log first product for debugging if any exist
+                if products:
+                    self.logger.info(f"First product: {products[0]['title']} (ID: {products[0]['id']})")
                 return products
             else:
                 self.logger.error(f"Failed to get products: Status code {response.status_code}")
+                self.logger.error(f"Response content: {response.content}")
                 return []
                 
         except Exception as e:
@@ -164,8 +186,8 @@ class ShopifyIndexer:
         """
         try:
             # Convert HTML to markdown
-            markdown_content = md(html_content)
-            
+            markdown_content = md.markdownify(html_content)
+
             # If configured, summarize long content
             if self.config.SUMMARIZE_CONTENT and len(markdown_content) > self.config.SUMMARIZE_THRESHOLD:
                 # For this implementation, we're just returning as-is
@@ -332,10 +354,10 @@ class ShopifyIndexer:
                     docs.append(doc)
             
             # Initialize embeddings
+            # text-embedding-ada-002 has fixed dimensions of 1536, don't specify dimensions
             embeddings = OpenAIEmbeddings(
                 api_key=self.config.OPENAI_API_KEY,
-                model=self.config.OPENAI_EMBEDDING_MODEL,
-                dimensions=self.config.PINECONE_DIMENSION
+                model=self.config.OPENAI_EMBEDDING_MODEL
             )
             
             # Index documents
@@ -403,3 +425,74 @@ class ShopifyIndexer:
         except Exception as e:
             self.logger.error(f"Error during full content indexing: {str(e)}")
             return False
+    
+    def run_full_process(self) -> dict:
+        """
+        Run the complete Shopify indexing process.
+        This is the main entry point called by IndexService.
+        
+        Returns:
+            A dictionary with status and message
+        """
+        try:
+            # Check for store in both possible config attributes
+            shop_domain = getattr(self.config, 'SHOPIFY_SHOP_DOMAIN', None)
+            shop_store = getattr(self.config, 'SHOPIFY_STORE', None)
+            
+            # Use SHOPIFY_SHOP_DOMAIN if provided, otherwise use SHOPIFY_STORE
+            shop_domain = shop_domain if shop_domain else shop_store
+            
+            # Update SHOPIFY_SHOP_DOMAIN with the value from either attribute
+            self.config.SHOPIFY_SHOP_DOMAIN = shop_domain
+            
+            self.logger.info(f"Starting Shopify indexing process for store: {shop_domain}")
+            
+            # Check if we have a valid Shopify domain
+            if not shop_domain:
+                self.logger.error("No Shopify domain provided")
+                return {
+                    "status": "error",
+                    "message": "No Shopify domain provided. Please set SHOPIFY_SHOP_DOMAIN in config or provide a store parameter."
+                }
+                
+            # Check if we have a valid Shopify API key
+            if not self.config.SHOPIFY_API_KEY:
+                self.logger.error("No Shopify API key provided")
+                return {
+                    "status": "error",
+                    "message": "No Shopify API key provided. Please set SHOPIFY_API_KEY in config."
+                }
+                
+            # Update the API base URL with the proper domain
+            self.shopify_admin_api_base = f"https://{shop_domain}/admin/api/{self.config.SHOPIFY_API_VERSION}"
+            self.logger.info(f"Updated API base URL: {self.shopify_admin_api_base}")
+            
+            # Set site base URL if not already set
+            if not self.config.SHOPIFY_SITE_BASE_URL:
+                self.config.SHOPIFY_SITE_BASE_URL = f"https://{shop_domain}"
+                self.logger.info(f"Updated site base URL: {self.config.SHOPIFY_SITE_BASE_URL}")
+            
+            # Run the indexing process
+            success = self.index_all_content()
+            
+            # Get blog and product counts for better messaging
+            blog_records, article_records = self.prepare_blog_articles()
+            product_records, _ = self.prepare_products()
+            
+            if success:
+                return {
+                    "status": "success",
+                    "message": f"Successfully indexed {len(product_records)} products and {len(article_records)} articles from {shop_domain}"
+                }
+            else:
+                return {
+                    "status": "error",
+                    "message": f"Failed to index content from {shop_domain}"
+                }
+                
+        except Exception as e:
+            self.logger.error(f"Error in run_full_process: {str(e)}")
+            return {
+                "status": "error",
+                "message": str(e)
+            }

@@ -17,16 +17,19 @@ const useShopifyActions = () => {
     
     try {
       const response = await indexApi.listShopifyContent();
-      dispatch({ type: ACTIONS.SET_CONTENT, payload: response.content || [] });
       
-      // Calculate stats
-      const products = response.content.filter(item => item.type === 'product').length;
-      const articles = response.content.filter(item => item.type === 'article').length;
+      // Handle the case where response.content may not exist
+      const content = response.content || [];
+      dispatch({ type: ACTIONS.SET_CONTENT, payload: content });
+      
+      // Calculate stats safely with the content array
+      const products = Array.isArray(content) ? content.filter(item => item.type === 'product').length : 0;
+      const articles = Array.isArray(content) ? content.filter(item => item.type === 'article').length : 0;
       
       dispatch({ 
         type: ACTIONS.SET_STATS, 
         payload: {
-          totalItems: response.content.length,
+          totalItems: content.length,
           products,
           articles
         } 
@@ -87,10 +90,21 @@ const useShopifyActions = () => {
     
     try {
       const response = await indexApi.indexShopify(state.shopifyDomain);
-      dispatch({ 
-        type: ACTIONS.SET_SUCCESS, 
-        payload: `Successfully indexed ${response.products_indexed || 0} products and ${response.articles_indexed || 0} articles from Shopify.` 
-      });
+      // Extract product and article counts from the success message if available
+      // Otherwise, use the message directly
+      if (response.status === "success") {
+        if (response.message && response.message.includes("Successfully indexed")) {
+          dispatch({ 
+            type: ACTIONS.SET_SUCCESS, 
+            payload: response.message 
+          });
+        } else {
+          dispatch({ 
+            type: ACTIONS.SET_SUCCESS, 
+            payload: `Successfully indexed Shopify content.` 
+          });
+        }
+      }
       // Refresh the content list
       fetchContent();
     } catch (err) {
@@ -131,10 +145,15 @@ const useShopifyActions = () => {
    * Get filtered content based on tab selection
    */
   const getFilteredContent = useCallback(() => {
+    // Ensure content is an array before filtering
+    if (!Array.isArray(state.content)) {
+      return [];
+    }
+    
     return state.content.filter(item => {
       if (state.tab === 0) return true; // All
-      if (state.tab === 1) return item.type === 'product';
-      if (state.tab === 2) return item.type === 'article';
+      if (state.tab === 1) return item && item.type === 'product';
+      if (state.tab === 2) return item && item.type === 'article';
       return true;
     });
   }, [state.content, state.tab]);

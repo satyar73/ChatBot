@@ -1,5 +1,7 @@
 import os
 from dotenv import load_dotenv
+from langchain_community.chains.pebblo_retrieval.enforcement_filters import PINECONE
+
 
 class ChatConfig:
     """Class to manage all configuration settings for the application"""
@@ -20,11 +22,11 @@ class ChatConfig:
         self.DRIVE_PROCESSED_FILE = os.path.join(self.OUTPUT_DIR, "drive_processed.json")
 
         # Shopify API Settings
-        self.SHOPIFY_API_KEY = os.getenv("SHOPIFY_API_KEY")
-        self.SHOPIFY_STORE = "919904"  # MSquare shopify store id
-        self.SHOPIFY_SHOP_DOMAIN = "919904.myshopify.com"  # MSquare shopify store id
         self.SHOPIFY_API_VERSION = "2024-04"
-        self.SHOPIFY_SITE_BASE_URL = "https://msquared.club"
+        self.SHOPIFY_API_KEY = os.getenv("SHOPIFY_API_KEY")
+        self.SHOPIFY_STORE = os.getenv("SHOPIFY_STORE")
+        self.SHOPIFY_SHOP_DOMAIN = os.getenv("SHOPIFY_SHOP_DOMAIN")
+        self.SHOPIFY_SITE_BASE_URL = os.getenv("SHOPIFY_SITE_BASE_URL")
 
         # API Limits
         self.BLOG_FETCH_LIMIT = 250
@@ -33,14 +35,14 @@ class ChatConfig:
 
         # Pinecone Settings
         self.PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-        self.PINECONE_INDEX_NAME = "attributiongpt-23082024"
-        self.PINECONE_DIMENSION = 512
-        self.PINECONE_CLOUD = "aws"
-        self.PINECONE_REGION = "us-west-2"
+        self.PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME")
+        self.PINECONE_DIMENSION = 1536  # Changed from 512 to 1536 to match existing index
+        self.PINECONE_CLOUD = os.getenv("PINECONE_CLOUD")
+        self.PINECONE_REGION = os.getenv("PINECONE_REGION")
 
         # OpenAI Settings
         self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-        self.OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
+        self.OPENAI_EMBEDDING_MODEL = "text-embedding-ada-002"
         self.OPENAI_SUMMARY_MODEL = "gpt-3.5-turbo"
 
         # Processing Settings

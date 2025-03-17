@@ -272,32 +272,40 @@ class ChatService:
                 no_rag_response = cached_no_rag_response
         
         # Extract sources from the RAG response
-        sources = self._format_sources(rag_response)
-        
-        # Save AI's message to chat history (using the RAG response as primary)
-        chat_history.add_ai_message(rag_response['output'])
+        primary_response = rag_response if mode != "no_rag" else no_rag_response
+
+        sources = self._format_sources(rag_response) if rag_response is not None else []
+
+        if primary_response is not None:
+           chat_history.add_ai_message(primary_response['output'])
+        elif rag_response is not None:
+            chat_history.add_ai_message(rag_response['output'])
+        elif no_rag_response is not None:
+            chat_history.add_ai_message(no_rag_response['output'])
+        else:
+            self.logger.error("No valid response generated from RAG or non-RAG agents")
         
         # Format message history for response
         formatted_history = self._format_history(chat_history.get_messages())
-        
-        # Create the response content
+
+        # Create the response content, ensuring we handle None values properly
         response_content = ResponseContent(
             input=user_input,
             history=formatted_history,
-            output=rag_response['output'],
+            output=primary_response['output'] if primary_response is not None else None,
             no_rag_output=no_rag_response['output'] if no_rag_response is not None else None,
-            intermediate_steps=rag_response.get('intermediate_steps', [])
+            intermediate_steps=primary_response.get('intermediate_steps', []) if primary_response is not None else []
         )
 
         # Cache the generated response
         chat_cache.cache_response(
             query_hash=query_hash,
             user_input=user_input,
-            rag_response=rag_response['output'],
+            rag_response=rag_response['output'] if rag_response is not None else None,
             no_rag_response=no_rag_response['output'] if no_rag_response is not None else None,
             sources=sources
         )
-        
+
         # Log cache miss stats
         response_time = time.time() - start_time
         chat_cache.log_cache_access(
@@ -361,6 +369,10 @@ class ChatService:
         Returns:
             List of formatted Source objects
         """
+        if rag_response is None:
+            self.logger.warning("Received None rag_response in _format_sources")
+            return []
+
         raw_sources = rag_response.get("sources", [])
         formatted_sources = []
 
