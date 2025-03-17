@@ -111,9 +111,23 @@ uvicorn app:app --port 8005 --reload
 
 ## API Endpoints
 
+### Chat & Session Management
 - `/chat`: Submit chat messages
+- `/chat/session/{session_id}`: Get chat history for a specific session
+- `/chat/session/{session_id}`: Delete a specific chat session (DELETE method)
+
+### Cache Management
+- `/chat/cache/stats`: Get cache performance statistics
+- `/chat/cache`: Clear cache entries (DELETE method, optional parameter: older_than_days)
+
+### Testing
+- `/chat/test`: Run a single test case
+- `/chat/batch-test`: Run a batch of tests from a CSV file
+
+### Indexing
+- `/index/`: Get index information or create a new index (Shopify)
+- `/index/google-drive`: Create and populate an index with Google Drive data
 - `/health`: Check server status
-- Various indexing endpoints for document management
 
 ## Development
 
@@ -136,12 +150,17 @@ The application includes a SQLite-based response caching system:
 
 ## Managing the Cache
 
-To clear the cache through the API:
+To clear the entire cache through the API:
 ```bash
 curl -X DELETE http://localhost:8005/chat/cache
 ```
 
-To view cache statistics:
+To clear only entries older than a specific number of days:
+```bash
+curl -X DELETE "http://localhost:8005/chat/cache?older_than_days=7"
+```
+
+To view cache performance statistics:
 ```bash
 curl http://localhost:8005/chat/cache/stats
 ```
@@ -166,10 +185,32 @@ These improvements ensure a consistent and error-free experience across all resp
 
 ## Testing
 
-### Semantic Comparison Tests
+The system now features enhanced testing capabilities for evaluating RAG performance with advanced metrics.
+
+### Multi-dimensional Semantic Evaluation
+
+The testing framework evaluates responses beyond simple similarity checks:
+
+- **Quality Metrics**: Analyzes concept coverage, semantic similarity, factual accuracy, and specificity
+- **Weighted Scoring**: Configurable weights to prioritize the most important quality dimensions
+- **Enhanced Comparison**: Detailed RAG vs. non-RAG analysis with value ratings (High/Medium/Low/None/Negative)
+- **LLM-based Analysis**: Sophisticated LLM evaluation for complex cases with strength/weakness identification
+- **Statistical Reporting**: Comprehensive reports on RAG effectiveness across test cases
+
+### Running Tests
+
 ```bash
+# Run full test suite with enhanced evaluation
 python -m app.services.chat_evaluator http://localhost:8005 app/services/chattests.csv 0.7
+
+# Run a single test case
+python -m app.services.chat_evaluator http://localhost:8005 app/services/chattests_single.csv 0.7
+
+# Run batch mode with statistical analysis
+python -m app.services.chat_evaluator http://localhost:8005 app/services/chattests.csv 0.7 batch
 ```
+
+The tests generate detailed CSV reports with response quality metrics and RAG value assessments, making it easier to identify where retrieval augmentation provides the most benefit.
 
 ### End-to-End Tests
 ```bash

@@ -11,7 +11,7 @@ import json
 import logging
 import os
 import pandas as pd
-from typing import Dict, List, Optional, Annotated, TypedDict, Literal, Any
+from typing import Dict, List, Optional, Annotated, TypedDict, Tuple, Literal, Any
 from datetime import datetime
 from uuid import uuid4
 
@@ -35,22 +35,36 @@ class DualState(TypedDict):
     rag_test_results: Optional[Dict]
     rag_llm_results: Optional[Dict]
     rag_passed: Optional[bool]
+    # Enhanced evaluation data
+    rag_enhanced_results: Optional[Dict]
     # Non-RAG response data
     no_rag_response: Optional[str]
     no_rag_test_results: Optional[Dict]
     no_rag_llm_results: Optional[Dict]
     no_rag_passed: Optional[bool]
+    no_rag_enhanced_results: Optional[Dict]
     # Combined reasoning and next steps
     similarity_threshold: float
     reasoning: Optional[str]
     comparison: Optional[Dict]
-    next: Optional[Literal["evaluate_llm_rag", "evaluate_llm_no_rag", "compare", "END"]]
+    next: Optional[Literal["evaluate_llm_rag", "evaluate_llm_no_rag", "enhance_evaluation", "compare", "END"]]
 
 
 class ChatTestService:
     def __init__(self, msquared_api_url: str = "http://localhost:8005"):
         self.config = ChatTestConfig()
         self.msquared_client = MSquaredClient(msquared_api_url)
+
+        # Define weights for enhanced evaluation
+        self.evaluation_weights = {
+            "concept_coverage": 0.35,  # Increased from default - key concepts are critical
+            "semantic_similarity": 0.30,  # Semantic understanding
+            "factual_accuracy": 0.20,  # Correct information
+            "specificity": 0.15,  # Specific details, numbers, examples
+        }
+
+        if not hasattr(self.config, 'ENHANCE_EVALUATION'):
+            self.config.ENHANCE_EVALUATION = "enhance_evaluation"
 
     def get_llm(self):
         """Create LLM instance using LLMClientManager"""
@@ -162,7 +176,7 @@ class ChatTestService:
             if passed:
                 logger.debug(f"Non-RAG response PASSED with score: {results['weighted_similarity']:.4f}")
                 reasoning = f"\n\nNon-RAG response: Quick test PASSED with similarity score of {results['weighted_similarity']:.4f}"
-                next_step = self.config.COMPARE  # Move to comparison step
+                next_step = self.config.ENHANCE_EVALUATION  # Move to comparison step
             else:
                 logger.debug(f"Non-RAG response FAILED with score: {results['weighted_similarity']:.4f}")
                 reasoning = f"\n\nNon-RAG response: Quick test FAILED with similarity score of {results['weighted_similarity']:.4f}"
@@ -328,7 +342,7 @@ class ChatTestService:
                 "no_rag_llm_results": {**results, "normalized_score": normalized_score},
                 "no_rag_passed": final_passed,
                 "reasoning": state.get("reasoning", "") + reasoning if state.get("reasoning") else reasoning,
-                self.config.NEXT: self.config.COMPARE  # Move to comparison step
+                self.config.NEXT: self.config.ENHANCE_EVALUATION  # Move to comparison step
             }
         except Exception as e:
             error_msg = f"\n\nError in non-RAG LLM evaluation: {str(e)}"
@@ -341,9 +355,221 @@ class ChatTestService:
                 self.config.NEXT: self.config.COMPARE  # Move to comparison step
             }
 
+    def _evaluate_response_quality(self,
+                                   expected: str,
+                                   response: str,
+                                   similarity_score: float,
+                                   concept_coverage: float,
+                                   test_details: Dict) -> Tuple[float, Dict]:
+        """
+        Enhanced evaluation function that goes beyond simple similarity to assess response quality.
+        """
+        evaluation = {}
+
+        # 1. Concept coverage - are all key concepts present?
+        evaluation["concept_coverage"] = concept_coverage
+
+        # 2. Semantic similarity - already calculated
+        evaluation["semantic_similarity"] = similarity_score
+
+        # 3. Factual accuracy - check if missing numerical values
+        numbers_missing = test_details.get("numbers_missing", [])
+        factual_accuracy = 1.0 - (len(numbers_missing) * 0.1)  # Reduce score for each missing number
+        factual_accuracy = max(0.0, min(1.0, factual_accuracy))  # Bound between 0 and 1
+        evaluation["factual_accuracy"] = factual_accuracy
+
+        # 4. Specificity - check for specific metrics, examples, or technical terms
+        # This is a heuristic - check for numbers, percentages, specific terms
+        has_numbers = any(c.isdigit() for c in response)
+        has_percentages = "%" in response
+        words_in_response = len(response.split())
+        words_in_expected = len(expected.split())
+
+        # Higher specificity if response has similar or more content than expected
+        length_ratio = min(1.0, words_in_response / max(1, words_in_expected))
+
+        specificity = 0.5  # Base value
+        if has_numbers:
+            specificity += 0.2
+        if has_percentages:
+            specificity += 0.1
+
+        # Adjust based on length ratio - longer answers often contain more specifics
+        specificity = specificity * (0.5 + 0.5 * length_ratio)
+        specificity = min(1.0, specificity)
+        evaluation["specificity"] = specificity
+
+        # Calculate weighted score
+        refined_score = sum(
+            self.evaluation_weights[metric] * score
+            for metric, score in evaluation.items()
+        )
+
+        return refined_score, evaluation
+
+    def _evaluate_rag_value(self,
+                            rag_score: float,
+                            no_rag_score: float,
+                            rag_eval: Dict,
+                            no_rag_eval: Dict) -> Tuple[str, str, float]:
+        """
+        Enhanced function to evaluate the value added by RAG compared to non-RAG.
+        """
+        # Calculate score difference
+        score_diff = rag_score - no_rag_score
+
+        # Determine value rating
+        if score_diff > 0.15:
+            value_rating = "High"
+        elif score_diff > 0.05:
+            value_rating = "Medium"
+        elif score_diff > -0.05:
+            value_rating = "Low"
+        elif score_diff > -0.15:
+            value_rating = "None"
+        else:
+            value_rating = "Negative"
+
+        # Check specific dimensions for a more nuanced assessment
+        specificity_diff = rag_eval.get("specificity", 0) - no_rag_eval.get("specificity", 0)
+        factual_diff = rag_eval.get("factual_accuracy", 0) - no_rag_eval.get("factual_accuracy", 0)
+        concept_diff = rag_eval.get("concept_coverage", 0) - no_rag_eval.get("concept_coverage", 0)
+
+        # Generate value assessment
+        assessment_parts = []
+
+        if abs(score_diff) < 0.05:
+            assessment_parts.append("RAG and non-RAG perform similarly (score difference: {:.4f})".format(score_diff))
+        elif score_diff > 0:
+            assessment_parts.append("RAG " +
+                                    ("significantly " if score_diff > 0.15 else "moderately ") +
+                                    "outperforms non-RAG (score difference: +{:.4f})".format(score_diff))
+        else:
+            assessment_parts.append("Non-RAG outperforms RAG (score difference: {:.4f})".format(score_diff))
+
+        # Add specific strengths/weaknesses
+        if concept_diff > 0.1:
+            assessment_parts.append("RAG provides better concept coverage (+{:.2f})".format(concept_diff))
+        elif concept_diff < -0.1:
+            assessment_parts.append("RAG misses key concepts ({:.2f})".format(concept_diff))
+
+        if specificity_diff > 0.1:
+            assessment_parts.append("RAG provides more specific information (+{:.2f})".format(specificity_diff))
+        elif specificity_diff < -0.1:
+            assessment_parts.append("RAG lacks specificity compared to non-RAG ({:.2f})".format(specificity_diff))
+
+        if factual_diff > 0.1:
+            assessment_parts.append("RAG is more factually accurate (+{:.2f})".format(factual_diff))
+        elif factual_diff < -0.1:
+            assessment_parts.append("RAG has factual inaccuracies ({:.2f})".format(factual_diff))
+
+        value_assessment = "\n".join(assessment_parts)
+
+        return value_rating, value_assessment, score_diff
+
+    def enhance_evaluation_node(self, state: DualState) -> DualState:
+        """Apply enhanced evaluation metrics to both RAG and non-RAG responses"""
+        logger.debug("Starting enhance_evaluation_node")
+
+        expected = state["expected_result"]
+
+        # Process RAG response
+        rag_response = state["rag_response"]
+        rag_test_details = state.get("rag_test_results", {})
+        rag_llm_results = state.get("rag_llm_results", {})
+
+        # Get the base scores
+        rag_base_score = max(
+            rag_test_details.get("weighted_similarity", 0),
+            rag_llm_results.get("normalized_score", 0) if rag_llm_results else 0
+        )
+        rag_concept_coverage = rag_test_details.get("concept_coverage", 0)
+
+        # Apply enhanced evaluation
+        rag_refined_score, rag_evaluation = self._evaluate_response_quality(
+            expected, rag_response, rag_base_score,
+            rag_concept_coverage, rag_test_details
+        )
+        logger.debug(f"RAG refined score: {rag_refined_score:.4f}")
+
+        # Process non-RAG response
+        no_rag_response = state["no_rag_response"]
+        no_rag_test_details = state.get("no_rag_test_results", {})
+        no_rag_llm_results = state.get("no_rag_llm_results", {})
+
+        # Get the base scores
+        no_rag_base_score = max(
+            no_rag_test_details.get("weighted_similarity", 0),
+            no_rag_llm_results.get("normalized_score", 0) if no_rag_llm_results else 0
+        )
+        no_rag_concept_coverage = no_rag_test_details.get("concept_coverage", 0)
+
+        # Apply enhanced evaluation
+        no_rag_refined_score, no_rag_evaluation = self._evaluate_response_quality(
+            expected, no_rag_response, no_rag_base_score,
+            no_rag_concept_coverage, no_rag_test_details
+        )
+        logger.debug(f"Non-RAG refined score: {no_rag_refined_score:.4f}")
+
+        # Determine pass/fail based on refined scores
+        rag_passed = rag_refined_score >= state["similarity_threshold"] or rag_refined_score > no_rag_refined_score
+        no_rag_passed = no_rag_refined_score >= state["similarity_threshold"]
+
+        # Add enhanced evaluations to state
+        enhanced_state = {
+            **state,
+            "rag_enhanced_results": {
+                "refined_score": rag_refined_score,
+                "evaluation": rag_evaluation,
+                "original_score": rag_base_score
+            },
+            "no_rag_enhanced_results": {
+                "refined_score": no_rag_refined_score,
+                "evaluation": no_rag_evaluation,
+                "original_score": no_rag_base_score
+            },
+            "rag_passed": rag_passed,
+            "no_rag_passed": no_rag_passed,
+            self.config.NEXT: self.config.COMPARE
+        }
+
+        # Add reasoning about enhanced evaluation
+        reasoning = "\n\n## Enhanced Evaluation Metrics:\n"
+        reasoning += f"RAG refined score: {rag_refined_score:.4f} (original: {rag_base_score:.4f})\n"
+        reasoning += f"Non-RAG refined score: {no_rag_refined_score:.4f} (original: {no_rag_base_score:.4f})\n"
+        reasoning += "\nMetric breakdown:\n"
+
+        # Add individual metrics
+        for metric, weight in self.evaluation_weights.items():
+            rag_value = rag_evaluation.get(metric, 0)
+            no_rag_value = no_rag_evaluation.get(metric, 0)
+            reasoning += f"- {metric} (weight: {weight:.2f}): RAG={rag_value:.4f}, Non-RAG={no_rag_value:.4f}\n"
+
+        enhanced_state["reasoning"] = state.get("reasoning", "") + reasoning if state.get("reasoning") else reasoning
+
+        logger.debug(f"enhance_evaluation_node completed, next step: {self.config.COMPARE}")
+        return enhanced_state
+
     def compare_node(self, state: DualState) -> DualState:
         """Compare RAG and non-RAG responses to determine RAG value"""
         logger.debug("Starting compare_node")
+
+        # Check if we have enhanced evaluation results
+        if state.get("rag_enhanced_results") and state.get("no_rag_enhanced_results"):
+            # Use enhanced scores
+            rag_score = state["rag_enhanced_results"]["refined_score"]
+            no_rag_score = state["no_rag_enhanced_results"]["refined_score"]
+            rag_evaluation = state["rag_enhanced_results"]["evaluation"]
+            no_rag_evaluation = state["no_rag_enhanced_results"]["evaluation"]
+
+            # Use enhanced evaluation to determine value rating
+            value_rating, value_assessment, score_diff = self._evaluate_rag_value(
+                rag_score, no_rag_score, rag_evaluation, no_rag_evaluation
+            )
+            logger.debug(f"Enhanced evaluation - RAG value rating: {value_rating}")
+        else:
+            # Fall back to original approach
+            logger.debug("No enhanced evaluation results found, using original comparison method")
 
         # Define the output structure
         class ComparisonOutput(TypedDict):
@@ -420,6 +646,16 @@ class ChatTestService:
             "rag_value_rating": value_rating
         }
 
+        # Add enhanced evaluation metrics if available
+        if state.get("rag_enhanced_results") and state.get("no_rag_enhanced_results"):
+            comparison.update({
+                "rag_specificity": state["rag_enhanced_results"]["evaluation"].get("specificity", 0),
+                "no_rag_specificity": state["no_rag_enhanced_results"]["evaluation"].get("specificity", 0),
+                "rag_factual_accuracy": state["rag_enhanced_results"]["evaluation"].get("factual_accuracy", 0),
+                "no_rag_factual_accuracy": state["no_rag_enhanced_results"]["evaluation"].get("factual_accuracy", 0),
+                "enhanced_evaluation": True
+            })
+
         # Also run an LLM comparison for more detailed analysis
         try:
             compare_prompt = self.config.COMPARISON_PROMPT_TEMPLATE
@@ -483,8 +719,10 @@ class ChatTestService:
             self.config.NEXT: self.config.END
         }
 
+
     def router(self, state: DualState) -> Literal[
-        "evaluate_rag", "evaluate_no_rag", "evaluate_llm_rag", "evaluate_llm_no_rag", "compare", "END"]:
+        "evaluate_rag", "evaluate_no_rag", "evaluate_llm_rag",
+        "evaluate_llm_no_rag", "enhance_evaluation", "compare", "END"]:
         """Router function to determine next step based on state"""
         next_step = state.get(self.config.NEXT, self.config.END)
         logger.debug(f"Router determining next step: {next_step}")
@@ -495,12 +733,16 @@ class ChatTestService:
         # Create the graph
         builder = StateGraph(DualState)
 
+        if not hasattr(self.config, 'ENHANCE_EVALUATION'):
+            self.config.ENHANCE_EVALUATION = "enhance_evaluation"
+
         # Add nodes
         builder.add_node(self.config.MSQUARED, self.msquared_node)
         builder.add_node(self.config.EVALUATE_RAG, self.evaluate_rag_node)
         builder.add_node(self.config.EVALUATE_NO_RAG, self.evaluate_no_rag_node)
         builder.add_node(self.config.EVALUATE_LLM_RAG, self.llm_evaluate_rag_node)
         builder.add_node(self.config.EVALUATE_LLM_NO_RAG, self.llm_evaluate_no_rag_node)
+        builder.add_node(self.config.ENHANCE_EVALUATION, self.enhance_evaluation_node)
         builder.add_node(self.config.COMPARE, self.compare_node)
 
         # Set up the flow
@@ -530,7 +772,7 @@ class ChatTestService:
             self.router,
             {
                 self.config.EVALUATE_LLM_NO_RAG : self.config.EVALUATE_LLM_NO_RAG,
-                self.config.COMPARE : self.config.COMPARE,
+                self.config.ENHANCE_EVALUATION : self.config.ENHANCE_EVALUATION,
             }
         )
 
@@ -538,7 +780,15 @@ class ChatTestService:
             self.config.EVALUATE_LLM_NO_RAG,
             self.router,
             {
-                self.config.COMPARE : self.config.COMPARE,
+                self.config.ENHANCE_EVALUATION : self.config.ENHANCE_EVALUATION,
+            }
+        )
+
+        builder.add_conditional_edges(
+            self.config.ENHANCE_EVALUATION,
+            self.router,
+            {
+                self.config.COMPARE: self.config.COMPARE,
             }
         )
 
@@ -569,9 +819,11 @@ class ChatTestService:
             "rag_test_results": None,
             "rag_llm_results": None,
             "rag_passed": None,
+            "rag_enhanced_results": None,  # Add this line
             "no_rag_response": None,
             "no_rag_test_results": None,
             "no_rag_llm_results": None,
+            "no_rag_enhanced_results": None,  # Add this line
             "no_rag_passed": None,
             "reasoning": None,
             "comparison": None,
@@ -607,6 +859,24 @@ class ChatTestService:
             # Get the best similarity score from all tests
             similarity_score = max(rag_score, no_rag_score)
 
+            # Include enhanced evaluation results if available
+            detailed_analysis = {
+                "rag_response": final_state.get("rag_response", ""),
+                "no_rag_response": final_state.get("no_rag_response", ""),
+                "rag_test": final_state.get("rag_test_results", {}),
+                "no_rag_test": final_state.get("no_rag_test_results", {}),
+                "rag_llm_test": final_state.get("rag_llm_results", {}),
+                "no_rag_llm_test": final_state.get("no_rag_llm_results", {}),
+                "comparison": final_state.get("comparison", {})
+            }
+
+            # Add enhanced evaluation if available
+            if final_state.get("rag_enhanced_results"):
+                detailed_analysis["rag_enhanced"] = final_state.get("rag_enhanced_results", {})
+
+            if final_state.get("no_rag_enhanced_results"):
+                detailed_analysis["no_rag_enhanced"] = final_state.get("no_rag_enhanced_results", {})
+
             # Build response
             response = ChatTestResponse(
                 test_id=test_id,
@@ -616,15 +886,7 @@ class ChatTestService:
                 passed=overall_passed,
                 reasoning=final_state.get("reasoning", "No reasoning provided"),
                 similarity_score=similarity_score,
-                detailed_analysis={
-                    "rag_response": final_state.get("rag_response", ""),
-                    "no_rag_response": final_state.get("no_rag_response", ""),
-                    "rag_test": final_state.get("rag_test_results", {}),
-                    "no_rag_test": final_state.get("no_rag_test_results", {}),
-                    "rag_llm_test": final_state.get("rag_llm_results", {}),
-                    "no_rag_llm_test": final_state.get("no_rag_llm_results", {}),
-                    "comparison": final_state.get("comparison", {})
-                }
+                detailed_analysis= detailed_analysis
             )
 
             return response

@@ -62,7 +62,7 @@ async def chat(data: Message, chat_service: ChatService = Depends(get_chat_servi
     return await chat_service.chat(data)
 
 
-@router.delete("/{session_id}", status_code=204)
+@router.delete("/session/{session_id}", status_code=204)
 async def delete_chat(session_id: str, chat_service: ChatService = Depends(get_chat_service)):
     """
     Delete chat history for a session.
@@ -79,7 +79,7 @@ async def delete_chat(session_id: str, chat_service: ChatService = Depends(get_c
     raise HTTPException(status_code=404, detail="session_id does not exist")
 
 
-@router.get("/{session_id}")
+@router.get("/session/{session_id}")
 async def get_chat(session_id: str, chat_service: ChatService = Depends(get_chat_service)):
     """
     Get chat history for a session.
@@ -177,7 +177,7 @@ async def get_cache_stats():
     return chat_cache.get_cache_stats()
 
 
-@router.delete("/cache", tags=["cache"])
+@router.delete("/cache", response_model=Dict[str, Any], tags=["cache"])
 async def clear_cache(older_than_days: Optional[int] = None):
     """
     Clear cache entries.
