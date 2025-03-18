@@ -44,6 +44,7 @@ class ChatConfig:
         self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
         self.OPENAI_EMBEDDING_MODEL = "text-embedding-ada-002"
         self.OPENAI_SUMMARY_MODEL = "gpt-3.5-turbo"
+        self.EMBEDDING_CONTEXT_LENGTH = 8192
 
         # Processing Settings
         self.SUMMARIZE_CONTENT = False  # Set to True if you want to summarize content
@@ -109,7 +110,7 @@ class ChatConfig:
         - Include synonyms and related concepts for technical marketing terms to enhance understanding
         
         RESPONSE STRUCTURE:
-        - Keep responses concise and focused. The shorter the answer the better
+        - Keep responses concise and focused. Keep the answer within 2 - 3 paragraphs.
         - Start with a direct answer to the question in the first paragraph
         - For technical marketing concepts, use this abbreviated structure: 1) Brief Definition, 2) Key Application, 3) Short Example
         - Prioritize essential information over comprehensive coverage - focus on what the user needs to know

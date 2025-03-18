@@ -17,9 +17,10 @@
 
 import React from 'react';
 import { Box } from '@mui/material';
-import { ChatProvider } from '../context/ChatContext';
+import { ChatProvider, useChatContext } from '../context/ChatContext';
 import ErrorAlert from './ErrorAlert';
 import ChatHeader from './ChatHeader';
+import SystemPromptEditor from './SystemPromptEditor';
 import ChatMessageList from './ChatMessageList';
 import ChatInput from './ChatInput';
 
@@ -28,10 +29,13 @@ import ChatInput from './ChatInput';
  * This component acts primarily as a composition layer with minimal logic
  */
 const ChatInterfaceContent = () => {
+  const { state } = useChatContext();
+
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <ErrorAlert />
       <ChatHeader />
+      {state.showSystemPrompt && <SystemPromptEditor />}
       <ChatMessageList />
       <ChatInput />
     </Box>

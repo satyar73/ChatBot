@@ -1,7 +1,7 @@
 """
-Service layer for handling agent queries and responses.
+Service layer for handling agent queries and responses with enhanced RAG query rewriting.
 """
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 import logging
 import os
 import sys
@@ -13,11 +13,145 @@ from app.models.chat_models import ChatHistory, ResponseContent, ResponseMessage
 from app.utils.logging_utils import get_logger, diagnose_logger, ensure_debug_logging
 from app.services.cache_service import chat_cache
 
-# Determine the environment
-environment = os.getenv("ENVIRONMENT", "development").lower()  # Default to "development"
-# Set the logging level based on the environment
-log_level = logging.INFO if environment == "production" else logging.DEBUG
-print(f"Setting log level to {log_level} for {__name__}", file=sys.stderr)
+
+# Add this new class for query rewriting
+class QueryRewriter:
+    """Class for rewriting and expanding user queries to improve RAG retrieval."""
+
+    def __init__(self):
+        self.logger = get_logger(f"{__name__}.QueryRewriter", "DEBUG")
+        self.logger.debug("QueryRewriter initialized")
+
+        # Common marketing and attribution terminology mapping for expansions
+        self.term_expansions = {
+            "mmm": ["marketing mix modeling", "marketing mix model"],
+            "ltv": ["lifetime value", "customer lifetime value"],
+            "roas": ["return on ad spend", "return on advertising spend"],
+            "roi": ["return on investment"],
+            "cac": ["customer acquisition cost", "cost of acquisition"],
+            "cpa": ["cost per acquisition", "cost per action"],
+            "cpc": ["cost per click"],
+            "cpm": ["cost per mille", "cost per thousand impressions"],
+            "ctr": ["click-through rate", "clickthrough rate"],
+            "cvr": ["conversion rate"],
+            "kpi": ["key performance indicator"],
+            "sem": ["search engine marketing"],
+            "seo": ["search engine optimization"],
+            "ppc": ["pay per click", "pay-per-click"]
+        }
+
+        # Marketing concept synonyms for query expansion
+        self.synonym_mappings = {
+            "attribution": ["credit assignment", "channel impact", "marketing impact", "touchpoint analysis"],
+            "incrementality": ["lift", "causal impact", "true impact", "incremental value"],
+            "channel": ["platform", "medium", "touchpoint", "marketing source"],
+            "conversion": ["purchase", "transaction", "sale", "signup", "acquisition"],
+            "effectiveness": ["performance", "impact", "results", "efficiency", "success"],
+            "marketing": ["advertising", "promotion", "campaign", "media spend"],
+            "measurement": ["tracking", "analytics", "analysis", "evaluation", "assessment"],
+            "optimization": ["improvement", "enhancement", "refinement", "maximization"]
+        }
+
+    def expand_abbreviations(self, query: str) -> str:
+        """Expand common marketing abbreviations in the query."""
+        expanded_query = query
+        for abbr, expansions in self.term_expansions.items():
+            # Only match whole words (with word boundaries)
+            pattern = r'\b' + re.escape(abbr) + r'\b'
+            if re.search(pattern, expanded_query, re.IGNORECASE):
+                # Choose the first expansion as default
+                expanded_query = re.sub(pattern, expansions[0], expanded_query, flags=re.IGNORECASE)
+
+        return expanded_query
+
+    def add_synonyms(self, query: str) -> str:
+        """Add relevant synonyms to the query to improve matching."""
+        for term, synonyms in self.synonym_mappings.items():
+            pattern = r'\b' + re.escape(term) + r'\b'
+            if re.search(pattern, query, re.IGNORECASE):
+                # Add the first two synonyms to the query
+                additional_terms = " " + " ".join(synonyms[:2])
+                return query + additional_terms
+
+        return query
+
+    def create_broader_query(self, query: str) -> str:
+        """Create a more general version of the query by removing specific constraints."""
+        # Remove specific qualifiers to make query more general
+        broader_query = re.sub(r'\b(specific|exactly|precise|only|detailed)\b', '', query, flags=re.IGNORECASE)
+
+        # Remove time constraints that might limit results
+        broader_query = re.sub(r'\b(in the last|recent|latest|current|today\'s|this month\'s|this year\'s)\b', '',
+                               broader_query, flags=re.IGNORECASE)
+
+        # Remove format requests that might narrow results
+        broader_query = re.sub(r'\b(table|graph|chart|report|dashboard)\b', '', broader_query, flags=re.IGNORECASE)
+
+        # Focus on core marketing concepts if the query is getting too diluted
+        marketing_terms = [
+            "attribution", "marketing", "campaign", "channel", "advertising",
+            "measurement", "performance", "metrics", "conversion", "funnel"
+        ]
+
+        # Extract core marketing concepts from the query
+        core_terms = []
+        for term in marketing_terms:
+            if re.search(r'\b' + re.escape(term) + r'\b', query, re.IGNORECASE):
+                core_terms.append(term)
+
+        # If we found core marketing terms, construct a query focused on them
+        if core_terms:
+            core_query = " ".join(core_terms)
+            # Return both the broader query and a core concept query
+            return broader_query.strip(), core_query
+
+        return broader_query.strip()
+
+    def generate_alt_queries(self, original_query: str) -> List[str]:
+        """Generate alternative formulations of the query to improve retrieval."""
+        self.logger.debug(f"Generating alternative queries for: {original_query}")
+
+        alt_queries = [original_query]  # Always include the original query
+
+        # Apply basic query expansions
+        expanded = self.expand_abbreviations(original_query)
+        if expanded != original_query:
+            alt_queries.append(expanded)
+            self.logger.debug(f"Added abbreviation-expanded query: {expanded}")
+
+        # Add synonyms
+        with_synonyms = self.add_synonyms(original_query)
+        if with_synonyms != original_query:
+            alt_queries.append(with_synonyms)
+            self.logger.debug(f"Added synonym-enhanced query: {with_synonyms}")
+
+        # Also add synonyms to the expanded version if different
+        if expanded != original_query:
+            expanded_with_synonyms = self.add_synonyms(expanded)
+            if expanded_with_synonyms != expanded:
+                alt_queries.append(expanded_with_synonyms)
+                self.logger.debug(f"Added expanded+synonym query: {expanded_with_synonyms}")
+
+        # Generate broader queries for fallback
+        broader_result = self.create_broader_query(original_query)
+
+        # Check if broader_result is a tuple (has both broader and core queries)
+        if isinstance(broader_result, tuple):
+            broader, core = broader_result
+            alt_queries.append(broader)
+            alt_queries.append(core)
+            self.logger.debug(f"Added broader query: {broader}")
+            self.logger.debug(f"Added core concept query: {core}")
+        else:
+            alt_queries.append(broader_result)
+            self.logger.debug(f"Added broader query: {broader_result}")
+
+        # Make sure we don't have duplicates
+        unique_queries = list(dict.fromkeys(alt_queries))
+
+        self.logger.debug(f"Generated {len(unique_queries)} alternative queries")
+        return unique_queries
+
 
 class ChatService:
     """Service for managing chat interactions with agents."""
@@ -27,47 +161,49 @@ class ChatService:
         self.chat_histories = {}
         self.logger = get_logger(f"{__name__}.ChatService", "DEBUG")
         self.logger.debug("ChatService initialized")
+        # Initialize the query rewriter
+        self.query_rewriter = QueryRewriter()
         # Explicit print to check if output is working at all
         print("ChatService initialized", file=sys.stderr)
-        
+
     def _is_database_query(self, query: str) -> bool:
         """
         Determine if a user query is likely a database/analytics query.
-        
+
         Args:
             query: The user's input query
-            
+
         Returns:
             bool: True if the query appears to be a database query
         """
         # Exclusion patterns - don't route these to database agent
         exclusion_patterns = [
-            r'\bincrementality test',    # Incrementality tests should go to RAG
-            r'\bprospecting\b',          # Prospecting questions should go to RAG
-            r'\bmarketing strateg',      # Marketing strategy questions to RAG
-            r'\bmarketing mix\b',        # Marketing mix model questions to RAG
-            r'\bmmm\b',                  # MMM questions to RAG
-            r'\bmodel\b',                # Model-related questions to RAG
-            r'\bvalidat',                # Validation questions to RAG
-            r'\bmsquared\b',             # Company-specific questions to RAG
-            r'\bcase stud',              # Case studies to RAG
-            r'\bwhite paper',            # Documentation to RAG
-            r'\bbest practice',          # Best practices to RAG
-            r'\brecommend'               # Recommendation requests to RAG
+            r'\bincrementality test',  # Incrementality tests should go to RAG
+            r'\bprospecting\b',  # Prospecting questions should go to RAG
+            r'\bmarketing strateg',  # Marketing strategy questions to RAG
+            r'\bmarketing mix\b',  # Marketing mix model questions to RAG
+            r'\bmmm\b',  # MMM questions to RAG
+            r'\bmodel\b',  # Model-related questions to RAG
+            r'\bvalidat',  # Validation questions to RAG
+            r'\bmsquared\b',  # Company-specific questions to RAG
+            r'\bcase stud',  # Case studies to RAG
+            r'\bwhite paper',  # Documentation to RAG
+            r'\bbest practice',  # Best practices to RAG
+            r'\brecommend'  # Recommendation requests to RAG
         ]
-        
+
         self.logger.debug(f"PATTERN MATCHING: Evaluating query against exclusion patterns")
         # First check exclusions - if any match, don't use database agent
         for pattern in exclusion_patterns:
             if re.search(pattern, query, re.IGNORECASE):
                 self.logger.debug(f"PATTERN MATCHING: EXCLUDED - Found matching exclusion pattern: '{pattern}'")
                 return False
-        
+
         self.logger.debug(f"PATTERN MATCHING: No exclusion patterns matched, continuing...")
-        
+
         # Keywords that suggest a database or analytics query
         db_keywords = [
-            r'\b(database|data warehouse)\b',  # More specific data terms 
+            r'\b(database|data warehouse)\b',  # More specific data terms
             r'\b(analytics dashboard)\b',
             r'\b(metrics|kpi)\b',
             r'\b(revenue|sales figures)\b',
@@ -78,7 +214,7 @@ class ChatService:
             r'\b(top performers)\b',
             r'\b(percentage breakdown)\b'
         ]
-        
+
         # Patterns that suggest data requests
         query_patterns = [
             r'how many (customers|users|sales)',
@@ -89,23 +225,107 @@ class ChatService:
             r'tell me about our numbers',
             r'list the (top|bottom)'
         ]
-        
+
         self.logger.debug(f"PATTERN MATCHING: Checking for database keyword matches")
         # Check for keyword matches
         for keyword in db_keywords:
             if re.search(keyword, query, re.IGNORECASE):
                 self.logger.debug(f"PATTERN MATCHING: MATCH - Database keyword pattern matched: '{keyword}'")
                 return True
-                
+
         self.logger.debug(f"PATTERN MATCHING: Checking for database query pattern matches")
         # Check for query pattern matches
         for pattern in query_patterns:
             if re.search(pattern, query, re.IGNORECASE):
                 self.logger.debug(f"PATTERN MATCHING: MATCH - Database query pattern matched: '{pattern}'")
                 return True
-                
+
         self.logger.debug(f"PATTERN MATCHING: No database patterns matched, routing to RAG")
         return False
+
+    async def _execute_rag_with_retry(self, query: str, history: List, max_attempts: int = 3, 
+                                custom_system_prompt: str = None) -> Tuple[Dict, List[str]]:
+        """
+        Execute RAG with multiple query formulations and retry logic.
+
+        Args:
+            query: The original user query
+            history: Chat history
+            max_attempts: Maximum number of query attempts
+            custom_system_prompt: Optional custom system prompt
+
+        Returns:
+            Tuple of (best_response, queries_tried)
+        """
+        # Generate alternative queries
+        alt_queries = self.query_rewriter.generate_alt_queries(query)
+        self.logger.debug(f"Generated {len(alt_queries)} alternative queries for RAG")
+
+        all_responses = []
+        queries_tried = []
+
+        # Get the appropriate RAG agent (with custom system prompt if provided)
+        rag_agent = agent_manager.get_rag_agent(custom_system_prompt)
+        
+        # Try the original query first
+        original_query = alt_queries[0]
+        queries_tried.append(original_query)
+
+        self.logger.debug(f"QUERY REWRITING: Trying original query: {original_query}")
+        original_response = await rag_agent.ainvoke(
+            {"input": original_query, "history": history},
+            include_run_info=True
+        )
+        all_responses.append((original_response, original_query))
+
+        # Function to check if a response indicates "no information found"
+        def is_empty_response(response: Dict) -> bool:
+            output = response.get('output', '').lower()
+            no_info_phrases = [
+                "i don't have information",
+                "i don't have specific information",
+                "no information available",
+                "i couldn't find",
+                "not found in",
+                "i don't have access",
+                "i don't have details",
+                "information is not provided"
+            ]
+            return any(phrase in output for phrase in no_info_phrases)
+
+        # If the first response seems good, return it
+        if not is_empty_response(original_response):
+            self.logger.debug(f"QUERY REWRITING: Original query produced good results, no need for alternatives")
+            return original_response, queries_tried
+
+        # Otherwise, try alternative queries
+        self.logger.debug(f"QUERY REWRITING: Original query may have produced empty results, trying alternatives")
+
+        # Remove the original query as we've already tried it
+        alt_queries = alt_queries[1:]
+
+        for i, alt_query in enumerate(alt_queries):
+            if i >= max_attempts - 1:  # We already tried the original query
+                break
+
+            queries_tried.append(alt_query)
+            self.logger.debug(f"QUERY REWRITING: Trying alternative query {i + 1}: {alt_query}")
+
+            alt_response = await rag_agent.ainvoke(
+                {"input": alt_query, "history": history},
+                include_run_info=True
+            )
+            all_responses.append((alt_response, alt_query))
+
+            # If this alternative query worked well, return it
+            if not is_empty_response(alt_response):
+                self.logger.debug(f"QUERY REWRITING: Alternative query {i + 1} produced good results")
+                return alt_response, queries_tried
+
+        # If we get here, none of the queries produced good results
+        # Return the original response to maintain consistency
+        self.logger.debug(f"QUERY REWRITING: No alternative queries produced better results, returning original")
+        return original_response, queries_tried
 
     async def chat(self, data: Message) -> ResponseMessage:
         """
@@ -113,7 +333,7 @@ class ChatService:
         Uses cache to avoid redundant API calls for identical queries.
 
         Args:
-            data: Message object containing user input and session ID
+            data: Message object containing user input, session ID, mode, and optional system prompt
 
         Returns:
             ResponseMessage with RAG and non-RAG responses and sources
@@ -121,10 +341,11 @@ class ChatService:
         start_time = time.time()
         user_input = data.message
         session_id = data.session_id
-        mode = getattr(data, "mode", "rag")
+        mode = data.mode
+        custom_system_prompt = data.system_prompt
 
         cache_hit = False
-        
+
         # Log the incoming request
         self.logger.info(f"Chat request: session={session_id}, input_length={len(user_input)}")
 
@@ -132,17 +353,18 @@ class ChatService:
         if session_id not in self.chat_histories:
             self.chat_histories[session_id] = ChatHistory()
         chat_history = self.chat_histories[session_id]
-        
+
         # Generate query hash for cache lookup
         query_hash = chat_cache.generate_query_hash(
             query=user_input,
             history=chat_history.get_messages(),
-            session_id=session_id
+            session_id=session_id,
+            system_prompt=custom_system_prompt
         )
-        
+
         # Check for special testing flags in the query
         force_refresh = "test_routing:" in user_input.lower()
-        
+
         # For testing, extract the real query if it contains the test flag
         test_query = user_input
         if force_refresh:
@@ -150,11 +372,11 @@ class ChatService:
             # Extract the actual query after the test_routing: prefix
             test_query = user_input.split("test_routing:", 1)[1].strip()
             self.logger.info(f"TEST MODE: Using test query: {test_query}")
-        
+
         # Check if this is a database query before checking cache
         is_database_query = self._is_database_query(test_query if force_refresh else user_input)
         self.logger.debug(f"Query identified as database query: {is_database_query}")
-        
+
         # For database queries or force refresh, skip cache
         if is_database_query or force_refresh:
             if is_database_query:
@@ -166,30 +388,30 @@ class ChatService:
             cached_rag_response, cached_no_rag_response = (None, None)
             cached_response, cache_hit = chat_cache.get_cached_response(query_hash)
             if cache_hit and ((mode != "no_rag" and cached_response["rag_response"] is None)
-                        or (mode != "rag" and cached_response["no_rag_response"] is None)):
-                    # Previous request was for a different mode
+                              or (mode != "rag" and cached_response["no_rag_response"] is None)):
+                # Previous request was for a different mode
                 cached_rag_response, cached_no_rag_response = (
-                cached_response["rag_response"], cached_response["no_rag_response"])
+                    cached_response["rag_response"], cached_response["no_rag_response"])
                 cache_hit = False
-                
+
         # If we're in test mode, use the extracted test query
         actual_query = test_query if force_refresh else user_input
 
         if cache_hit:
             self.logger.info(f"Cache hit for query_hash={query_hash}")
-            
+
             # Extract cached data
             rag_output = cached_response["rag_response"]
             no_rag_output = cached_response["no_rag_response"]
             sources = cached_response.get("sources", [])
-            
+
             # Add the user message and the cached response to chat history
             chat_history.add_user_message(user_input)
             chat_history.add_ai_message(rag_output)
 
             # Format message history
             formatted_history = self._format_history(chat_history.get_messages())
-            
+
             # Create response content with cached data
             response_content = ResponseContent(
                 input=user_input,
@@ -198,7 +420,7 @@ class ChatService:
                 no_rag_output=no_rag_output,
                 intermediate_steps=[]  # No intermediate steps for cached responses
             )
-            
+
             # Log cache hit stats
             response_time = time.time() - start_time
             chat_cache.log_cache_access(
@@ -208,24 +430,24 @@ class ChatService:
                 cache_hit=True,
                 response_time=response_time
             )
-            
+
             return ResponseMessage(
                 response=response_content,
                 sources=sources
             )
-        
+
         # Cache miss - need to generate a new response
         self.logger.info(f"Cache miss for query_hash={query_hash}, generating new response")
-        
+
         # Add user message to history
         chat_history.add_user_message(user_input)
-        
+
         # Detect if this is a database query
         self.logger.debug(f"==== AGENT ROUTING: Analyzing query for agent selection ====")
         self.logger.debug(f"QUERY: {actual_query}")
         is_database_query = self._is_database_query(actual_query)
         self.logger.debug(f"AGENT ROUTING DECISION: Query classified as database query: {is_database_query}")
-        
+
         if is_database_query:
             self.logger.debug(f"==== AGENT ROUTING: Selected DATABASE AGENT ====")
             self.logger.debug(f"AGENT ROUTING: Calling database agent with query: {actual_query[:100]}...")
@@ -234,29 +456,39 @@ class ChatService:
                 include_run_info=True
             )
             self.logger.debug(f"AGENT ROUTING: Database response received, length: {len(str(rag_response))}")
-            
+
             # Always generate a no_rag response for completeness
             self.logger.debug(f"==== AGENT ROUTING: Also generating STANDARD response for database query ====")
             no_rag_response = await agent_manager.standard_agent.ainvoke(
                 {"input": actual_query, "history": chat_history.get_messages()},
                 include_run_info=True
             )
-            self.logger.debug(f"AGENT ROUTING: Standard response received for database query, length: {len(str(no_rag_response))}")
+            self.logger.debug(
+                f"AGENT ROUTING: Standard response received for database query, length: {len(str(no_rag_response))}")
+            queries_tried = [actual_query]  # Only the original query was used
         else:
-            # Generate response using agent executor with RAG
+            # Generate response using agent executor with RAG - now with query rewriting
             if mode != "no_rag":
-                self.logger.debug(f"==== AGENT ROUTING: Selected RAG AGENT ====")
-                self.logger.debug(f"AGENT ROUTING: Calling RAG agent with query: {actual_query[:100]}...")
-                rag_response = await agent_manager.rag_agent.ainvoke(
-                    {"input": actual_query, "history": chat_history.get_messages()},
-                    include_run_info=True
+                self.logger.debug(f"==== AGENT ROUTING: Selected RAG AGENT with QUERY REWRITING ====")
+                self.logger.debug(
+                    f"AGENT ROUTING: Calling RAG agent with potential query rewrites: {actual_query[:100]}...")
+
+                # Use the new method that tries multiple query formulations with optional custom system prompt
+                rag_response, queries_tried = await self._execute_rag_with_retry(
+                    actual_query,
+                    chat_history.get_messages(),
+                    custom_system_prompt=custom_system_prompt
                 )
-                self.logger.debug(f"AGENT ROUTING: RAG response received, length: {len(str(rag_response))}")
+
+                self.logger.debug(
+                    f"AGENT ROUTING: RAG response received after trying {len(queries_tried)} queries, response length: {len(str(rag_response))}")
                 self.logger.debug(f"AGENT ROUTING: RAG output: {rag_response['output'][:200]}...")
+                self.logger.debug(f"AGENT ROUTING: Queries tried: {queries_tried}")
             else:
                 self.logger.debug(f"AGENT ROUTING: Using cached RAG response")
                 rag_response = cached_rag_response
-            
+                queries_tried = [actual_query]  # Only for tracking
+
             # Generate response using agent executor without RAG
             if mode != "rag" and not is_database_query:
                 self.logger.debug(f"==== AGENT ROUTING: Also selected STANDARD AGENT ====")
@@ -270,21 +502,21 @@ class ChatService:
             else:
                 self.logger.debug(f"AGENT ROUTING: Using cached non-RAG response")
                 no_rag_response = cached_no_rag_response
-        
+
         # Extract sources from the RAG response
         primary_response = rag_response if mode != "no_rag" else no_rag_response
 
         sources = self._format_sources(rag_response) if rag_response is not None else []
 
         if primary_response is not None:
-           chat_history.add_ai_message(primary_response['output'])
+            chat_history.add_ai_message(primary_response['output'])
         elif rag_response is not None:
             chat_history.add_ai_message(rag_response['output'])
         elif no_rag_response is not None:
             chat_history.add_ai_message(no_rag_response['output'])
         else:
             self.logger.error("No valid response generated from RAG or non-RAG agents")
-        
+
         # Format message history for response
         formatted_history = self._format_history(chat_history.get_messages())
 
@@ -297,13 +529,21 @@ class ChatService:
             intermediate_steps=primary_response.get('intermediate_steps', []) if primary_response is not None else []
         )
 
+        # Add the queries tried to the intermediate steps for transparency/debugging
+        if 'intermediate_steps' in response_content.dict() and isinstance(response_content.intermediate_steps, list):
+            response_content.intermediate_steps.append({
+                "queries_tried": queries_tried,
+                "query_count": len(queries_tried)
+            })
+
         # Cache the generated response
         chat_cache.cache_response(
             query_hash=query_hash,
             user_input=user_input,
             rag_response=rag_response['output'] if rag_response is not None else None,
             no_rag_response=no_rag_response['output'] if no_rag_response is not None else None,
-            sources=sources
+            sources=sources,
+            system_prompt=custom_system_prompt
         )
 
         # Log cache miss stats
@@ -315,9 +555,9 @@ class ChatService:
             cache_hit=False,
             response_time=response_time
         )
-        
+
         self.logger.info(f"Response generated and cached in {response_time:.2f}s")
-        
+
         return ResponseMessage(
             response=response_content,
             sources=sources
@@ -406,7 +646,6 @@ class ChatService:
             }
             for msg in messages
         ]
-
 
 class AgentService:
     """

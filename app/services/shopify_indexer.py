@@ -222,7 +222,8 @@ class ShopifyIndexer:
             blog_record = {
                 'title': blog_title,
                 'url': blog_url,
-                'type': 'blog'
+                'type': 'blog',
+                'markdown': f"Blog: {blog_title}"  # Add minimal markdown content for indexing
             }
             all_blog_records.append(blog_record)
             
@@ -283,7 +284,42 @@ class ShopifyIndexer:
         
         self.logger.info(f"Prepared {len(all_product_records)} products")
         return all_product_records, all_variant_records
-    
+
+    def create_embedding_prompt(self, text: str, metadata: Dict[str, Any] = None) -> str:
+        """
+        Create an optimized prompt for embedding that highlights attribution terms.
+
+        Args:
+            text: Original text to embed
+            metadata: Metadata associated with the text
+
+        Returns:
+            Enhanced prompt for embedding
+        """
+        metadata = metadata or {}
+
+        # For tracking-specific Q&A
+        if 'special_type' in metadata and metadata['special_type'] == 'tracking_types_examples':
+            return f"""
+            Context: Web and app tracking methods categorized as first-party and third-party tracking. 
+            First-party tracking uses first-party cookies and internal systems.
+            Third-party tracking uses third-party cookies and external platforms.
+
+            {text}
+            """
+
+        # For attribution-specific texts, add context
+        is_attribution_related = any(term in text.lower() for term in [
+            "attribution", "incrementality", "MMM", "MTA", "CAC", "last click",
+            "self-attribution", "self-attributed", "base attribution",
+            "advanced attribution", "advanced attribution multiplier"
+        ])
+
+        if is_attribution_related:
+            return f"Marketing attribution context: {text}"
+
+        return text
+
     def index_to_pinecone(self, records: List[Dict[str, Any]]) -> bool:
         """
         Index content records to Pinecone vector database.
@@ -331,51 +367,163 @@ class ShopifyIndexer:
             # Prepare documents
             docs = []
             for i, record in enumerate(records):
+                # Check if record has markdown content
+                if 'markdown' not in record:
+                    self.logger.warning(f"Record {i} missing 'markdown' field: {record}")
+                    continue  # Skip records without markdown
+                
                 # Split content into chunks
-                text_splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=self.config.CHUNK_SIZE,
-                    chunk_overlap=self.config.CHUNK_OVERLAP
-                )
-                
-                # Create document chunks
-                chunks = text_splitter.split_text(record['markdown'])
-                
+                if record.get('type') == 'qa_pair':
+                    # For Q&A content, don't split questions from answers
+                    chunks = [record['markdown']]
+                else:
+                    # Regular content uses recursive splitting
+                    text_splitter = RecursiveCharacterTextSplitter(
+                        chunk_size=self.config.CHUNK_SIZE,
+                        chunk_overlap=self.config.CHUNK_OVERLAP,
+                        separators=["\n\n", "\n", " ", ""]
+                    )
+                    chunks = text_splitter.split_text(record['markdown'])
+
                 # Create documents with metadata
                 for j, chunk in enumerate(chunks):
+                    # Get attribution metadata
+                    attribution_metadata = self.enrich_attribution_metadata(chunk)
+
+                    # Merge with standard metadata
+                    metadata = {
+                        "title": record['title'],
+                        "url": record['url'],
+                        "chunk": j,
+                        "source": f"{record.get('type', 'content')}"
+                    }
+                    metadata.update(attribution_metadata)
+
                     doc = Document(
                         page_content=chunk,
-                        metadata={
-                            "title": record['title'],
-                            "url": record['url'],
-                            "chunk": j,
-                            "source": f"{record.get('type', 'content')}"
-                        }
+                        metadata=metadata
                     )
                     docs.append(doc)
-            
+
             # Initialize embeddings
             # text-embedding-ada-002 has fixed dimensions of 1536, don't specify dimensions
             embeddings = OpenAIEmbeddings(
                 api_key=self.config.OPENAI_API_KEY,
-                model=self.config.OPENAI_EMBEDDING_MODEL
+                model=self.config.OPENAI_EMBEDDING_MODEL,
+                embedding_ctx_length=self.config.EMBEDDING_CONTEXT_LENGTH,
+                show_progress_bar = True
             )
             
             # Index documents
             self.logger.info(f"Indexing {len(docs)} document chunks to Pinecone...")
-            
-            vector_store = PineconeVectorStore.from_documents(
-                documents=docs,
-                embedding=embeddings,
-                index_name=self.config.PINECONE_INDEX_NAME,
-                pinecone_api_key=self.config.PINECONE_API_KEY
-            )
-            
-            self.logger.info("Indexing completed successfully")
+
+            # Create custom embeddings with enhanced prompts
+            texts = []
+            metadatas = []
+            for doc in docs:
+                texts.append(self.create_embedding_prompt(doc.page_content, doc.metadata))
+                metadatas.append(doc.metadata)
+
+            # Generate embeddings
+            embeddings_array = embeddings.embed_documents(texts)
+
+            # Get the Pinecone index
+            index = pc.Index(self.config.PINECONE_INDEX_NAME)
+
+            # Batch size for uploads
+            batch_size = 100
+            for i in range(0, len(texts), batch_size):
+                batch_texts = texts[i:i + batch_size]
+                batch_embeddings = embeddings_array[i:i + batch_size]
+                batch_metadatas = metadatas[i:i + batch_size]
+
+                # Create vector records
+                vectors = []
+                for j, (text, embedding, metadata) in enumerate(zip(batch_texts, batch_embeddings, batch_metadatas)):
+                    vectors.append({
+                        "id": f"doc_{i + j}",
+                        "values": embedding,
+                        "metadata": {**metadata, "text": text}
+                    })
+
+                # Upsert vectors to Pinecone
+                index.upsert(vectors=vectors)
+
+            self.logger.info(f"Successfully indexed {len(texts)} documents with custom embeddings")
+
             return True
             
         except Exception as e:
             self.logger.error(f"Error indexing to Pinecone: {str(e)}")
             return False
+
+    def prepare_qa_pairs(self, qa_content: str) -> List[Dict[str, Any]]:
+        """
+        Process Q&A content to preserve question-answer relationships
+
+        Args:
+            qa_content: Raw Q&A content with questions and answers
+
+        Returns:
+            List of processed Q&A records
+        """
+        import re
+
+        qa_records = []
+        # Split into question-answer pairs
+        qa_pairs = re.findall(r"(.*?\?)\s*(.*?)(?=\n\n|$)", qa_content, re.DOTALL)
+
+        for question, answer in qa_pairs:
+            question = question.strip()
+            answer = answer.strip()
+
+            if "tracking" in question.lower() and "web and app" in question.lower():
+                # Add special metadata for tracking questions
+                record = {
+                    'title': f"Q&A: {question[:50]}...",
+                    'url': '#tracking-types',
+                    'markdown': f"Q: {question}\n\nA: {answer}",
+                    'type': 'qa_pair',
+                    'special_type': 'tracking_types_examples'
+                }
+                qa_records.append(record)
+            else:
+                record = {
+                    'title': f"Q&A: {question[:50]}...",
+                    'url': '#qa',
+                    'markdown': f"Q: {question}\n\nA: {answer}",
+                    'type': 'qa_pair'
+                }
+                qa_records.append(record)
+
+        return qa_records
+
+    def enrich_attribution_metadata(self, content: str) -> Dict[str, Any]:
+        """
+        Analyze content for attribution terminology and create enhanced metadata.
+
+        Args:
+            content: Markdown or text content to analyze
+
+        Returns:
+            Dictionary of attribution-related metadata
+        """
+        # Key attribution terms to identify
+        attribution_terms = [
+            "attribution", "incrementality", "MMM", "marketing mix modeling",
+            "MTA", "multi-touch attribution", "CAC", "iCAC", "multiplier",
+            "last click", "geo testing", "holdout test", "scale test",
+            "self-attribution", "self-attributed", "base attribution",
+            "advanced attribution", "advanced attribution multiplier"
+        ]
+
+        metadata = {}
+        # Check for attribution terms
+        for term in attribution_terms:
+            if term.lower() in content.lower():
+                metadata[f"has_{term.replace(' ', '_').lower()}"] = True
+
+        return metadata
     
     def index_all_content(self) -> bool:
         """
@@ -395,9 +543,20 @@ class ShopifyIndexer:
             self.logger.info("Fetching products...")
             product_records, variant_records = self.prepare_products()
             
+            # Process Q&A content from paste.txt if present
+            qa_records = []
+            if hasattr(self.config, 'QA_SOURCE_FILE') and self.config.QA_SOURCE_FILE:
+                try:
+                    with open(self.config.QA_SOURCE_FILE, 'r') as f:
+                        qa_content = f.read()
+                    qa_records = self.prepare_qa_pairs(qa_content)
+                    self.logger.info(f"Processed {len(qa_records)} Q&A pairs")
+                except Exception as e:
+                    self.logger.error(f"Error processing Q&A content: {str(e)}")
+
             # Combine all records
-            all_records = article_records + product_records
-            
+            all_records = article_records + product_records + qa_records + blog_records
+
             # Save intermediate files if configured
             if self.config.SAVE_INTERMEDIATE_FILES:
                 os.makedirs(self.config.OUTPUT_DIR, exist_ok=True)

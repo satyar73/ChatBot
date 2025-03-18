@@ -278,9 +278,28 @@ class AgentManager:
         self.logger = get_logger(f"{__name__}.AgentManager", "DEBUG")
         self.logger.info("AgentManager initialized")
 
+    def get_rag_agent(self, custom_system_prompt=None):
+        """
+        Get or create a RAG-enabled agent with optional custom system prompt.
+        
+        Args:
+            custom_system_prompt: Optional custom system prompt to override default
+            
+        Returns:
+            Agent executor configured for RAG
+        """
+        if custom_system_prompt:
+            self.logger.debug("Creating RAG agent with custom system prompt")
+            return self._configure_rag_agent(custom_system_prompt)
+        
+        if self._rag_agent is None:
+            self.logger.debug("Initializing RAG agent with default system prompt")
+            self._rag_agent = self._configure_rag_agent()
+        return self._rag_agent
+        
     @property
     def rag_agent(self):
-        """Get or lazy-initialize the RAG-enabled agent."""
+        """Get or lazy-initialize the default RAG-enabled agent."""
         if self._rag_agent is None:
             self.logger.debug("Initializing RAG agent")
             self._rag_agent = self._configure_rag_agent()
@@ -302,8 +321,16 @@ class AgentManager:
             self._database_agent = self._configure_database_agent()
         return self._database_agent
 
-    def _configure_rag_agent(self):
-        """Configure and return a RAG-enabled agent."""
+    def _configure_rag_agent(self, custom_system_prompt=None):
+        """
+        Configure and return a RAG-enabled agent.
+        
+        Args:
+            custom_system_prompt: Optional custom system prompt to override default
+            
+        Returns:
+            Agent executor configured for RAG
+        """
         self.logger.debug("Configuring RAG agent with prompt")
         llm = AgentFactory.create_llm()
         tools = ToolManager.get_rag_tools()
@@ -314,7 +341,12 @@ class AgentManager:
                 tool.callbacks.append(AgentFactory.prompt_capture)
                 self.logger.debug(f"Added callback to tool: {tool.name}")
 
-        prompt = AgentFactory.create_agent_prompt(self.config.RAG_SYSTEM_PROMPT)
+        # Use custom system prompt if provided, otherwise use default
+        system_prompt = custom_system_prompt or self.config.RAG_SYSTEM_PROMPT
+        if custom_system_prompt:
+            self.logger.info("Using custom system prompt for RAG agent")
+        
+        prompt = AgentFactory.create_agent_prompt(system_prompt)
 
         self.logger.debug(f"Creating RAG agent with {len(tools)} tools")
         agent = create_openai_functions_agent(

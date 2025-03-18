@@ -7,7 +7,9 @@ const initialState = {
   loading: false,
   responseMode: 'rag', // Three modes: "rag", "standard", "compare"
   sessionId: null,
-  error: null
+  error: null,
+  systemPrompt: '',  // Store custom system prompt
+  showSystemPrompt: false  // Control visibility of system prompt editor
 };
 
 // Action types
@@ -21,7 +23,9 @@ export const ACTIONS = {
   ADD_ASSISTANT_MESSAGES: 'ADD_ASSISTANT_MESSAGES',
   SET_SESSION_ID: 'SET_SESSION_ID',
   CLEAR_CHAT: 'CLEAR_CHAT',
-  REFRESH_MESSAGES: 'REFRESH_MESSAGES'
+  REFRESH_MESSAGES: 'REFRESH_MESSAGES',
+  SET_SYSTEM_PROMPT: 'SET_SYSTEM_PROMPT',
+  TOGGLE_SYSTEM_PROMPT: 'TOGGLE_SYSTEM_PROMPT'
 };
 
 // Reducer for handling state updates
@@ -65,6 +69,12 @@ const chatReducer = (state, action) => {
     
     case ACTIONS.REFRESH_MESSAGES:
       return { ...state, messages: action.payload };
+      
+    case ACTIONS.SET_SYSTEM_PROMPT:
+      return { ...state, systemPrompt: action.payload };
+      
+    case ACTIONS.TOGGLE_SYSTEM_PROMPT:
+      return { ...state, showSystemPrompt: !state.showSystemPrompt };
     
     default:
       return state;

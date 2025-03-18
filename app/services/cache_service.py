@@ -36,6 +36,7 @@ class ChatCacheService:
                 rag_response TEXT,
                 no_rag_response TEXT,
                 sources TEXT,
+                system_prompt TEXT,
                 timestamp REAL,
                 hit_count INTEGER DEFAULT 1
             )
@@ -61,7 +62,7 @@ class ChatCacheService:
             self.logger.error(f"Failed to initialize cache database: {e}")
             raise
     
-    def generate_query_hash(self, query: str, history: List = None, session_id: str = None) -> str:
+    def generate_query_hash(self, query: str, history: List = None, session_id: str = None, system_prompt: str = None) -> str:
         """
         Generate a hash to uniquely identify a query with its context.
         
@@ -69,6 +70,7 @@ class ChatCacheService:
             query: The user's query text
             history: Optional chat history
             session_id: Optional session ID
+            system_prompt: Optional custom system prompt
             
         Returns:
             String hash that uniquely identifies this query in its context
@@ -87,6 +89,10 @@ class ChatCacheService:
         # Add session ID if configured
         if session_id and cache_config.CONSIDER_SESSION_IN_HASH:
             hash_content += session_id
+            
+        # Add system prompt if provided (this is critical for proper caching)
+        if system_prompt:
+            hash_content += "system_prompt:" + system_prompt.strip()
             
         # Generate hash
         query_hash = hashlib.md5(hash_content.encode('utf-8')).hexdigest()
@@ -163,7 +169,8 @@ class ChatCacheService:
                       user_input: str, 
                       rag_response: str, 
                       no_rag_response: str, 
-                      sources: List = None) -> bool:
+                      sources: List = None,
+                      system_prompt: str = None) -> bool:
         """
         Cache a response for future retrieval.
         
@@ -173,6 +180,7 @@ class ChatCacheService:
             rag_response: Response with RAG
             no_rag_response: Response without RAG
             sources: Optional list of sources
+            system_prompt: Optional custom system prompt
             
         Returns:
             Boolean indicating success/failure
@@ -191,10 +199,10 @@ class ChatCacheService:
             cursor.execute(
                 """
                 INSERT OR REPLACE INTO chat_cache 
-                (query_hash, user_input, rag_response, no_rag_response, sources, timestamp, hit_count) 
-                VALUES (?, ?, ?, ?, ?, ?, 1)
+                (query_hash, user_input, rag_response, no_rag_response, sources, system_prompt, timestamp, hit_count) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1)
                 """, 
-                (query_hash, user_input, rag_response, no_rag_response, sources_json, time.time())
+                (query_hash, user_input, rag_response, no_rag_response, sources_json, system_prompt, time.time())
             )
             
             # Ensure cache size doesn't exceed limit

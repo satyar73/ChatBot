@@ -19,6 +19,10 @@ services:
     # Expose to host for direct API testing if needed
     ports:
       - "8005:8005"
+    profiles:
+      - default
+      # Exclude from debug profile to avoid port conflicts
+      # This prevents backend and backend-debug from starting together
     healthcheck:
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8005/health')"]
       interval: 30s

@@ -12,12 +12,15 @@ const api = axios.create({
 });
 
 export const chatApi = {
-  sendMessage: async (message, responseMode = "rag", sessionId = null) => {
+  sendMessage: async (message, responseMode = "rag", sessionId = null, systemPrompt = null) => {
     try {
       // Generate a random session ID if not provided
       const session_id = sessionId || `session_${Math.random().toString(36).substring(2, 15)}`;
       
       console.log(`Sending chat request with session_id: ${session_id}, mode: ${responseMode}`);
+      if (systemPrompt) {
+        console.log(`Using custom system prompt (${systemPrompt.length} chars)`);
+      }
       
       // Map UI response mode to backend mode parameter
       let mode = "rag";
@@ -27,11 +30,19 @@ export const chatApi = {
         mode = "compare";
       }
       
-      const response = await api.post('/chat', { 
+      // Prepare request payload, including system_prompt if provided
+      const payload = { 
         message,
         session_id,
         mode
-      });
+      };
+      
+      // Only include system_prompt if it's provided
+      if (systemPrompt) {
+        payload.system_prompt = systemPrompt;
+      }
+      
+      const response = await api.post('/chat', payload);
       
       // Return the response data along with the session ID for future requests
       return { 

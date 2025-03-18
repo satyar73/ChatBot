@@ -1,13 +1,14 @@
 import React from 'react';
-import { Box, Typography, Button, IconButton } from '@mui/material';
+import { Box, Typography, Button, IconButton, Tooltip } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
+import SettingsIcon from '@mui/icons-material/Settings';
 import { useChatContext } from '../context/ChatContext';
 import useChatActions from '../hooks/useChatActions';
 
 const ChatHeader = () => {
   const { state } = useChatContext();
-  const { responseMode, sessionId } = state;
-  const { setResponseMode, clearChat } = useChatActions();
+  const { responseMode, sessionId, systemPrompt } = state;
+  const { setResponseMode, clearChat, toggleSystemPrompt } = useChatActions();
 
   return (
     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
@@ -59,9 +60,21 @@ const ChatHeader = () => {
           </Button>
         </Box>
         
-        <IconButton color="error" onClick={clearChat}>
-          <DeleteIcon />
-        </IconButton>
+        <Tooltip title="System Prompt Editor">
+          <IconButton 
+            color={systemPrompt ? "success" : "primary"} 
+            onClick={toggleSystemPrompt}
+            sx={{ mr: 1 }}
+          >
+            <SettingsIcon />
+          </IconButton>
+        </Tooltip>
+        
+        <Tooltip title="Clear Chat">
+          <IconButton color="error" onClick={clearChat}>
+            <DeleteIcon />
+          </IconButton>
+        </Tooltip>
       </Box>
     </Box>
   );

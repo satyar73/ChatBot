@@ -23,6 +23,20 @@ const useChatActions = () => {
   }, [dispatch]);
   
   /**
+   * Set the system prompt
+   */
+  const setSystemPrompt = useCallback((prompt) => {
+    dispatch({ type: ACTIONS.SET_SYSTEM_PROMPT, payload: prompt });
+  }, [dispatch]);
+  
+  /**
+   * Toggle the system prompt editor visibility
+   */
+  const toggleSystemPrompt = useCallback(() => {
+    dispatch({ type: ACTIONS.TOGGLE_SYSTEM_PROMPT });
+  }, [dispatch]);
+  
+  /**
    * Clear the error message
    */
   const clearError = useCallback(() => {
@@ -77,8 +91,13 @@ const useChatActions = () => {
     dispatch({ type: ACTIONS.SET_ERROR, payload: null });
     
     try {
-      // Send message to API with the current session ID and response mode
-      const response = await chatApi.sendMessage(state.input, state.responseMode, state.sessionId);
+      // Send message to API with the current session ID, response mode, and system prompt
+      const response = await chatApi.sendMessage(
+        state.input, 
+        state.responseMode, 
+        state.sessionId,
+        state.systemPrompt || null
+      );
       
       // Save or update the session ID for future requests
       if (response.session_id) {
@@ -159,6 +178,8 @@ const useChatActions = () => {
     sendMessage,
     setInput,
     setResponseMode,
+    setSystemPrompt,
+    toggleSystemPrompt,
     clearError,
     clearChat
   };

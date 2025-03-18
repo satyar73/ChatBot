@@ -31,7 +31,8 @@ class Message(BaseModel):
     """Model for user message with session identification."""
     message: str
     session_id: str
-    mode: str
+    mode: str = "rag"
+    system_prompt: Optional[str] = None
 
 class ResponseContent(BaseModel):
     """Model for the content of a response."""
