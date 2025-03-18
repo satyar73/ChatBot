@@ -310,7 +310,7 @@ class ShopifyIndexer:
 
         # For attribution-specific texts, add context
         is_attribution_related = any(term in text.lower() for term in [
-            "attribution", "incrementality", "MMM", "MTA", "CAC", "last click",
+            "attribution", "incrementality", "MDL", "MMM", "MTA", "CAC", "last click",
             "self-attribution", "self-attributed", "base attribution",
             "advanced attribution", "advanced attribution multiplier"
         ])
@@ -471,11 +471,12 @@ class ShopifyIndexer:
 
         qa_records = []
         # Split into question-answer pairs
-        qa_pairs = re.findall(r"(.*?\?)\s*(.*?)(?=\n\n|$)", qa_content, re.DOTALL)
+        qa_pairs = re.findall(r'<\\q(.*?)\/>\s*<\\a(.*?)\/>', qa_content, re.DOTALL)
 
         for question, answer in qa_pairs:
             question = question.strip()
             answer = answer.strip()
+            self.logger.info(f"Processing Q&A pair: {question} - {answer}")
 
             if "tracking" in question.lower() and "web and app" in question.lower():
                 # Add special metadata for tracking questions
@@ -510,10 +511,10 @@ class ShopifyIndexer:
         """
         # Key attribution terms to identify
         attribution_terms = [
-            "attribution", "incrementality", "MMM", "marketing mix modeling",
-            "MTA", "multi-touch attribution", "CAC", "iCAC", "multiplier",
-            "last click", "geo testing", "holdout test", "scale test",
-            "self-attribution", "self-attributed", "base attribution",
+            "attribution", "incrementality", "MDL", "Minimum Detectable Lift",
+            "MMM", "marketing mix modeling", "MTA", "multi-touch attribution",
+            "CAC", "iCAC", "multiplier", "last click", "geo testing", "holdout test",
+            "scale test", "self-attribution", "self-attributed", "base attribution",
             "advanced attribution", "advanced attribution multiplier"
         ]
 

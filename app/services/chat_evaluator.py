@@ -52,67 +52,107 @@ class ChatTesterCLI:
 
     async def run_single_test(self, prompt: str, expected_result: str) -> Dict:
         """
-        Run a single test using the TestService
+        Run a single test using the TestService with robust error handling
         """
-        # Create test request
-        request = ChatTestRequest(
-            prompt=prompt,
-            expected_result=expected_result,
-            similarity_threshold=self.similarity_threshold,
-            test_id=str(uuid4())
-        )
+        try:
+            # Create test request
+            request = ChatTestRequest(
+                prompt=prompt,
+                expected_result=expected_result,
+                similarity_threshold=self.similarity_threshold,
+                test_id=str(uuid4())
+            )
 
-        # Run the test through the test service
-        result = await self.test_service.run_test(request)
+            # Run the test through the test service
+            result = await self.test_service.run_test(request)
+            
+            # Initialize with default values
+            rag_response = ""
+            no_rag_response = ""
+            rag_score = 0.0
+            no_rag_score = 0.0
+            rag_value_rating = "Unknown"
+            value_assessment = ""
+            rag_passed = False
+            no_rag_passed = False
+            
+            # Safely process detailed_analysis if it exists
+            if hasattr(result, 'detailed_analysis') and result.detailed_analysis is not None:
+                detailed_analysis = result.detailed_analysis
+                
+                # Get RAG and non-RAG specific data
+                rag_response = detailed_analysis.get("rag_response", "")
+                no_rag_response = detailed_analysis.get("no_rag_response", "")
 
-        # Get RAG and non-RAG specific data
-        rag_response = result.detailed_analysis.get("rag_response", "")
-        no_rag_response = result.detailed_analysis.get("no_rag_response", "")
+                # Safely access nested dictionaries
+                rag_test = detailed_analysis.get("rag_test") or {}
+                rag_llm_test = detailed_analysis.get("rag_llm_test") or {}
+                no_rag_test = detailed_analysis.get("no_rag_test") or {}
+                no_rag_llm_test = detailed_analysis.get("no_rag_llm_test") or {}
+                
+                # Get similarity scores for both
+                rag_score = max(
+                    rag_test.get("weighted_similarity", 0),
+                    rag_llm_test.get("normalized_score", 0) 
+                )
 
-        # Get similarity scores for both
-        rag_score = max(
-            result.detailed_analysis.get("rag_test", {}).get("weighted_similarity", 0),
-            result.detailed_analysis.get("rag_llm_test", {}).get("normalized_score", 0)
-        )
+                no_rag_score = max(
+                    no_rag_test.get("weighted_similarity", 0),
+                    no_rag_llm_test.get("normalized_score", 0)
+                )
 
-        no_rag_score = max(
-            result.detailed_analysis.get("no_rag_test", {}).get("weighted_similarity", 0),
-            result.detailed_analysis.get("no_rag_llm_test", {}).get("normalized_score", 0)
-        )
+                # Get comparison data
+                comparison = detailed_analysis.get("comparison", {})
+                rag_value_rating = comparison.get("rag_value_rating", "Unknown")
+                value_assessment = comparison.get("value_assessment", "")
 
-        # Get comparison data
-        comparison = result.detailed_analysis.get("comparison", {})
-        rag_value_rating = comparison.get("rag_value_rating", "Unknown")
-        value_assessment = comparison.get("value_assessment", "")
-
-        # Get individual pass/fail status
-        rag_passed = comparison.get("rag_passed", False)
-        no_rag_passed = comparison.get("no_rag_passed", False)
+                # Get individual pass/fail status
+                rag_passed = comparison.get("rag_passed", False)
+                no_rag_passed = comparison.get("no_rag_passed", False)
+            else:
+                # Log if detailed_analysis is missing
+                print(f"Warning: detailed_analysis is None for prompt: {prompt[:50]}...")
+        except Exception as e:
+            # Handle any errors gracefully
+            print(f"Error processing test for prompt '{prompt[:50]}...': {str(e)}")
+            # Return a minimal result with error information
+            return {
+                "Prompt": prompt,
+                "Expected Result": expected_result,
+                "RAG Response": f"Error: {str(e)}",
+                "Non-RAG Response": f"Error: {str(e)}",
+                "Overall Passed": False,
+                "RAG Passed": False,
+                "Non-RAG Passed": False,
+                "Failure Reasons": str(e),
+                "RAG Similarity": 0,
+                "Non-RAG Similarity": 0,
+                "RAG Value Rating": "Error",
+                "Value Assessment": f"Test failed with error: {str(e)}"
+            }
 
         # Convert to dictionary format for DataFrame compatibility
         return {
-            "Prompt": result.prompt,
-            "Expected Result": result.expected_result,
+            "Prompt": getattr(result, 'prompt', prompt),
+            "Expected Result": getattr(result, 'expected_result', expected_result),
             "RAG Response": rag_response,
             "Non-RAG Response": no_rag_response,
-            "Overall Passed": result.passed,
+            "Overall Passed": getattr(result, 'passed', False),
             "RAG Passed": rag_passed,
             "Non-RAG Passed": no_rag_passed,
-            "Failure Reasons": result.reasoning,
+            "Failure Reasons": getattr(result, 'reasoning', ''),
             "RAG Similarity": rag_score,
             "Non-RAG Similarity": no_rag_score,
             "RAG Value Rating": rag_value_rating,
             "Value Assessment": value_assessment,
-            "Text Similarity": result.detailed_analysis.get("rag_test", {}).get("basic_similarity", 0),
-            "Word Overlap": result.detailed_analysis.get("rag_test", {}).get("jaccard_similarity", 0),
-            "Bigram Overlap": result.detailed_analysis.get("rag_test", {}).get("bigram_overlap", 0),
-            "Trigram Overlap": result.detailed_analysis.get("rag_test", {}).get("trigram_overlap", 0),
-            "Concept Coverage": result.detailed_analysis.get("rag_test", {}).get("concept_coverage", 0),
-            "Weighted Similarity": result.similarity_score,
-            "Missing Key Concepts": ", ".join(
-                result.detailed_analysis.get("rag_test", {}).get("key_concepts_missing", []))[:100],
-            "Missing Numerical Values": ", ".join(
-                result.detailed_analysis.get("rag_test", {}).get("numbers_missing", []))[:100]
+            "Text Similarity": rag_test.get("basic_similarity", 0),
+            "Word Overlap": rag_test.get("jaccard_similarity", 0),
+            "Bigram Overlap": rag_test.get("bigram_overlap", 0),
+            "Trigram Overlap": rag_test.get("trigram_overlap", 0),
+            "Concept Coverage": rag_test.get("concept_coverage", 0),
+            "Weighted Similarity": getattr(result, 'similarity_score', rag_score),
+            "Missing Key Concepts": ", ".join(rag_test.get("key_concepts_missing", []))[:100],
+            "Missing Numerical Values": ", ".join(rag_test.get("numbers_missing", []))[:100]
         }
 
     async def run_all_tests(self) -> pd.DataFrame:

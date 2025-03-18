@@ -46,11 +46,13 @@ class ChatConfig:
         self.OPENAI_SUMMARY_MODEL = "gpt-3.5-turbo"
         self.EMBEDDING_CONTEXT_LENGTH = 8192
 
+
         # Processing Settings
         self.SUMMARIZE_CONTENT = False  # Set to True if you want to summarize content
         self.SAVE_INTERMEDIATE_FILES = True  # Save JSON files during processing
         self.CHUNK_SIZE = 800          # Reduced from 1024 for more granular retrieval
         self.CHUNK_OVERLAP = 200       # Increased from 128 for better context continuity
+        self.QA_SOURCE_FILE = "app/services/qagold.txt"
 
         # File paths
 
