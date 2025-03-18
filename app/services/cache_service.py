@@ -363,6 +363,12 @@ class ChatCacheService:
                 count_result = cursor.fetchone()
                 if count_result:
                     entries_to_delete, min_age_hours, max_age_hours, avg_hits = count_result
+                    # Handle None values by providing defaults
+                    entries_to_delete = entries_to_delete or 0
+                    min_age_hours = 0 if min_age_hours is None else min_age_hours
+                    max_age_hours = 0 if max_age_hours is None else max_age_hours
+                    avg_hits = 0 if avg_hits is None else avg_hits
+                    
                     self.logger.info(
                         f"Clearing {entries_to_delete} cache entries older than {older_than_days} days " +
                         f"(age range: {min_age_hours:.1f} to {max_age_hours:.1f} hours, avg hits: {avg_hits:.1f})"
@@ -380,6 +386,11 @@ class ChatCacheService:
                 count_result = cursor.fetchone()
                 if count_result:
                     entries_to_delete, avg_age_hours, avg_hits = count_result
+                    # Handle None values by providing defaults
+                    entries_to_delete = entries_to_delete or 0
+                    avg_age_hours = 0 if avg_age_hours is None else avg_age_hours
+                    avg_hits = 0 if avg_hits is None else avg_hits
+                    
                     self.logger.info(
                         f"Clearing ALL {entries_to_delete} cache entries " +
                         f"(avg age: {avg_age_hours:.1f} hours, avg hits: {avg_hits:.1f})"
