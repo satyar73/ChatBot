@@ -62,14 +62,20 @@ The IndexService relies on configuration from:
 - `app.config.chat_config.ChatConfig`: Contains API keys and index settings
 
 ## 3. ShopifyIndexer
-The `ShopifyIndexer` class fetches content from a Shopify store and indexes it to Pinecone.
+The `ShopifyIndexer` class fetches content from a Shopify store and indexes it to Pinecone with 
+metadata enrichment and more optimal embedding techniques.
 
 ### 3.1 Key Components
-
-- **API Integration**: Connects to Shopify Admin API
-- **Content Processors**: Converts HTML to markdown and processes content
-- **Vector Indexing**: Creates embeddings and uploads to Pinecone
-- **Attribution Enhancement**: Adds marketing attribution metadata
+- **API Integration**: Connects to Shopify Admin API to fetch blogs, articles, and products
+- **Content Processors**: Converts HTML to markdown and processes content with specialized handling
+- **Metadata Enrichment**: Enhances records with:
+  - Marketing attribution terminology detection
+  - Technical term identification and definitions
+  - Keyword extraction and categorization
+  - Q&A pair processing
+- **Optimized Embedding Generation**: Creates custom embedding prompts that highlight technical marketing terms
+- **Vector Indexing**: Creates embeddings and uploads to Pinecone with appropriate metadata
+- **Chunking Strategies**: Adaptive text chunking based on content type and technical terminology
 
 ### 3.2 Key Methods
 
@@ -99,8 +105,48 @@ Gets all articles for a specific blog.
 
 **Returns**:
 - List of article objects
-#### `get_products() -> List[Dict]`
 
+#### `prepare_blog_articles() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]`
+Prepares blog articles for indexing.
+
+**Flow**:
+1. Fetches all blogs from Shopify store
+2. For each blog, creates a blog record with title and URL
+3. Fetches all articles for each blog
+4. Converts article HTML content to markdown
+5. Creates article records with title, URL, and markdown content
+
+**Returns**:
+- Tuple of (blog_records, article_records)
+
+#### `prepare_products() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]`
+Prepares products for indexing.
+
+**Flow**:
+1. Fetches all products from Shopify store
+2. Converts product HTML descriptions to markdown
+3. Creates product records with title, URL, and markdown content
+4. Processes product variants if needed
+
+**Returns**:
+- Tuple of (product_records, variant_records)
+
+#### `prepare_qa_pairs(qa_content) -> List[Dict[str, Any]]`
+Processes Q&A content to preserve question-answer relationships.
+
+**Parameters**:
+- `qa_content`: Raw Q&A content with questions and answers
+
+**Flow**:
+1. Parses Q&A content to extract question-answer pairs
+2. Preserves the relationship between questions and answers
+3. Adds special metadata for certain types of Q&A content
+4. Formats Q&A pairs for optimal retrieval
+
+**Returns**:
+- List of processed Q&A records
+
+#### `get_products() -> List[Dict]`
 Gets all products from Shopify store.
 
 **Returns**:
@@ -115,11 +161,57 @@ Converts HTML content to markdown for better chunking and indexing.
 **Returns**:
 - Markdown string
 
+#### `extract_keywords_from_qa(qa_content) -> Dict[str, List[str]]`
+Extracts keywords from Q&A pairs to use for tagging articles.
+
+**Parameters**:
+- `qa_content`: Raw Q&A content with questions and answers
+
+**Returns**:
+- Dictionary mapping keyword categories to related terms
+
+#### `enhance_records_with_keywords(records, keyword_map) -> List[Dict]`
+Enhances content records with keywords based on content analysis.
+
+**Parameters**:
+- `records`: List of content records
+- `keyword_map`: Dictionary of keywords and related terms
+
+**Returns**:
+- Enhanced records with keywords added
+
+#### `create_embedding_prompt(text, metadata) -> str`
+Creates an optimized prompt for embedding that highlights attribution terms and technical concepts.
+
+**Parameters**:
+- `text`: Original text to embed
+- `metadata`: Metadata associated with the text
+
+**Returns**:
+- Enhanced prompt for embedding with additional context
+
+#### `enrich_attribution_metadata(content) -> Dict`
+Analyzes content for attribution terminology and creates enhanced metadata.
+
+**Parameters**:
+- `content`: Markdown or text content to analyze
+
+**Returns**:
+- Dictionary of attribution-related metadata
+
 #### `index_to_pinecone(records) -> bool`
-Indexes content records to Pinecone vector database.
+Indexes content records to Pinecone vector database with enhanced metadata and embedding techniques.
 
 **Parameters**:
 - `records`: List of content records with title, url, and markdown
+
+**Flow**:
+1. Processes records to extract metadata and keywords
+2. Creates optimized embedding prompts for technical content
+3. Uses adaptive chunking strategies based on content type
+4. Applies different chunking sizes for technical vs. general content
+5. Generates enhanced embeddings with custom prompts
+6. Batches vectors for efficient Pinecone uploads
 
 **Returns**:
 - True if indexing was successful, False otherwise
@@ -330,6 +422,17 @@ The Indexing Service uses standard logging to track progress:
 - **Incremental Indexing**: Consider implementing delta updates rather than full reindexing
 - **Content Pre-processing**: Optimize content before embedding (clean HTML, remove boilerplate)
 - **Index Monitoring**: Regularly check vector counts and dimensions
-- **Content Chunking**: Adjust chunk size based on content type for better retrieval
-- **Summarization**: Use summarization for very long documents, but preserve key information
-- **Metadata Enrichment**: Add rich metadata to improve filtering during retrieval
+- **Adaptive Content Chunking**: Adjust chunk size based on content type and technical terminology:
+  - Use smaller chunks with more overlap for technical content
+  - Use standard chunk sizes for general content
+  - Preserve special terms during chunking
+- **Custom Embedding Prompts**: Enhance embedding quality with context-specific prompting:
+  - Add technical definitions for specialized terminology
+  - Highlight attribution-related content
+  - Provide additional context for domain-specific terms
+- **Metadata Enrichment**: Add rich metadata for improved retrieval:
+  - Keyword categorization
+  - Attribution terminology detection
+  - Technical term identification
+  - Q&A relationship preservation
+- **Batch Processing**: Use efficient batching for vector uploads to improve performance

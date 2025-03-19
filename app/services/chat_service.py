@@ -37,7 +37,9 @@ class QueryRewriter:
             "kpi": ["key performance indicator"],
             "sem": ["search engine marketing"],
             "seo": ["search engine optimization"],
-            "ppc": ["pay per click", "pay-per-click"]
+            "ppc": ["pay per click", "pay-per-click"],
+            "attribution multiplier": ["advanced attribution multiplier", "attribution factor",
+                                       "incrementality factor"],
         }
 
         # Marketing concept synonyms for query expansion
@@ -49,7 +51,20 @@ class QueryRewriter:
             "effectiveness": ["performance", "impact", "results", "efficiency", "success"],
             "marketing": ["advertising", "promotion", "campaign", "media spend"],
             "measurement": ["tracking", "analytics", "analysis", "evaluation", "assessment"],
-            "optimization": ["improvement", "enhancement", "refinement", "maximization"]
+            "optimization": ["improvement", "enhancement", "refinement", "maximization"],
+            "advanced attribution": ["advanced attribution multiplier", "attribution adjustment",
+                                     "incrementality coefficient"],
+        }
+
+        self.technical_terms = {
+            "advanced attribution multiplier": (
+                "A coefficient used in advanced attribution to adjust platform-reported metrics "
+                "to reflect true incremental value of marketing channels"
+            ),
+            "attribution multiplier": (
+                "A factor applied to channel attribution to account for over-reporting "
+                "or under-reporting in marketing platforms"
+            )
         }
 
     def expand_abbreviations(self, query: str) -> str:
@@ -112,6 +127,14 @@ class QueryRewriter:
         self.logger.debug(f"Generating alternative queries for: {original_query}")
 
         alt_queries = [original_query]  # Always include the original query
+
+        for term in self.technical_terms:
+            if term.lower() in original_query.lower():
+                # Add the term by itself for precise matching
+                alt_queries.append(term)
+                # Add the term with its definition
+                alt_queries.append(f"{term} {self.technical_terms[term]}")
+                self.logger.debug(f"Added technical term query: {term}")
 
         # Apply basic query expansions
         expanded = self.expand_abbreviations(original_query)
@@ -243,8 +266,72 @@ class ChatService:
         self.logger.debug(f"PATTERN MATCHING: No database patterns matched, routing to RAG")
         return False
 
-    async def _execute_rag_with_retry(self, query: str, history: List, max_attempts: int = 3, 
-                                custom_system_prompt: str = None) -> Tuple[Dict, List[str]]:
+    def _is_empty_or_inadequate_response(self, response: Dict) -> bool:
+        """
+        Enhanced function to check if a response doesn't adequately answer the query.
+        Looks for both "no information" phrases and phrases that indicate the term wasn't found.
+
+        Args:
+            response: The response from the RAG agent
+
+        Returns:
+            bool: True if the response is empty or inadequate, False otherwise
+        """
+        output = response.get('output', '').lower()
+
+        # Check for standard "no information" phrases
+        no_info_phrases = [
+            "i don't have information",
+            "i don't have specific information",
+            "no information available",
+            "i couldn't find",
+            "not found in",
+            "i don't have access",
+            "i don't have details",
+            "information is not provided"
+        ]
+
+        # Check for phrases indicating a term wasn't found in documents
+        term_not_found_phrases = [
+            "does not appear in",
+            "doesn't appear in",
+            "is not mentioned in",
+            "isn't mentioned in",
+            "not present in",
+            "could not find",
+            "couldn't find",
+            "not explicitly",
+            "not specifically",
+            "is not defined in",
+            "isn't defined in",
+            "is absent from",
+            "no specific mention of",
+            "no explicit reference to",
+            "not explicitly mentioned",
+            "not specifically mentioned",
+            "not explicitly defined",
+            "not specifically defined",
+            "does not appear explicitly",
+            "doesn't appear explicitly",
+            "not appear explicitly"
+        ]
+
+        # Check if any "no information" phrase is present
+        has_no_info = any(phrase in output for phrase in no_info_phrases)
+
+        # Check if any "term not found" phrase is present
+        term_not_found = any(phrase in output for phrase in term_not_found_phrases)
+
+        # Log the result for debugging
+        if has_no_info or term_not_found:
+            self.logger.debug(f"QUERY REWRITING: Response deemed inadequate because: " +
+                              ("contains 'no info' phrases" if has_no_info else "") +
+                              ("contains 'term not found' phrases" if term_not_found else ""))
+
+        return has_no_info or term_not_found
+
+    async def _execute_rag_with_retry(self, query: str, history: List, max_attempts: int = 3,
+                                      custom_system_prompt: str = None) -> Tuple[Dict, List[str]]:
         """
         Execute RAG with multiple query formulations and retry logic.
 
@@ -257,16 +344,40 @@ class ChatService:
         Returns:
             Tuple of (best_response, queries_tried)
         """
+        self.logger.debug(f"QUERY REWRITING: Starting _execute_rag_with_retry with query: {query[:100]}")
+
         # Generate alternative queries
         alt_queries = self.query_rewriter.generate_alt_queries(query)
-        self.logger.debug(f"Generated {len(alt_queries)} alternative queries for RAG")
+        self.logger.debug(f"QUERY REWRITING: Generated {len(alt_queries)} alternative queries for RAG")
+        self.logger.debug(f"QUERY REWRITING: Alternatives: {alt_queries}")
 
         all_responses = []
         queries_tried = []
 
         # Get the appropriate RAG agent (with custom system prompt if provided)
         rag_agent = agent_manager.get_rag_agent(custom_system_prompt)
-        
+
+        # XXX this is a hack. Ideally I should be able to have the LLM detect this
+        # Special handling for technical terms
+        for term in self.query_rewriter.technical_terms:
+            if term.lower() in query.lower():
+                # For technical terms, try the exact term query first
+                technical_query = term
+                self.logger.debug(f"QUERY REWRITING: Technical term detected, trying exact term: {technical_query}")
+
+                technical_response = await rag_agent.ainvoke(
+                    {"input": technical_query, "history": history},
+                    include_run_info=True
+                )
+
+                # If this gives a good result, use it
+                if not self._is_empty_or_inadequate_response(technical_response):
+                    self.logger.debug(f"QUERY REWRITING: Exact technical term query produced good results")
+                    return technical_response, [query, technical_query]
+                else:
+                    self.logger.debug(
+                        f"QUERY REWRITING: Technical term query produced inadequate results, will try alternatives")
+
         # Try the original query first
         original_query = alt_queries[0]
         queries_tried.append(original_query)
@@ -278,28 +389,13 @@ class ChatService:
         )
         all_responses.append((original_response, original_query))
 
-        # Function to check if a response indicates "no information found"
-        def is_empty_response(response: Dict) -> bool:
-            output = response.get('output', '').lower()
-            no_info_phrases = [
-                "i don't have information",
-                "i don't have specific information",
-                "no information available",
-                "i couldn't find",
-                "not found in",
-                "i don't have access",
-                "i don't have details",
-                "information is not provided"
-            ]
-            return any(phrase in output for phrase in no_info_phrases)
-
         # If the first response seems good, return it
-        if not is_empty_response(original_response):
+        if not self._is_empty_or_inadequate_response(original_response):
             self.logger.debug(f"QUERY REWRITING: Original query produced good results, no need for alternatives")
             return original_response, queries_tried
 
         # Otherwise, try alternative queries
-        self.logger.debug(f"QUERY REWRITING: Original query may have produced empty results, trying alternatives")
+        self.logger.debug(f"QUERY REWRITING: Original query produced inadequate results, trying alternatives")
 
         # Remove the original query as we've already tried it
         alt_queries = alt_queries[1:]
@@ -318,14 +414,22 @@ class ChatService:
             all_responses.append((alt_response, alt_query))
 
             # If this alternative query worked well, return it
-            if not is_empty_response(alt_response):
+            if not self._is_empty_or_inadequate_response(alt_response):
                 self.logger.debug(f"QUERY REWRITING: Alternative query {i + 1} produced good results")
                 return alt_response, queries_tried
+            else:
+                self.logger.debug(f"QUERY REWRITING: Alternative query {i + 1} produced inadequate results")
 
         # If we get here, none of the queries produced good results
-        # Return the original response to maintain consistency
+        # Find the best response among all attempts
+        best_response = original_response
+        best_query = original_query
+
+        # Optional: Implement a scoring mechanism to pick the best response
+        # For now, just returning the original response as a fallback
         self.logger.debug(f"QUERY REWRITING: No alternative queries produced better results, returning original")
-        return original_response, queries_tried
+
+        return best_response, queries_tried
 
     async def chat(self, data: Message) -> ResponseMessage:
         """

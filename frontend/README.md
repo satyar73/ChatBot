@@ -25,7 +25,7 @@ testing, and managing document indexing.
    npm start
    ```
 
-3. The application will be available at http://localhost:3000
+3. The application will be available at http://localhost
 
 ## Configuration
 The application is configured to proxy API requests to http://localhost:8005 where the backend should be running. You

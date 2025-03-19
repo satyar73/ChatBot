@@ -17,49 +17,55 @@ The `ChatService` class manages chat interactions between users and the underlyi
 
 ### 2.1 Key Components
 - **Session Management**: Maintains chat histories for different user sessions
-- **Query Routing**: Intelligently routes queries to appropriate agents (RAG, non-RAG, or database)
-- **Query Rewriting**: Uses the `QueryRewriter` to enhance RAG retrieval
+- **Query Routing**: Routes queries to appropriate agents (RAG, non-RAG, or database) using pattern matching
+- **Query Rewriting**: Uses an `QueryRewriter` with the following strategies to enhance RAG retrieval:
+  - Abbreviation expansion for marketing terms
+  - Synonym addition for improved matching
+  - Technical term handling with definitions
+  - Query broadening techniques
+- **Response Quality Assessment**: Evaluates RAG responses for adequacy and tries alternative query formulations when needed
+- **Detailed Logging**: Provides logs of routing decisions and query transformations
 - **Response Processing**: Handles both RAG and non-RAG responses and combines them with sources
-- **Caching Integration**: Uses the cache service to store and retrieve responses
+- **Caching Integration**: Uses the cache service to store and retrieve responses with performance tracking
 
 ### 2.2 Key Methods
 
 #### `chat(data: Message) -> ResponseMessage`
-Processes a user chat message and returns a response. This is the main entry point for client requests.
-This follows a traditional programmatic approach (as opposed to managing the workflow using state-graph).
-I am intending to change this to a more conventional approach next
-
+Processes a user chat message and returns a response with enhanced query rewriting and routing intelligence. This is the main entry point for client requests.
 **Parameters**:
 - `data`: A Message object containing:
-- `message`: The user's query text
-- `session_id`: Identifier for the user's session
-- `mode`: Response mode ("rag", "no_rag", or both)
-- `system_prompt`: Optional custom system prompt
+  - `message`: The user's query text
+  - `session_id`: Identifier for the user's session
+  - `mode`: Response mode ("rag", "no_rag", or both)
+  - `system_prompt`: Optional custom system prompt
 
 **Flow**:
 1. Generates a unique hash for the query based on content, session, and system prompt
-2. Checks cache for an existing response
-3. If cache miss:
-   - Determines if query is a database query or RAG query
-   - Calls appropriate agent to generate response
-   - Routes to database agent for data-related queries
-   - For RAG queries, attempts query rewriting to improve results
+2. Checks for special testing flags in the query (e.g., "test_routing:")
+3. Checks cache for an existing response (skipped for database queries or test mode)
+4. If cache miss:
+   - Analyzes query with enhanced pattern matching to determine routing
+   - Routes to database agent for data/analytics queries with detailed logging
+   - For RAG queries, uses improved query rewriting with retry logic:
+     - Tries multiple query formulations
+     - Special handling for technical terms
+     - Evaluates response quality to determine if alternative queries are needed
    - Optionally generates non-RAG response for comparison
-4. Adds the response to the session chat history
-5. Extracts and formats sources from RAG response
-6. Caches the response for future use
-7. Returns formatted response with RAG/non-RAG outputs and sources
+5. Adds the response to the session chat history
+6. Extracts and formats sources from RAG response
+7. Caches the response for future use including query reformulations
+8. Tracks and logs cache access statistics and response times
+9. Returns formatted response with RAG/non-RAG outputs, sources, and query rewriting metadata
 
 **Returns**:
 - `ResponseMessage` object with:
   - RAG-based response
   - Non-RAG response (if requested)
   - Sources from retrieval
-  - Metadata about the response process
+  - Metadata about the response process including alternative queries tried
 
 #### `_execute_rag_with_retry(query, history, max_attempts, custom_system_prompt) -> Tuple[Dict, List[str]]`
-Executes RAG agent with retry logic and query reformulation.
-
+Executes RAG agent with enhanced retry logic, query reformulation, and special handling for technical terms.
 **Parameters**:
 - `query`: The original user query
 - `history`: Chat history
@@ -68,46 +74,73 @@ Executes RAG agent with retry logic and query reformulation.
 
 **Flow**:
 1. Generates alternative query formulations using the QueryRewriter
-2. Tries the original query first
-3. If the response appears to lack information, tries alternative formulations
-4. Returns the best response and list of queries tried
+2. Special handling for technical marketing terms by trying exact term queries first
+3. Tries the original query for normal queries
+4. Evaluates response quality using `_is_empty_or_inadequate_response`
+5. If the response appears to lack information or contains "not found" phrases, tries alternative formulations
+6. Returns the best response and list of all queries tried
+
+**Technical Term Handling**:
+- Identifies technical marketing terms (e.g., "advanced attribution multiplier")
+- Tries exact term queries first for precise matching
+- Adds technical definitions to improve retrieval accuracy
 
 **Returns**:
 - Tuple containing (best_response, queries_tried)
 
 #### `_is_database_query(query) -> bool`
-Determines if a query should be routed to the database agent. This is a rule based approach and I need
-to change this to use LLMs instead. In fact I need to change the entire flow with the latest text-to-SQL approach
-
+Determines if a query should be routed to the database agent using an enhanced rule-based approach with exclusion and inclusion patterns.
 **Parameters**:
 - `query`: The user's input text
+
+**Flow**:
+1. First checks against exclusion patterns (high-priority rules that prevent database routing)
+   - Excludes queries about incrementality tests, prospecting, marketing strategy, etc.
+2. If no exclusions match, checks against database keyword patterns
+   - Matches database/analytics terms, specific metrics mentions, etc.
+3. Additionally checks against query patterns that suggest data requests
+   - Patterns like "how many customers", "show me the data", etc.
+4. Provides detailed logging for pattern matching decisions
 
 **Returns**:
 - `True` if the query appears to be a database/analytics query
 - `False` otherwise
 
-### 2.3 Configuration
+**Note**: This is a rule-based approach that will eventually be replaced with an LLM-based classifier for more accurate routing.
 
+### 2.3 Configuration
 The ChatService relies on configuration from:
 - `app.config.chat_config.ChatConfig`: Contains system prompts, API settings
 - `app.config.cache_config`: Contains cache configuration
 
 ## 3. Query Rewriter
-The `QueryRewriter` class enhances user queries to improve RAG retrieval quality.
+The `QueryRewriter` class enhances user queries to improve RAG retrieval quality through various transformation techniques.
 
-### 3.1 Key Methods
+### 3.1 Features
+- **Abbreviation Expansion**: Expands common marketing abbreviations (e.g., "mmm" → "marketing mix modeling")
+- **Synonym Addition**: Enriches queries with relevant synonyms to improve matching
+- **Technical Term Enhancement**: Special handling for technical marketing terms with definitions
+- **Query Broadening**: Creates more general versions of queries by removing specific constraints
+- **Marketing-Specific Terminology**: Extensive mappings for marketing and attribution terminology
+
+### 3.2 Key Methods
 
 #### `generate_alt_queries(original_query) -> List[str]`
-Generates alternative formulations of a query to improve retrieval.
+Generates alternative formulations of a query to improve retrieval by applying multiple transformation techniques.
 
 **Parameters**:
 - `original_query`: The original user query
 
 **Returns**:
-- List of alternative query formulations
+- List of alternative query formulations, including:
+  - The original query (always included)
+  - Queries with expanded abbreviations
+  - Queries with added synonyms
+  - Technical term definitions when applicable
+  - Broader versions of the query
 
 #### `expand_abbreviations(query) -> str`
-Expands common marketing abbreviations in the query.
+Expands common marketing abbreviations in the query using a comprehensive dictionary of terms.
 
 **Parameters**:
 - `query`: User query text
@@ -116,8 +149,7 @@ Expands common marketing abbreviations in the query.
 - Query with expanded abbreviations
 
 #### `add_synonyms(query) -> str`
-
-Adds relevant synonyms to the query to improve matching.
+Adds relevant synonyms to the query to improve matching based on a curated synonym mapping.
 
 **Parameters**:
 - `query`: User query text
@@ -126,14 +158,13 @@ Adds relevant synonyms to the query to improve matching.
 - Query with added synonyms
 
 #### `create_broader_query(query) -> str`
-
-Creates a more general version of the query by removing specific constraints.
+Creates a more general version of the query by removing specific constraints and extracting core marketing concepts.
 
 **Parameters**:
 - `query`: User query text
 
 **Returns**:
-- Broader version of the query
+- Broader version of the query or a tuple containing (broader_query, core_concepts_query)
 
 ## 4. ChatCacheService
 The `ChatCacheService` provides caching functionality to avoid redundant API calls.

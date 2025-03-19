@@ -200,7 +200,169 @@ class ShopifyIndexer:
             self.logger.error(f"Error converting HTML to markdown: {str(e)}")
             # Return original content if conversion fails
             return html_content
-    
+
+    def extract_keywords_from_qa(self, qa_content: str) -> Dict[str, List[str]]:
+        """
+        Extract keywords from Q&A pairs to use for tagging articles.
+
+        Args:
+            qa_content: Raw Q&A content with questions and answers
+
+        Returns:
+            Dictionary mapping keywords to related terms
+        """
+        import re
+
+        # Define key topic areas and related terms
+        keyword_map = {
+            "attribution": ["attribution", "base attribution", "advanced attribution",
+                            "self-attribution", "self-attributed", "attribution multiplier",
+                            "advanced attribution multiplier"],
+            "incrementality": ["incrementality", "incrementality testing", "geo testing",
+                               "holdout test", "scale test", "lift"],
+            "mmm": ["marketing mix modeling", "mmm", "marketing mix model", "media mix"],
+            "mta": ["multi-touch attribution", "mta", "multi touch", "touchpoints"],
+            "measurement": ["measurement", "metrics", "kpi", "measure", "statistical significance",
+                            "minimum detectable lift", "mdl", "confidence"],
+            "marketing_funnel": ["funnel", "awareness", "consideration", "conversion",
+                                 "retention", "advocacy"],
+            "tracking": ["tracking", "cookies", "first-party", "third-party", "pixels"],
+            "optimization": ["optimization", "budget allocation", "diminishing returns",
+                             "roas", "roi", "cpa", "cac", "icac"],
+            "channels": ["facebook", "google", "tiktok", "search", "social", "display"]
+        }
+
+        # Extract all questions to build a frequency map
+        qa_pairs = re.findall(r'<\\q(.*?)\/>\s*<\\a(.*?)\/>', qa_content, re.DOTALL)
+        questions = [q.strip().lower() for q, _ in qa_pairs]
+
+        # Count frequency of keywords in questions
+        keyword_frequency = {}
+        for question in questions:
+            for category, terms in keyword_map.items():
+                for term in terms:
+                    if term.lower() in question:
+                        if category not in keyword_frequency:
+                            keyword_frequency[category] = 0
+                        keyword_frequency[category] += 1
+
+        # Sort by frequency for each category
+        sorted_keywords = {k: v for k, v in sorted(
+            keyword_frequency.items(), key=lambda item: item[1], reverse=True)}
+
+        self.logger.info(f"Extracted keywords with frequencies: {sorted_keywords}")
+        return keyword_map
+
+    def enhance_records_with_keywords(self, records: List[Dict[str, Any]],
+                                      keyword_map: Dict[str, List[str]]) -> List[Dict[str, Any]]:
+        """
+        Enhance records with keywords based on content analysis.
+
+        Args:
+            records: List of content records
+            keyword_map: Dictionary of keywords and related terms
+
+        Returns:
+            Enhanced records with keywords
+        """
+        enhanced_records = []
+
+        for record in records:
+            # Skip if no markdown content
+            if 'markdown' not in record:
+                enhanced_records.append(record)
+                continue
+
+            content = record['markdown'].lower()
+            record_keywords = set()
+
+            # Check for each keyword category in the content
+            for category, terms in keyword_map.items():
+                for term in terms:
+                    if term.lower() in content:
+                        record_keywords.add(category)
+                        # Add the specific term that matched
+                        record_keywords.add(term.lower())
+
+            # Add keywords to record
+            if record_keywords:
+                record['keywords'] = list(record_keywords)
+
+            enhanced_records.append(record)
+
+        self.logger.info(f"Enhanced {len(enhanced_records)} records with keywords")
+        return enhanced_records
+
+    def index_all_content(self) -> bool:
+        """
+        Index all Shopify content (blogs, articles, products) to Pinecone.
+
+        Returns:
+            True if indexing was successful, False otherwise
+        """
+        try:
+            self.logger.info("Starting full content indexing...")
+
+            # Prepare blog articles
+            self.logger.info("Fetching blog articles...")
+            blog_records, article_records = self.prepare_blog_articles()
+
+            # Prepare products
+            self.logger.info("Fetching products...")
+            product_records, variant_records = self.prepare_products()
+
+            # Extract keywords from Q&A content if available
+            keyword_map = {}
+            qa_records = []
+            if hasattr(self.config, 'QA_SOURCE_FILE') and self.config.QA_SOURCE_FILE:
+                try:
+                    with open(self.config.QA_SOURCE_FILE, 'r') as f:
+                        qa_content = f.read()
+                    # Extract keywords first
+                    keyword_map = self.extract_keywords_from_qa(qa_content)
+                    # Then process Q&A pairs
+                    qa_records = self.prepare_qa_pairs(qa_content)
+                    self.logger.info(f"Processed {len(qa_records)} Q&A pairs")
+                except Exception as e:
+                    self.logger.error(f"Error processing Q&A content: {str(e)}")
+
+            # Enhance records with keywords
+            enhanced_article_records = self.enhance_records_with_keywords(article_records, keyword_map)
+            enhanced_product_records = self.enhance_records_with_keywords(product_records, keyword_map)
+            enhanced_qa_records = self.enhance_records_with_keywords(qa_records, keyword_map)
+            enhanced_blog_records = self.enhance_records_with_keywords(blog_records, keyword_map)
+
+            # Combine all records. Blog records not included as there is not much to be included in them
+            all_records = enhanced_article_records + enhanced_product_records + enhanced_qa_records
+
+            # Save intermediate files if configured
+            if self.config.SAVE_INTERMEDIATE_FILES:
+                os.makedirs(self.config.OUTPUT_DIR, exist_ok=True)
+
+                with open(os.path.join(self.config.OUTPUT_DIR, "blogs.json"), "w") as f:
+                    json.dump(enhanced_blog_records, f, indent=2)
+
+                with open(os.path.join(self.config.OUTPUT_DIR, "articles.json"), "w") as f:
+                    json.dump(enhanced_article_records, f, indent=2)
+
+                with open(os.path.join(self.config.OUTPUT_DIR, "products.json"), "w") as f:
+                    json.dump(enhanced_product_records, f, indent=2)
+
+            # Index to Pinecone
+            self.logger.info(f"Indexing {len(all_records)} total records...")
+            result = self.index_to_pinecone(all_records)
+
+            if result:
+                self.logger.info("Full content indexing completed successfully")
+            else:
+                self.logger.error("Full content indexing failed")
+
+            return result
+
+        except Exception as e:
+            self.logger.error(f"Error during full content indexing: {str(e)}")
+            return False
+
     def prepare_blog_articles(self) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
         Prepare blog articles for indexing.
@@ -298,6 +460,23 @@ class ShopifyIndexer:
         """
         metadata = metadata or {}
 
+        # Check for specific technical terms to highlight
+        technical_terms = {
+            "advanced attribution multiplier": "A coefficient used in advanced attribution to adjust the credit given to marketing channels based on their true incremental value",
+            "attribution multiplier": "A factor used to adjust attribution models to reflect true marketing contribution",
+            # Add other technical terms as needed
+        }
+
+        # Add definitions for any technical terms found in the text
+        term_definitions = []
+        for term, definition in technical_terms.items():
+            if term.lower() in text.lower():
+                term_definitions.append(f"{term}: {definition}")
+
+        if term_definitions:
+            term_context = "\n".join(term_definitions)
+            return f"Technical marketing terms context:\n{term_context}\n\n{text}"
+
         # For tracking-specific Q&A
         if 'special_type' in metadata and metadata['special_type'] == 'tracking_types_examples':
             return f"""
@@ -377,12 +556,30 @@ class ShopifyIndexer:
                     # For Q&A content, don't split questions from answers
                     chunks = [record['markdown']]
                 else:
-                    # Regular content uses recursive splitting
-                    text_splitter = RecursiveCharacterTextSplitter(
-                        chunk_size=self.config.CHUNK_SIZE,
-                        chunk_overlap=self.config.CHUNK_OVERLAP,
-                        separators=["\n\n", "\n", " ", ""]
-                    )
+                    #Define special technical terms to preserve
+                    special_terms = [
+                        "advanced attribution multiplier",
+                        "attribution multiplier",
+                        "marketing mix modeling",
+                        # Add other multi-word technical terms
+                    ]
+
+                    # Create a custom separator pattern that preserves these terms
+                    separators = ["\n\n", "\n", ". ", " ", ""]
+
+                    # For technical content, use smaller chunks with more overlap
+                    if any(term in record['markdown'].lower() for term in special_terms):
+                        text_splitter = RecursiveCharacterTextSplitter(
+                            chunk_size=self.config.CHUNK_SIZE // 2,  # Smaller chunks for technical content
+                            chunk_overlap=self.config.CHUNK_OVERLAP * 2,  # More overlap
+                            separators=separators
+                        )
+                    else:
+                        text_splitter = RecursiveCharacterTextSplitter(
+                            chunk_size=self.config.CHUNK_SIZE,
+                            chunk_overlap=self.config.CHUNK_OVERLAP,
+                            separators=separators
+                        )
                     chunks = text_splitter.split_text(record['markdown'])
 
                 # Create documents with metadata
@@ -398,6 +595,10 @@ class ShopifyIndexer:
                         "source": f"{record.get('type', 'content')}"
                     }
                     metadata.update(attribution_metadata)
+
+                    # Add keywords if available
+                    if 'keywords' in record:
+                        metadata["keywords"] = record['keywords']
 
                     doc = Document(
                         page_content=chunk,
@@ -524,67 +725,11 @@ class ShopifyIndexer:
             if term.lower() in content.lower():
                 metadata[f"has_{term.replace(' ', '_').lower()}"] = True
 
+            if "attribution_terms" not in metadata:
+                metadata["attribution_terms"] = []
+            metadata["attribution_terms"].append(term.lower())
+
         return metadata
-    
-    def index_all_content(self) -> bool:
-        """
-        Index all Shopify content (blogs, articles, products) to Pinecone.
-        
-        Returns:
-            True if indexing was successful, False otherwise
-        """
-        try:
-            self.logger.info("Starting full content indexing...")
-            
-            # Prepare blog articles
-            self.logger.info("Fetching blog articles...")
-            blog_records, article_records = self.prepare_blog_articles()
-            
-            # Prepare products
-            self.logger.info("Fetching products...")
-            product_records, variant_records = self.prepare_products()
-            
-            # Process Q&A content from paste.txt if present
-            qa_records = []
-            if hasattr(self.config, 'QA_SOURCE_FILE') and self.config.QA_SOURCE_FILE:
-                try:
-                    with open(self.config.QA_SOURCE_FILE, 'r') as f:
-                        qa_content = f.read()
-                    qa_records = self.prepare_qa_pairs(qa_content)
-                    self.logger.info(f"Processed {len(qa_records)} Q&A pairs")
-                except Exception as e:
-                    self.logger.error(f"Error processing Q&A content: {str(e)}")
-
-            # Combine all records
-            all_records = article_records + product_records + qa_records + blog_records
-
-            # Save intermediate files if configured
-            if self.config.SAVE_INTERMEDIATE_FILES:
-                os.makedirs(self.config.OUTPUT_DIR, exist_ok=True)
-                
-                with open(os.path.join(self.config.OUTPUT_DIR, "blogs.json"), "w") as f:
-                    json.dump(blog_records, f, indent=2)
-                    
-                with open(os.path.join(self.config.OUTPUT_DIR, "articles.json"), "w") as f:
-                    json.dump(article_records, f, indent=2)
-                    
-                with open(os.path.join(self.config.OUTPUT_DIR, "products.json"), "w") as f:
-                    json.dump(product_records, f, indent=2)
-            
-            # Index to Pinecone
-            self.logger.info(f"Indexing {len(all_records)} total records...")
-            result = self.index_to_pinecone(all_records)
-            
-            if result:
-                self.logger.info("Full content indexing completed successfully")
-            else:
-                self.logger.error("Full content indexing failed")
-                
-            return result
-            
-        except Exception as e:
-            self.logger.error(f"Error during full content indexing: {str(e)}")
-            return False
     
     def run_full_process(self) -> dict:
         """
