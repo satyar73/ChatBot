@@ -19,6 +19,15 @@ def configure_logging(log_level: Optional[str] = None) -> None:
         log_level = os.environ.get('LOG_LEVEL', 'INFO').upper()
 
     numeric_level = getattr(logging, log_level, logging.INFO)
+    
+    # Create centralized logs directory
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    logs_dir = os.path.join(project_root, "logs")
+    os.makedirs(logs_dir, exist_ok=True)
+    
+    # Set up log file paths
+    app_log_file = os.path.join(logs_dir, "app.log")
+    error_log_file = os.path.join(logs_dir, "error.log")
 
     # Configure logging
     logging_config = {
@@ -41,26 +50,44 @@ def configure_logging(log_level: Optional[str] = None) -> None:
                 "formatter": "detailed",
                 "stream": sys.stderr  # Use stderr for better Docker compatibility
             },
-            # You can add a file handler here if needed
+            "file": {
+                "level": "DEBUG",
+                "class": "logging.handlers.RotatingFileHandler",
+                "formatter": "detailed",
+                "filename": app_log_file,
+                "maxBytes": 1073741824,  # 1GB
+                "backupCount": 5,
+                "encoding": "utf-8"
+            },
+            "error_file": {
+                "level": "ERROR",
+                "class": "logging.handlers.RotatingFileHandler",
+                "formatter": "detailed",
+                "filename": error_log_file,
+                "maxBytes": 1073741824,  # 1GB
+                "backupCount": 5,
+                "encoding": "utf-8"
+            }
         },
         "loggers": {
             # FastAPI and Uvicorn loggers
-            "uvicorn": {"level": "INFO"},
-            "uvicorn.error": {"level": "INFO"},
-            "uvicorn.access": {"level": "INFO"},
-            "fastapi": {"level": "INFO"},
+            "uvicorn": {"level": "INFO", "handlers": ["console", "file"], "propagate": False},
+            "uvicorn.error": {"level": "INFO", "handlers": ["console", "file", "error_file"], "propagate": False},
+            "uvicorn.access": {"level": "INFO", "handlers": ["console", "file"], "propagate": False},
+            "fastapi": {"level": "INFO", "handlers": ["console", "file"], "propagate": False},
 
             # Application loggers
-            "app": {"level": log_level, "handlers": ["console"], "propagate": False},
-            "app.services": {"level": log_level, "handlers": ["console"], "propagate": False},
-            "app.services.chat_service": {"level": "DEBUG", "handlers": ["console"], "propagate": False},
-            "app.services.chat_test_service": {"level": log_level, "handlers": ["console"], "propagate": False},
+            "app": {"level": log_level, "handlers": ["console", "file"], "propagate": False},
+            "app.services": {"level": log_level, "handlers": ["console", "file"], "propagate": False},
+            "app.services.chat_service": {"level": "DEBUG", "handlers": ["console", "file"], "propagate": False},
+            "app.services.chat_test_service": {"level": log_level, "handlers": ["console", "file"], "propagate": False},
+            "prompt_capture": {"level": "DEBUG", "handlers": ["console"], "propagate": False},
 
             # Third-party libraries
-            "urllib3": {"level": "WARNING"},
-            "httpx": {"level": "WARNING"},
+            "urllib3": {"level": "WARNING", "handlers": ["console", "file"], "propagate": False},
+            "httpx": {"level": "WARNING", "handlers": ["console", "file"], "propagate": False},
         },
-        "root": {"level": log_level, "handlers": ["console"]},
+        "root": {"level": log_level, "handlers": ["console", "file", "error_file"]},
     }
 
     # Apply the configuration
@@ -143,19 +170,23 @@ def ensure_debug_logging(name: str = None) -> None:
         logger.addHandler(handler)
         print(f"Added handler to {name} logger")
 
-# Enhance the get_logger function to be more robust
-def get_logger(name: str, log_level: str = None) -> logging.Logger:
+# Enhance the get_logger function to be more robust and support rotating files
+def get_logger(name: str, log_level: str = None, use_rotating_file: bool = True, 
+               log_file: str = None) -> logging.Logger:
     """
     Get a configured logger with proper debug support.
 
     Args:
         name: Logger name (usually __name__)
         log_level: Optional log level as string ('DEBUG', 'INFO', etc.)
+        use_rotating_file: Whether to add a rotating file handler
+        log_file: Optional specific log file path (defaults to logs/module_name.log)
 
     Returns:
         Configured logger
     """
     import logging
+    from logging.handlers import RotatingFileHandler
 
     # Get the logger
     logger = logging.getLogger(name)
@@ -182,6 +213,34 @@ def get_logger(name: str, log_level: str = None) -> logging.Logger:
 
         # Try to fix it
         ensure_debug_logging(name)
+
+    # If using rotating file and no file handlers present
+    if use_rotating_file and not any(isinstance(h, RotatingFileHandler) for h in logger.handlers):
+        try:
+            # Set up log file path
+            if log_file is None:
+                # Create centralized logs directory
+                project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                logs_dir = os.path.join(project_root, "logs")
+                os.makedirs(logs_dir, exist_ok=True)
+                
+                # Create a log file name based on the module name
+                module_part = name.split('.')[-1]
+                log_file = os.path.join(logs_dir, f"{module_part}.log")
+            
+            # Add rotating file handler (1GB max size, keep 5 backup files)
+            handler = RotatingFileHandler(
+                log_file,
+                maxBytes=1073741824,  # 1GB
+                backupCount=5,
+                encoding='utf-8'
+            )
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s - [%(filename)s:%(lineno)d]')
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
+            print(f"Added rotating file handler to {name} logger, logging to {log_file}")
+        except Exception as e:
+            print(f"Warning: Failed to set up rotating file handler: {e}")
 
     # If no handlers in logger hierarchy, add one
     has_handlers = logger.handlers

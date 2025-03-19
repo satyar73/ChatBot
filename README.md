@@ -13,12 +13,12 @@ This is a RAG-enabled chatbot system designed for marketing professionals and an
     - Shopify storefront (products, blogs)
 - **Vector Search**: Uses Pinecone and OpenAI embeddings for semantic similarity
 - **FastAPI Backend**: Robust API with configurable endpoints
-- **Advanced Logging**: Comprehensive logging for debugging and monitoring
-- **Response Caching**: Efficient local caching system for faster responses
+- **Logging**: logging for debugging and monitoring
+- **Response Caching**: Local caching system for faster responses
 - **Cache Analytics**: Built-in metrics to measure cache performance
 - **Multi-Mode UI**: Toggle between RAG, standard, and side-by-side comparison views
-- **Advanced LLM Interaction Logging**: Detailed logs of tool usage, execution tracing, and response capture
-- **Robust Response Mode Handling**: Improved handling of RAG, no-RAG, and comparison modes with enhanced error resilience
+- **LLM Interaction Logging**: Detailed logs of tool usage, execution tracing, and response capture
+- **Response Mode Handling**: Improved handling of RAG, no-RAG, and comparison modes with enhanced error resilience
 
 ## Tech Stack
 
@@ -96,7 +96,12 @@ docker-compose down
 
 To view logs:
 ```bash
+# View all container logs
 docker-compose logs -f
+
+# Access application logs directly
+docker exec -it chatbot_backend ls -la /app/logs
+docker exec -it chatbot_backend cat /app/logs/app.log
 ```
 
 ### Running Locally
@@ -107,6 +112,22 @@ python run.py
 or
 ```bash
 uvicorn app:app --port 8005 --reload
+```
+
+### Accessing Logs
+Logs are stored in the `/logs` directory at the project root:
+```bash
+# List all log files
+ls -la logs/
+
+# View application logs
+tail -f logs/app.log
+
+# View LLM interaction logs
+tail -f logs/llm_prompts_responses.jsonl
+
+# View error logs
+tail -f logs/error.log
 ```
 
 ## API Endpoints
@@ -165,14 +186,28 @@ To view cache performance statistics:
 curl http://localhost:8005/chat/cache/stats
 ```
 
-## Advanced Logging and Error Handling
+## Logging and Error Handling
+
+The system features a centralized logging infrastructure:
+
+- **Centralized Logs Directory**: All logs are stored in the `/logs` directory at the project root
+- **Rotating Log Files**: Automatic log rotation when files reach 1GB with 5 backup files maintained
+- **Structured JSON Logging**: LLM interactions are captured in `logs/llm_prompts_responses.jsonl`
+- **Other Log Files**:
+  - `app.log`: General application logs
+  - `error.log`: Error-specific logs
+  - Module-specific logs with automatic naming
+
+### LLM Interaction Logging
 
 The agent system includes comprehensive logging of all LLM interactions:
 
 - **Detailed Tool Usage Logging**: All tool invocations are captured with input/output parameters
 - **Chain Execution Tracing**: Logs full LLM reasoning chain execution
-- **Structured JSON Logs**: Stored in `app/prompt_logs` for easy analysis
 - **Message Content Preservation**: Full message contexts are preserved for debugging
+- **Persistent Logging**: Logs persist across server restarts in the same files
+
+### Response Mode Handling
 
 The chat service now handles all response modes more reliably:
 

@@ -55,12 +55,37 @@ class ChatCacheService:
             )
             ''')
             
+            # Perform database migrations
+            self._run_migrations(conn)
+            
             conn.commit()
             conn.close()
             self.logger.info(f"Cache database initialized at {cache_config.CACHE_DB_PATH}")
         except Exception as e:
             self.logger.error(f"Failed to initialize cache database: {e}")
             raise
+            
+    def _run_migrations(self, conn):
+        """Run database migrations to update schema when needed.
+        
+        Args:
+            conn: SQLite connection
+        """
+        cursor = conn.cursor()
+        try:
+            # Check if system_prompt column exists in chat_cache table
+            cursor.execute("PRAGMA table_info(chat_cache)")
+            columns = [column[1] for column in cursor.fetchall()]
+            
+            # Add system_prompt column if it doesn't exist
+            if "system_prompt" not in columns:
+                self.logger.info("Adding system_prompt column to chat_cache table")
+                cursor.execute("ALTER TABLE chat_cache ADD COLUMN system_prompt TEXT")
+                conn.commit()
+                
+        except Exception as e:
+            self.logger.error(f"Error during database migration: {e}")
+            # Continue execution - don't let migration failure break the application
     
     def generate_query_hash(self, query: str, history: List = None, session_id: str = None, system_prompt: str = None) -> str:
         """
@@ -118,13 +143,18 @@ class ChatCacheService:
             
             # Get cached response
             cursor.execute(
-                "SELECT rag_response, no_rag_response, sources, timestamp, hit_count FROM chat_cache WHERE query_hash = ?", 
+                "SELECT rag_response, no_rag_response, sources, timestamp, hit_count, system_prompt FROM chat_cache WHERE query_hash = ?", 
                 (query_hash,)
             )
             result = cursor.fetchone()
             
             if result:
-                rag_response, no_rag_response, sources_json, timestamp, hit_count = result
+                # Handle the case where the result might not have system_prompt (older rows)
+                if len(result) >= 6:
+                    rag_response, no_rag_response, sources_json, timestamp, hit_count, system_prompt = result
+                else:
+                    rag_response, no_rag_response, sources_json, timestamp, hit_count = result
+                    system_prompt = None
                 
                 # Check if cache entry has expired
                 # Check if cache entry has expired
@@ -149,7 +179,8 @@ class ChatCacheService:
                 cached_response = {
                     "rag_response": rag_response,
                     "no_rag_response": no_rag_response,
-                    "sources": sources
+                    "sources": sources,
+                    "system_prompt": system_prompt
                 }
                 
                 self.logger.info(f"Cache hit for {query_hash}, hit count: {hit_count + 1}")
@@ -195,15 +226,31 @@ class ChatCacheService:
             # Convert sources to JSON string
             sources_json = json.dumps(sources) if sources else None
             
-            # Store response in cache
-            cursor.execute(
-                """
-                INSERT OR REPLACE INTO chat_cache 
-                (query_hash, user_input, rag_response, no_rag_response, sources, system_prompt, timestamp, hit_count) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-                """, 
-                (query_hash, user_input, rag_response, no_rag_response, sources_json, system_prompt, time.time())
-            )
+            # Check if we have the system_prompt column before trying to use it
+            cursor.execute("PRAGMA table_info(chat_cache)")
+            columns = [column[1] for column in cursor.fetchall()]
+            
+            if "system_prompt" in columns:
+                # Store response in cache with system_prompt
+                cursor.execute(
+                    """
+                    INSERT OR REPLACE INTO chat_cache 
+                    (query_hash, user_input, rag_response, no_rag_response, sources, system_prompt, timestamp, hit_count) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                    """, 
+                    (query_hash, user_input, rag_response, no_rag_response, sources_json, system_prompt, time.time())
+                )
+            else:
+                # Handle case where system_prompt column doesn't exist (fallback)
+                self.logger.warning("system_prompt column not found, attempting to insert without it")
+                cursor.execute(
+                    """
+                    INSERT OR REPLACE INTO chat_cache 
+                    (query_hash, user_input, rag_response, no_rag_response, sources, timestamp, hit_count) 
+                    VALUES (?, ?, ?, ?, ?, ?, 1)
+                    """, 
+                    (query_hash, user_input, rag_response, no_rag_response, sources_json, time.time())
+                )
             
             # Ensure cache size doesn't exceed limit
             if cache_config.CACHE_SIZE_LIMIT > 0:

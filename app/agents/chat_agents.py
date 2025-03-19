@@ -18,47 +18,46 @@ from datetime import datetime
 
 
 class PromptCaptureCallback(BaseCallbackHandler):
-    """Callback handler to capture complete prompts and responses."""
+    """Callback handler to capture complete prompts and responses with rotating log files."""
 
     def __init__(self):
-        # Create a logger specifically for prompt captures
-        self.logger = get_logger("prompt_capture", "DEBUG")
-
-        # Create a directory for prompt logs with absolute path
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        self.log_dir = os.path.join(base_dir, "prompt_logs")
+        # Get the project root directory for constructing paths
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        self.log_dir = os.path.join(project_root, "logs")
+        
+        # Make sure the logs directory exists
         try:
             os.makedirs(self.log_dir, exist_ok=True)
-            self.logger.debug(f"Created prompt logs directory at: {self.log_dir}")
         except Exception as e:
-            self.logger.debug(f"Error creating prompt logs directory: {e}")
+            print(f"Error creating logs directory: {e}")
             # Fallback to a location that should be writable
-            self.log_dir = "/tmp/prompt_logs"
+            self.log_dir = "/tmp/chatbot_logs"
             os.makedirs(self.log_dir, exist_ok=True)
-
-        # Create a timestamped log file name
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.log_file = os.path.join(self.log_dir, f"llm_prompts_responses_{timestamp}.jsonl")
-        self.logger.debug(f"Will log prompts to: {self.log_file}")
-
-        # Add file handler with more detailed error handling
-        try:
-            file_handler = logging.FileHandler(self.log_file)
-            formatter = logging.Formatter('%(asctime)s - %(message)s')
-            file_handler.setFormatter(formatter)
-            self.logger.addHandler(file_handler)
-
-            # Test write to the log file
-            with open(self.log_file, "a") as f:
-                f.write(json.dumps({"event": "init", "timestamp": datetime.now().isoformat()}) + "\n")
-
-            self.logger.debug(f"Successfully initialized prompt capture logging to {self.log_file}")
-        except Exception as e:
-            self.logger.debug(f"ERROR setting up log file: {e}")
+        
+        # Define specific log file for prompt captures with .jsonl extension
+        self.log_file = os.path.join(self.log_dir, "llm_prompts_responses.jsonl")
+        
+        # Create a logger specifically for prompt captures with a rotating file handler
+        self.logger = get_logger(
+            "prompt_capture", 
+            "DEBUG",
+            use_rotating_file=True,
+            log_file=self.log_file
+        )
+        
+        # Log initialization event
+        init_data = {
+            "event": "init", 
+            "timestamp": datetime.now().isoformat(),
+            "message": "PromptCaptureCallback initialized with rotating log files"
+        }
+        
+        # Log the initialization data
+        self.logger.info(json.dumps(init_data))
+        self.logger.debug(f"Successfully initialized prompt capture with rotating logs at {self.log_file}")
 
     def on_llm_start(self, serialized, prompts, **kwargs):
         """Log the complete prompt when an LLM call starts."""
-        self.logger.info(f"LLM start event triggered with {len(prompts)} prompts")
         try:
             # Extract and log the prompt
             prompt_data = {
@@ -68,24 +67,18 @@ class PromptCaptureCallback(BaseCallbackHandler):
                 "prompts": prompts
             }
 
-            self.logger.info(f"Processing LLM start with prompts of total length: {sum(len(p) for p in prompts)}")
-
-            # Write to the log file directly with explicit error reporting
+            # Log the data through the logger which will handle rotation
             try:
-                with open(self.log_file, "a") as f:
-                    json_data = json.dumps(prompt_data)
-                    f.write(json_data + "\n")
-                    print(f"Successfully wrote {len(json_data)} bytes to log file")
+                json_data = json.dumps(prompt_data)
+                self.logger.info(json_data)
             except Exception as e:
-                self.logger.error(f"ERROR writing to log file: {e}")
+                self.logger.error(f"ERROR serializing prompt data: {e}")
 
         except Exception as e:
-            print(f"ERROR in on_llm_start: {e}")
-            self.logger.error(f"Error logging prompt: {e}")
+            self.logger.error(f"Error in on_llm_start: {e}")
 
     def on_llm_end(self, response, **kwargs):
         """Log the complete response when an LLM call ends."""
-        self.logger.info(f"LLM END event triggered")
         try:
             # Extract and log the response
             response_data = {
@@ -94,20 +87,19 @@ class PromptCaptureCallback(BaseCallbackHandler):
                 "response": self._serialize_response(response)
             }
 
-            self.logger.debug(f"RESPONSE: {json.dumps(response_data)}")
-
-            # Also write to the JSONL file directly
-            with open(self.log_file, "a") as f:
-                f.write(json.dumps(response_data) + "\n")
+            # Log through the logger which will handle rotation
+            try:
+                json_data = json.dumps(response_data)
+                self.logger.info(json_data)
+            except Exception as e:
+                self.logger.error(f"ERROR serializing response data: {e}")
 
         except Exception as e:
-            self.logger.error(f"Error logging response: {e}")
+            self.logger.error(f"Error in on_llm_end: {e}")
 
     def on_chain_start(self, serialized, inputs, **kwargs):
         """Log when a chain starts."""
-
         try:
-            self.logger.info(f"ON CHAIN START event triggered with inputs: {inputs} and serialized: {serialized}")
             chain_data = {
                 "event": "chain_start",
                 "timestamp": datetime.now().isoformat(),
@@ -115,16 +107,19 @@ class PromptCaptureCallback(BaseCallbackHandler):
                 "inputs": self._clean_inputs(inputs)
             }
 
-            with open(self.log_file, "a") as f:
-                f.write(json.dumps(chain_data) + "\n")
+            # Log through the logger which will handle rotation
+            try:
+                json_data = json.dumps(chain_data)
+                self.logger.info(json_data)
+            except Exception as e:
+                self.logger.error(f"ERROR serializing chain data: {e}")
 
         except Exception as e:
-            self.logger.error(f"Error logging chain start: {e}")
+            self.logger.error(f"Error in on_chain_start: {e}")
 
     def on_tool_start(self, serialized, input_str, **kwargs):
         """Log when a tool is called."""
         try:
-            self.logger.info(f"ON TOOL START event triggered with inputs: {input_str} and serialized: {serialized}")
             tool_data = {
                 "event": "tool_start",
                 "timestamp": datetime.now().isoformat(),
@@ -132,27 +127,34 @@ class PromptCaptureCallback(BaseCallbackHandler):
                 "input": input_str
             }
 
-            with open(self.log_file, "a") as f:
-                f.write(json.dumps(tool_data) + "\n")
+            # Log through the logger which will handle rotation
+            try:
+                json_data = json.dumps(tool_data)
+                self.logger.info(json_data)
+            except Exception as e:
+                self.logger.error(f"ERROR serializing tool start data: {e}")
 
         except Exception as e:
-            self.logger.error(f"Error logging tool start: {e}")
+            self.logger.error(f"Error in on_tool_start: {e}")
 
     def on_tool_end(self, output, **kwargs):
         """Log when a tool returns."""
         try:
-            self.logger.info(f"ON TOOL END event triggered with inputs: {output}")
             tool_data = {
                 "event": "tool_end",
                 "timestamp": datetime.now().isoformat(),
                 "output": output
             }
 
-            with open(self.log_file, "a") as f:
-                f.write(json.dumps(tool_data) + "\n")
+            # Log through the logger which will handle rotation
+            try:
+                json_data = json.dumps(tool_data)
+                self.logger.info(json_data)
+            except Exception as e:
+                self.logger.error(f"ERROR serializing tool end data: {e}")
 
         except Exception as e:
-            self.logger.error(f"Error logging tool end: {e}")
+            self.logger.error(f"Error in on_tool_end: {e}")
 
     def _serialize_response(self, response):
         """Serialize LLM response to a JSON-friendly format."""
