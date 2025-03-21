@@ -40,7 +40,7 @@ This is a RAG-enabled chatbot system designed for marketing professionals and an
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/satyar73/ChatBotExample/
+   git clone https://github.com/satyar73/ChatBot/
    cd ChatBotExample
    ```
 
