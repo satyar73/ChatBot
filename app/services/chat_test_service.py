@@ -1,17 +1,18 @@
 from app.models.chat_test_models import (
-    ChatTestRequest, ChatTestResponse, ChatBatchTestRequest, ChatBatchTestResponse,
-    ChatMarketingTestState, RouterOutput, ChatLLMTestOutput, ChatAdvancedTestOutput
+    ChatTestRequest,
+    ChatTestResponse,
+    ChatBatchTestResponse,
+    ChatLLMTestOutput
 )
 from app.config.chat_test_config import ChatTestConfig
 from app.utils.msquared_client import MSquaredClient
 from app.utils.similarity_engines import SimilarityEngines
 from app.utils.llm_client import LLMClientManager  # Import the LLMClientManager
 from app.utils.logging_utils import get_logger
-import json
 import logging
 import os
 import pandas as pd
-from typing import Dict, List, Optional, Annotated, TypedDict, Tuple, Literal, Any
+from typing import Dict, List, Optional, TypedDict, Tuple, Literal
 from datetime import datetime
 from uuid import uuid4
 
@@ -176,7 +177,7 @@ class ChatTestService:
             if passed:
                 logger.debug(f"Non-RAG response PASSED with score: {results['weighted_similarity']:.4f}")
                 reasoning = f"\n\nNon-RAG response: Quick test PASSED with similarity score of {results['weighted_similarity']:.4f}"
-                next_step = self.config.ENHANCE_EVALUATION  # Move to comparison step
+                next_step = self.config.ENHANCED_EVALUATION  # Move to comparison step
             else:
                 logger.debug(f"Non-RAG response FAILED with score: {results['weighted_similarity']:.4f}")
                 reasoning = f"\n\nNon-RAG response: Quick test FAILED with similarity score of {results['weighted_similarity']:.4f}"
@@ -342,7 +343,7 @@ class ChatTestService:
                 "no_rag_llm_results": {**results, "normalized_score": normalized_score},
                 "no_rag_passed": final_passed,
                 "reasoning": state.get("reasoning", "") + reasoning if state.get("reasoning") else reasoning,
-                self.config.NEXT: self.config.ENHANCE_EVALUATION  # Move to comparison step
+                self.config.NEXT: self.config.ENHANCED_EVALUATION  # Move to comparison step
             }
         except Exception as e:
             error_msg = f"\n\nError in non-RAG LLM evaluation: {str(e)}"
@@ -364,13 +365,9 @@ class ChatTestService:
         """
         Enhanced evaluation function that goes beyond simple similarity to assess response quality.
         """
-        evaluation = {}
-
         # 1. Concept coverage - are all key concepts present?
-        evaluation["concept_coverage"] = concept_coverage
-
         # 2. Semantic similarity - already calculated
-        evaluation["semantic_similarity"] = similarity_score
+        evaluation = {"concept_coverage": concept_coverage, "semantic_similarity": similarity_score}
 
         # 3. Factual accuracy - check if missing numerical values
         numbers_missing = test_details.get("numbers_missing", [])
@@ -724,6 +721,8 @@ class ChatTestService:
         "evaluate_rag", "evaluate_no_rag", "evaluate_llm_rag",
         "evaluate_llm_no_rag", "enhance_evaluation", "compare", "END"]:
         """Router function to determine next step based on state"""
+
+        # noinspection PyTypedDict
         next_step = state.get(self.config.NEXT, self.config.END)
         logger.debug(f"Router determining next step: {next_step}")
         return next_step
@@ -903,7 +902,8 @@ class ChatTestService:
                 detailed_analysis={"error": str(e)}
             )
 
-    async def run_batch_test(self, csv_file: str, similarity_threshold: float = 0.7) -> ChatBatchTestResponse:
+    # noinspection PyTypeChecker
+    async def run_batch_test(self, csv_file: str, similarity_threshold: float = 0.7):
         """Run tests from a CSV file"""
         # Load CSV
         df = pd.read_csv(csv_file)

@@ -38,14 +38,12 @@ class IndexService:
                     "message": result.get("message", "Indexing completed successfully"),
                     # Add any other important keys from result that are serializable
                 }
-            else:
-                # If result isn't a dict, create a serializable response
-                return {
+
+            # Create a serializable response by default
+            return {
                     "status": "success",
                     "message": "Indexing completed successfully"
-                }
-
-            return result
+            }
 
         except Exception as e:
             return {"status": "error", "message": str(e)}

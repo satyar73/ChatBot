@@ -2,8 +2,7 @@
 Client for communicating with the MSquared API.
 """
 import aiohttp
-from typing import Tuple, Dict, Any, Optional
-import json
+from typing import Tuple
 
 class MSquaredClient:
     """Client for interacting with the MSquared API."""
@@ -77,7 +76,8 @@ class MSquaredClient:
         try:
             async with session.delete(f"{self.api_url}/chat/{session_id}") as response:
                 return response.status == 204
-        except Exception:
+        except Exception as e:
+            print(f"Error deleting chat: {str(e)}")
             return False
 
     async def cleanup(self):

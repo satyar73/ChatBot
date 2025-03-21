@@ -1,17 +1,17 @@
 """
 Service layer for handling agent queries and responses with enhanced RAG query rewriting.
 """
-from typing import Dict, List, Optional, Any, Tuple
-import logging
-import os
+from typing import Dict, List, Any, Tuple
 import sys
 import time
-import json
 import re
+
 from app.agents.chat_agents import agent_manager
 from app.models.chat_models import ChatHistory, ResponseContent, ResponseMessage, Source, Message
-from app.utils.logging_utils import get_logger, diagnose_logger, ensure_debug_logging
+from app.utils.logging_utils import get_logger
+from app.utils.other_utlis import load_json
 from app.services.cache_service import chat_cache
+from app.config.chat_config import ChatConfig
 
 
 # Add this new class for query rewriting
@@ -90,7 +90,8 @@ class QueryRewriter:
 
         return query
 
-    def create_broader_query(self, query: str) -> str:
+    @staticmethod
+    def create_broader_query(query: str) -> str:
         """Create a more general version of the query by removing specific constraints."""
         # Remove specific qualifiers to make query more general
         broader_query = re.sub(r'\b(specific|exactly|precise|only|detailed)\b', '', query, flags=re.IGNORECASE)
@@ -118,7 +119,7 @@ class QueryRewriter:
         if core_terms:
             core_query = " ".join(core_terms)
             # Return both the broader query and a core concept query
-            return broader_query.strip(), core_query
+            return f"{broader_query.strip()} {core_query}"
 
         return broader_query.strip()
 
@@ -184,10 +185,41 @@ class ChatService:
         self.chat_histories = {}
         self.logger = get_logger(f"{__name__}.ChatService", "DEBUG")
         self.logger.debug("ChatService initialized")
-        # Initialize the query rewriter
-        self.query_rewriter = QueryRewriter()
         # Explicit print to check if output is working at all
         print("ChatService initialized", file=sys.stderr)
+
+        self.config = ChatConfig()
+
+        # Initialize the query rewriter
+        self.query_rewriter = QueryRewriter()
+
+        #Initialize the qa data
+        self.qa_data = {}
+        if hasattr(self.config, 'QA_SOURCE_FILE_JSON') and self.config.QA_SOURCE_FILE_JSON:
+            json_file = self.config.QA_SOURCE_FILE_JSON
+            self.qa_data = load_json(json_file)
+
+    def _get_answer(self, question):
+        """
+        Get the expected answer for a question if it exists in the cache.
+
+        Args:
+            question (str): The question to look up
+
+        Returns:
+            str or None: The expected answer if found, None otherwise
+        """
+        # Look for exact match
+        if question in self.qa_data:
+            return self.qa_data[question]
+
+        # Case-insensitive match
+        for q, a in self.qa_data.items():
+            if q.lower() == question.lower():
+                return a
+
+        # No match found
+        return None
 
     def _is_database_query(self, query: str) -> bool:
         """
@@ -203,7 +235,7 @@ class ChatService:
         exclusion_patterns = [
             r'\bincrementality test',  # Incrementality tests should go to RAG
             r'\bprospecting\b',  # Prospecting questions should go to RAG
-            r'\bmarketing strateg',  # Marketing strategy questions to RAG
+            r'\bmarketing strategy',  # Marketing strategy questions to RAG
             r'\bmarketing mix\b',  # Marketing mix model questions to RAG
             r'\bmmm\b',  # MMM questions to RAG
             r'\bmodel\b',  # Model-related questions to RAG
@@ -331,7 +363,8 @@ class ChatService:
         return has_no_info or term_not_found
 
     async def _execute_rag_with_retry(self, query: str, history: List, max_attempts: int = 3,
-                                      custom_system_prompt: str = None) -> Tuple[Dict, List[str]]:
+                                      custom_system_prompt: str = None,
+                                      rag_agent = None) -> Tuple[Dict, List[str]]:
         """
         Execute RAG with multiple query formulations and retry logic.
 
@@ -340,7 +373,7 @@ class ChatService:
             history: Chat history
             max_attempts: Maximum number of query attempts
             custom_system_prompt: Optional custom system prompt
-
+            rag_agent: Optional RAG agent object to use for execution (if provided, custom_system_prompt is ignored)
         Returns:
             Tuple of (best_response, queries_tried)
         """
@@ -354,8 +387,15 @@ class ChatService:
         all_responses = []
         queries_tried = []
 
-        # Get the appropriate RAG agent (with custom system prompt if provided)
-        rag_agent = agent_manager.get_rag_agent(custom_system_prompt)
+        # Get the appropriate RAG agent
+        if rag_agent is None:
+            # Use the system prompt to get a RAG agent if no agent provided
+            rag_agent = agent_manager.get_rag_agent(custom_system_prompt)
+            self.logger.debug(
+                f"QUERY REWRITING: Using RAG agent with custom system prompt: {custom_system_prompt is not None}")
+        else:
+            # Use the provided agent (which may have expected answer)
+            self.logger.debug(f"QUERY REWRITING: Using pre-configured RAG agent")
 
         # XXX this is a hack. Ideally I should be able to have the LLM detect this
         # Special handling for technical terms
@@ -423,13 +463,28 @@ class ChatService:
         # If we get here, none of the queries produced good results
         # Find the best response among all attempts
         best_response = original_response
-        best_query = original_query
 
         # Optional: Implement a scoring mechanism to pick the best response
         # For now, just returning the original response as a fallback
         self.logger.debug(f"QUERY REWRITING: No alternative queries produced better results, returning original")
 
         return best_response, queries_tried
+
+    async def _invoke_agent_with_fallback(self,
+                                          actual_query: str,
+                                          agent_name: str,
+                                          chat_history: ChatHistory) -> Tuple[Dict, List[str]]:
+        # Call the database agent
+        self.logger.debug(f"==== AGENT ROUTING: Selected {agent_name} AGENT ====")
+        self.logger.debug(f"AGENT ROUTING: Calling {agent_name} agent with query: {actual_query[:100]}...")
+        agent = agent_manager.get_agent(agent_name)
+        response = await agent.ainvoke(
+            {"input": actual_query, "history": chat_history.get_messages()},
+            include_run_info=True
+        )
+        self.logger.debug(f"AGENT ROUTING: {agent_name} response received, length: {len(str(response))}")
+
+        return response, [actual_query]
 
     async def chat(self, data: Message) -> ResponseMessage:
         """
@@ -481,21 +536,20 @@ class ChatService:
         is_database_query = self._is_database_query(test_query if force_refresh else user_input)
         self.logger.debug(f"Query identified as database query: {is_database_query}")
 
+        cached_response, cached_rag_response, cached_no_rag_response = (None, None, None)
         # For database queries or force refresh, skip cache
         if is_database_query or force_refresh:
             if is_database_query:
                 self.logger.info(f"Database query detected, bypassing cache: {user_input}")
-            cache_hit = False
-            cached_rag_response, cached_no_rag_response = (None, None)
         else:
             # Check cache for existing response
-            cached_rag_response, cached_no_rag_response = (None, None)
             cached_response, cache_hit = chat_cache.get_cached_response(query_hash)
             if cache_hit and ((mode != "no_rag" and cached_response["rag_response"] is None)
                               or (mode != "rag" and cached_response["no_rag_response"] is None)):
                 # Previous request was for a different mode
                 cached_rag_response, cached_no_rag_response = (
                     cached_response["rag_response"], cached_response["no_rag_response"])
+                # Reset cache_hit to False
                 cache_hit = False
 
         # If we're in test mode, use the extracted test query
@@ -553,23 +607,16 @@ class ChatService:
         self.logger.debug(f"AGENT ROUTING DECISION: Query classified as database query: {is_database_query}")
 
         if is_database_query:
-            self.logger.debug(f"==== AGENT ROUTING: Selected DATABASE AGENT ====")
-            self.logger.debug(f"AGENT ROUTING: Calling database agent with query: {actual_query[:100]}...")
-            rag_response = await agent_manager.database_agent.ainvoke(
-                {"input": actual_query, "history": chat_history.get_messages()},
-                include_run_info=True
-            )
-            self.logger.debug(f"AGENT ROUTING: Database response received, length: {len(str(rag_response))}")
+            rag_response, queries_tried_db = await self._invoke_agent_with_fallback(
+                                                                actual_query,
+                                                    "database",
+                                                                chat_history)
+            no_rag_response, queries_tried_std = await self._invoke_agent_with_fallback(
+                                                                actual_query,
+                                                    "standard",
+                                                                chat_history)
 
-            # Always generate a no_rag response for completeness
-            self.logger.debug(f"==== AGENT ROUTING: Also generating STANDARD response for database query ====")
-            no_rag_response = await agent_manager.standard_agent.ainvoke(
-                {"input": actual_query, "history": chat_history.get_messages()},
-                include_run_info=True
-            )
-            self.logger.debug(
-                f"AGENT ROUTING: Standard response received for database query, length: {len(str(no_rag_response))}")
-            queries_tried = [actual_query]  # Only the original query was used
+            queries_tried = queries_tried_db + queries_tried_std
         else:
             # Generate response using agent executor with RAG - now with query rewriting
             if mode != "no_rag":
@@ -577,12 +624,29 @@ class ChatService:
                 self.logger.debug(
                     f"AGENT ROUTING: Calling RAG agent with potential query rewrites: {actual_query[:100]}...")
 
-                # Use the new method that tries multiple query formulations with optional custom system prompt
-                rag_response, queries_tried = await self._execute_rag_with_retry(
-                    actual_query,
-                    chat_history.get_messages(),
-                    custom_system_prompt=custom_system_prompt
-                )
+                # Get expected answer for this query (if it exists)
+                expected_answer = self._get_answer(user_input)
+                if expected_answer:
+                    self.logger.info(f"Found expected answer for query: '{user_input[:50]}...'")
+
+                    # Get RAG agent with both custom system prompt and expected answer
+                    rag_agent = agent_manager.get_rag_agent(
+                        custom_system_prompt=custom_system_prompt,
+                        expected_answer=expected_answer
+                    )
+
+                    # Use the new method that tries multiple query formulations
+                    rag_response, queries_tried = await self._execute_rag_with_retry(
+                        actual_query,
+                        chat_history.get_messages(),
+                        rag_agent=rag_agent  # Pass the custom agent with expected answer
+                    )
+                else :
+                    rag_response, queries_tried = await self._execute_rag_with_retry(
+                        actual_query,
+                        chat_history.get_messages(),
+                        custom_system_prompt=custom_system_prompt
+                    )
 
                 self.logger.debug(
                     f"AGENT ROUTING: RAG response received after trying {len(queries_tried)} queries, response length: {len(str(rag_response))}")
@@ -595,14 +659,11 @@ class ChatService:
 
             # Generate response using agent executor without RAG
             if mode != "rag" and not is_database_query:
-                self.logger.debug(f"==== AGENT ROUTING: Also selected STANDARD AGENT ====")
-                self.logger.debug(f"AGENT ROUTING: Calling standard agent with query: {actual_query[:100]}...")
-                no_rag_response = await agent_manager.standard_agent.ainvoke(
-                    {"input": actual_query, "history": chat_history.get_messages()},
-                    include_run_info=True
-                )
-                self.logger.debug(f"AGENT ROUTING: Standard response received, length: {len(str(no_rag_response))}")
-                self.logger.debug(f"AGENT ROUTING: Standard output: {no_rag_response['output'][:200]}...")
+                no_rag_response, queries_tried_std = await self._invoke_agent_with_fallback(
+                                                                    actual_query,
+                                                        "standard",
+                                                                    chat_history
+                                                                )
             else:
                 self.logger.debug(f"AGENT ROUTING: Using cached non-RAG response")
                 no_rag_response = cached_no_rag_response
@@ -686,7 +747,7 @@ class ChatService:
             return True
         return False
 
-    def get_chat(self, session_id: str) -> Dict:
+    def get_chat(self, session_id: str) -> dict[Any, Any] | None:
         """
         Get chat history for a session.
 

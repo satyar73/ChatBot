@@ -2,7 +2,7 @@
 import logging  # Make sure this import is at the top of the file
 import os
 import sys
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 import logging.config  # Also import logging.config at the top
 
 def configure_logging(log_level: Optional[str] = None) -> None:
@@ -235,7 +235,13 @@ def get_logger(name: str, log_level: str = None, use_rotating_file: bool = True,
                 backupCount=5,
                 encoding='utf-8'
             )
-            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s - [%(filename)s:%(lineno)d]')
+            
+            # Use a special formatter for the prompt_capture logger that only includes the message
+            if name == "prompt_capture":
+                formatter = logging.Formatter('%(message)s')
+            else:
+                formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s - [%(filename)s:%(lineno)d]')
+                
             handler.setFormatter(formatter)
             logger.addHandler(handler)
             print(f"Added rotating file handler to {name} logger, logging to {log_file}")

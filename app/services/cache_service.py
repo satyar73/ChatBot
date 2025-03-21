@@ -5,10 +5,7 @@ import json
 import time
 import hashlib
 import sqlite3
-import logging
-from typing import Dict, List, Tuple, Optional, Any
-from datetime import datetime
-import os
+from typing import Dict, List, Tuple, Optional
 
 from app.config import cache_config
 from app.utils.logging_utils import get_logger
@@ -80,14 +77,15 @@ class ChatCacheService:
             # Add system_prompt column if it doesn't exist
             if "system_prompt" not in columns:
                 self.logger.info("Adding system_prompt column to chat_cache table")
-                cursor.execute("ALTER TABLE chat_cache ADD COLUMN system_prompt TEXT")
+                cursor.execute("ALTER TABLE IF EXISTS chat_cache ADD COLUMN system_prompt TEXT")
                 conn.commit()
                 
         except Exception as e:
             self.logger.error(f"Error during database migration: {e}")
             # Continue execution - don't let migration failure break the application
     
-    def generate_query_hash(self, query: str, history: List = None, session_id: str = None, system_prompt: str = None) -> str:
+    @staticmethod
+    def generate_query_hash(query: str, history: List = None, session_id: str = None, system_prompt: str = None) -> str:
         """
         Generate a hash to uniquely identify a query with its context.
         
@@ -254,16 +252,19 @@ class ChatCacheService:
             
             # Ensure cache size doesn't exceed limit
             if cache_config.CACHE_SIZE_LIMIT > 0:
+                # Calculate the number of rows to limit in Python before executing the query
+                total_rows = cursor.execute("SELECT COUNT(*) FROM chat_cache").fetchone()[0]
+                rows_to_keep = max(0, total_rows - 10)
+
                 cursor.execute(
                     """
-                    DELETE FROM chat_cache 
+                    DELETE FROM chat_cache
                     WHERE query_hash IN (
-                        SELECT query_hash FROM chat_cache 
-                        ORDER BY timestamp ASC 
-                        LIMIT max(0, (SELECT COUNT(*) FROM chat_cache) - ?)
-                    )
-                    """, 
-                    (cache_config.CACHE_SIZE_LIMIT,)
+                        select query_hash from chat_cache
+                            LIMIT  ?
+                        )                        
+                    """,
+                    (rows_to_keep,)
                 )
             
             conn.commit()
@@ -445,8 +446,10 @@ class ChatCacheService:
                 else:
                     entries_to_delete = 0
                 
-                # Perform the deletion
+                # Delete all rows from the table
+                # noinspection SqlWithoutWhere
                 cursor.execute("DELETE FROM chat_cache")
+                conn.execute("VACUUM")  # Reclaim free space
             
             conn.commit()
             conn.close()

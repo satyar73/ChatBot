@@ -3,8 +3,7 @@ import sys
 import os
 import pandas as pd
 from datetime import datetime
-from typing import Dict, List, Optional
-from pydantic import BaseModel
+from typing import Dict
 from uuid import uuid4
 
 # Import the TestService and models
@@ -54,6 +53,7 @@ class ChatTesterCLI:
         """
         Run a single test using the TestService with robust error handling
         """
+        rag_test = {}
         try:
             # Create test request
             request = ChatTestRequest(
@@ -196,6 +196,7 @@ class ChatTesterCLI:
         avg_rag_similarity = results_df["RAG Similarity"].mean()
         avg_no_rag_similarity = results_df["Non-RAG Similarity"].mean()
 
+        high_value, medium_value, low_value, value_counts, negative_value = (0, 0, 0, None, 0)
         # Count by RAG value rating
         if "RAG Value Rating" in results_df.columns:
             value_counts = results_df["RAG Value Rating"].value_counts()
@@ -285,8 +286,8 @@ async def main():
         print("Example: python chat_evaluator.py http://localhost:8005 test_cases.csv 0.7")
         sys.exit(1)
 
-    API_URL = sys.argv[1]
-    CSV_PATH = sys.argv[2]
+    api_url = sys.argv[1]
+    csv_path = sys.argv[2]
 
     # Optional similarity threshold
     similarity_threshold = 0.7  # Default
@@ -302,11 +303,11 @@ async def main():
         use_batch_mode = True
 
     # Get the full path assuming the file is in the current working directory
-    full_path = os.path.join(os.getcwd(), CSV_PATH)
+    full_path = os.path.join(os.getcwd(), csv_path)
 
     # Validate the file exists in the current working directory
     if not os.path.exists(full_path):
-        print(f"Error: CSV file '{CSV_PATH}' not found in the current working directory: {os.getcwd()}")
+        print(f"Error: CSV file '{csv_path}' not found in the current working directory: {os.getcwd()}")
         sys.exit(1)
 
     print(f"Full path to the CSV file: {full_path}")
@@ -314,7 +315,7 @@ async def main():
     print(f"Mode: {'Batch' if use_batch_mode else 'Sequential'}")
 
     # Create the tester
-    tester = ChatTesterCLI(API_URL, CSV_PATH, similarity_threshold)
+    tester = ChatTesterCLI(api_url, csv_path, similarity_threshold)
 
     try:
         if use_batch_mode:

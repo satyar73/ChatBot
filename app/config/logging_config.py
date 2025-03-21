@@ -3,6 +3,8 @@
 from enum import Enum
 from typing import Dict
 
+# Defining my log levels as I want to customize these in the future.
+# Also, this helps in building the custom logging utility
 class LogLevel(str, Enum):
     DEBUG = "DEBUG"
     INFO = "INFO"

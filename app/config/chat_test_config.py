@@ -1,7 +1,8 @@
-import os
 from dotenv import load_dotenv
 
 class ChatTestConfig:
+
+
     # Default API URL
     def __init__(self):
         # Load environment variables
@@ -25,7 +26,11 @@ class ChatTestConfig:
         self.EVALUATE_NO_RAG = "evaluate_no_rag"
         self.EVALUATE_LLM_RAG = "evaluate_llm_rag"
         self.EVALUATE_LLM_NO_RAG = "evaluate_llm_no_rag"
+        self.ENHANCED_EVALUATION = "enhance_evaluation"
         self.COMPARE = "compare"
+
+        self.RAG_RESPONSE = "RAG"
+        self.NO_RAG_RESPONSE = "NO RAG"
 
         # File timestamp format
         self.FILE_TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S"
@@ -107,19 +112,26 @@ class ChatTestConfig:
             6. overall_assessment: Overall assessment of the value added by RAG for this query
             """
 
-        def update_setting(self, setting_name, value):
-            """Update a setting value if it exists"""
-            if hasattr(self, setting_name):
-                setattr(self, setting_name, value)
-                return True
-            return False
 
-        def get_all_settings(self):
-            """Get all settings as a dictionary (excluding private attributes)"""
-            return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
+    def update_setting(self, setting_name, value) -> bool:
+        """Update a setting value if it exists
+        @param setting_name:
+        @param value:
+        @return:
+        """
+        if hasattr(self, setting_name):
+            setattr(self, setting_name, value)
+            return True
 
-        def validate_settings(self):
-            """Validate that essential settings are present"""
-            missing_settings = []
+        return False
 
-            return missing_settings
+    def get_all_settings(self):
+        """Get all settings as a dictionary (excluding private attributes)"""
+        return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
+
+    def validate_settings(self):
+        """Validate that essential settings are present"""
+
+        missing_settings = []
+
+        return missing_settings

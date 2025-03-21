@@ -6,11 +6,9 @@ from typing import Callable, Dict, List, Union, Optional
 from pathlib import Path
 import logging
 import io
-import mimetypes
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 from google.oauth2 import service_account
-import markdown
 import docx
 import PyPDF2
 import pptx
@@ -143,7 +141,7 @@ class GoogleDriveIndexer:
                 # It's a supported file
                 all_files.append(item)
             elif item['mimeType'] == 'application/vnd.google-apps.folder' and recursive and folder_id is not None:
-                # It's a folder and we want to process recursively
+                # It's a folder, and we want to process recursively
                 # Only process subfolders if we're starting from a specific folder
                 folder_files = self.get_supported_files(item['id'], recursive=True)
                 all_files.extend(folder_files)

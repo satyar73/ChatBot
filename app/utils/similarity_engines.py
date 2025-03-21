@@ -1,15 +1,12 @@
 from difflib import SequenceMatcher
 import re
-from typing import Dict, List, Set, Tuple
-import math
-from collections import Counter
-import numpy as np
+from typing import Dict, List
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import nltk
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
-from nltk.stem import PorterStemmer, WordNetLemmatizer
+from nltk.stem import WordNetLemmatizer
 
 
 # Download necessary NLTK resources (uncomment these when first running)
@@ -142,7 +139,8 @@ class SimilarityEngines:
                 noun_phrases.append(' '.join(current_np))
 
             concepts.extend(noun_phrases)
-        except:
+        except Exception as e:
+            print(f"Error extracting key concepts: {e}")
             # If NLTK processing fails, continue without it
             pass
 
@@ -263,13 +261,13 @@ class SimilarityEngines:
     def ngram_similarity(text1: str, text2: str, n: int = 2) -> float:
         """Calculate n-gram overlap similarity"""
 
-        def get_ngrams(text, n):
+        def get_ngrams(text):
             tokens = text.lower().split()
             ngrams = [tuple(tokens[i:i + n]) for i in range(len(tokens) - n + 1)]
             return set(ngrams)
 
-        ngrams1 = get_ngrams(text1, n)
-        ngrams2 = get_ngrams(text2, n)
+        ngrams1 = get_ngrams(text1)
+        ngrams2 = get_ngrams(text2)
 
         if not ngrams1 and not ngrams2:
             return 1.0
@@ -297,7 +295,7 @@ class SimilarityEngines:
             return similarity
         except ImportError:
             # If TextBlob is not available, return None
-            return None
+            return -1.0
 
     @staticmethod
     def comprehensive_test(actual: str, expected: str) -> Dict:
@@ -313,7 +311,8 @@ class SimilarityEngines:
         try:
             results["cosine_tfidf"] = SimilarityEngines.cosine_similarity_tfidf(actual, expected)
             results["cosine_count"] = SimilarityEngines.cosine_similarity_count(actual, expected)
-        except:
+        except Exception as e:
+            print(f"sklearn error: {e}")
             # If sklearn is not available
             pass
 

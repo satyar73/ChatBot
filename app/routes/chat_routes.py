@@ -19,7 +19,6 @@ from app.models.chat_models import Message, ResponseMessage
 from app.models.chat_test_models import (
     ChatTestRequest,
     ChatTestResponse,
-    ChatBatchTestRequest,
     ChatBatchTestResponse,
 )
 from app.services.chat_service import ChatService
@@ -49,7 +48,7 @@ async def chat(data: Message, chat_service: ChatService = Depends(get_chat_servi
     Process chat message and return responses based on the specified mode.
 
     Args:
-        data: Message object containing user input, session ID, and mode
+        data: Message object containing user input, session ID, and Mode.
               Mode can be "rag", "no_rag", or "compare"
         chat_service: ChatService instance from dependency
 
@@ -190,7 +189,7 @@ async def clear_cache(older_than_days: Optional[int] = None):
     """
     from app.config.cache_config import DEFAULT_CACHE_CLEANUP_DAYS
     
-    # If older_than_days is not provided but we have a default, use it
+    # If older_than_days is not provided, but we have a default, use it
     if older_than_days is None and DEFAULT_CACHE_CLEANUP_DAYS > 0:
         # Log that we're using the default
         chat_cache.logger.info(f"Using default cache cleanup age: {DEFAULT_CACHE_CLEANUP_DAYS} days")

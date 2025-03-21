@@ -6,7 +6,6 @@ from typing import List, Optional, Dict, Any
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain.schema import AIMessage, HumanMessage
 
-
 class ChatHistory(BaseChatMessageHistory):
     """Stores chat history in memory."""
 
@@ -26,7 +25,6 @@ class ChatHistory(BaseChatMessageHistory):
         """Clears the chat history."""
         self.messages = []
 
-
 class Message(BaseModel):
     """Model for user message with session identification."""
     message: str
@@ -37,7 +35,7 @@ class Message(BaseModel):
 class ResponseContent(BaseModel):
     """Model for the content of a response."""
     input: str
-    history: List = []
+    history: List[Any] = Field(default_factory=lambda: [])
     output: str
     no_rag_output: Optional[str] = None  # Added field for non-RAG response
     intermediate_steps: List = []

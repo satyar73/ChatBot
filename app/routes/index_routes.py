@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 from typing import Optional
 from app.services.index_service import IndexService

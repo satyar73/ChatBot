@@ -1,10 +1,8 @@
 """
 Centralized LLM client management using Portkey with caching.
 """
-from typing import Dict, Any, Optional, Union, List, Type
+from typing import Dict, Any, Optional, List
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_core.messages import BaseMessage, SystemMessage
-from pydantic import BaseModel
 import os
 import hashlib
 import json
@@ -153,6 +151,7 @@ class LLMClientManager:
             except Exception as e:
                 logger.error(f"Error creating LLM with Portkey: {str(e)}")
                 # Fallback to standard client
+                # noinspection PyArgumentList
                 llm = ChatOpenAI(
                     model=model,
                     temperature=temperature,
@@ -161,6 +160,7 @@ class LLMClientManager:
                 logger.info(f"Fallback - Created standard LLM instance: {model}")
         else:
             # Use standard OpenAI client
+            # noinspection PyArgumentList
             llm = ChatOpenAI(
                 model=model,
                 temperature=temperature,
@@ -270,6 +270,7 @@ class LLMClientManager:
             ChatOpenAI instance with structured output capability
         """
         llm = cls.get_chat_llm(enable_cache=enable_cache, **llm_kwargs)
+        # noinspection PyTypeChecker
         return llm.with_structured_output(output_type)
 
     @classmethod
@@ -314,6 +315,7 @@ class LLMClientManager:
         messages = [{"role": "user", "content": prompt}]
 
         # Check local cache if enabled
+        cache_key = None
         if use_cache:
             cache_key = cls._generate_cache_key(messages, model, temperature)
             cached_response = cls._response_cache.get(cache_key)
