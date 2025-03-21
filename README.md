@@ -1,4 +1,4 @@
-# ChatBot Example - RAG-Enabled Marketing Assistant
+# ChatBot - RAG-Enabled Marketing Assistant
 
 ## Overview
 
@@ -40,8 +40,8 @@ This is a RAG-enabled chatbot system designed for marketing professionals and an
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/satyar73/ChatBotExample/
-   cd ChatBotExample
+   git clone https://github.com/satyar73/ChatBot/
+   cd ChatBot
    ```
 
 2. Create and activate a virtual environment:
