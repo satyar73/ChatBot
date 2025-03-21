@@ -1,4 +1,4 @@
-# ChatBot Example - RAG-Enabled Marketing Assistant
+# ChatBot - RAG-Enabled Marketing Assistant
 
 ## Overview
 
