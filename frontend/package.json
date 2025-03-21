@@ -47,6 +47,7 @@
     ]
   },
   "proxy": "http://localhost:8005",
+  "homepage": ".",
   "devDependencies": {
     "@chromatic-com/storybook": "^3.2.5",
     "@storybook/addon-essentials": "^8.6.4",

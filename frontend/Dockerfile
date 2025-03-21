@@ -15,6 +15,9 @@ COPY . .
 # This is empty because Nginx will handle the proxying
 ENV REACT_APP_API_URL=""
 
+# Add PUBLIC_URL to make sure assets are loaded correctly
+ENV PUBLIC_URL="."
+
 # Build the app for production
 RUN npm run build
 
