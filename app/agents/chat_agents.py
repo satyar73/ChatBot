@@ -463,20 +463,20 @@ class AgentManager:
             # Add the expected answer with instructions to avoid direct copying
             enhanced_prompt = f"""{base_prompt}
 
-            IMPORTANT - RESPONSE GUIDANCE:
-            I'm providing you with key concepts about this topic. Your task is to:
+IMPORTANT - RESPONSE GUIDANCE:
+I'm providing you with key concepts about this topic. Your task is to:
 
-            1. STRICTLY AVOID any phrasing that matches the reference material
-            2. Use only the concepts and facts to inform your response
-            3. Write a COMPLETELY ORIGINAL answer in your own words and structure
-            4. Include source links from the retrieved context, not these concepts
-            5. If these concepts contradict retrieved information, prioritize information from retrieval
+1. STRICTLY AVOID any phrasing that matches the reference material
+2. Use only the concepts and facts to inform your response
+3. Write a COMPLETELY ORIGINAL answer in your own words and structure
+4. Include source links from the retrieved context, not these concepts
+5. If these concepts contradict retrieved information, prioritize information from retrieval
 
-            KEY CONCEPTS FROM REFERENCE:
-            {key_points}
+KEY CONCEPTS FROM REFERENCE:
+{key_points}
 
-            CRITICAL INSTRUCTION: Your response must NOT contain any exact phrases from the reference concepts. Rephrase everything completely while preserving the meaning.
-            """
+CRITICAL INSTRUCTION: Your response must NOT contain any exact phrases from the reference concepts. Rephrase everything completely while preserving the meaning.
+"""
 
             custom_system_prompt = enhanced_prompt
             self.logger.info("Enhanced system prompt with expected answer")

@@ -1,12 +1,27 @@
 import json
 
 # Load feature flags from a configuration file
-def load_feature_flags():
+def load_feature_flags(flag_type="chat"):
     try:
-        with open('feature_flags.json', 'r') as file:
-            return json.load(file)
-    except (FileNotFoundError, json.JSONDecodeError):
-        # return nothing
+        if flag_type == "chat":
+            file_path = 'chatfeatureflags.json'
+        elif flag_type == "indexer":
+            file_path = 'indexerfeatureflags.json'
+        else:
+            return {}
+        
+        print(f"Loading feature flags from {file_path}")    
+        with open(file_path, 'r') as file:
+            content = file.read()
+            print(f"Feature flags file content: {content}")
+            flags = json.loads(content)
+            print(f"Parsed feature flags: {flags}")
+            return flags
+    except FileNotFoundError as e:
+        print(f"Feature flags file not found: {e}")
+        return {}
+    except json.JSONDecodeError as e:
+        print(f"JSON decode error in feature flags: {e}")
         return {}
 
 def load_json(json_file):

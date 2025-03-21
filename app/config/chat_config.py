@@ -8,6 +8,9 @@ class ChatConfig:
     def __init__(self):
         # Load environment variables
         load_dotenv()
+        
+        # Load feature flags
+        self.CHAT_FEATURE_FLAGS = load_feature_flags("chat")
 
         self.OUTPUT_DIR = "data"
 

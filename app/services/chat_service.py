@@ -12,6 +12,7 @@ from app.utils.logging_utils import get_logger
 from app.utils.other_utlis import load_json
 from app.services.cache_service import chat_cache
 from app.config.chat_config import ChatConfig
+from app.utils.semantic_filtering import SemanticFilter
 
 
 # Add this new class for query rewriting
@@ -21,6 +22,10 @@ class QueryRewriter:
     def __init__(self):
         self.logger = get_logger(f"{__name__}.QueryRewriter", "DEBUG")
         self.logger.debug("QueryRewriter initialized")
+        
+        # Get config to access feature flags
+        self.config = ChatConfig()
+        self.logger.debug(f"Semantic similarity filtering enabled: {self.config.CHAT_FEATURE_FLAGS.get('semantic_similarity_filtering', False)}")
 
         # Common marketing and attribution terminology mapping for expansions
         self.term_expansions = {
@@ -170,11 +175,31 @@ class QueryRewriter:
             alt_queries.append(broader_result)
             self.logger.debug(f"Added broader query: {broader_result}")
 
-        # Make sure we don't have duplicates
+        # Make sure we don't have duplicates (text matching)
         unique_queries = list(dict.fromkeys(alt_queries))
-
-        self.logger.debug(f"Generated {len(unique_queries)} alternative queries")
-        return unique_queries
+        
+        # Use semantic similarity filtering if enabled
+        if self.config.CHAT_FEATURE_FLAGS.get("semantic_similarity_filtering", False):
+            self.logger.debug(f"Applying semantic similarity filtering to {len(unique_queries)} queries")
+            
+            # Apply semantic filtering to remove similar queries
+            filtered_queries = SemanticFilter.filter_similar_queries(
+                unique_queries, 
+                similarity_threshold=0.7  # Configurable threshold
+            )
+            
+            # Log the filtering results
+            removed_count = len(unique_queries) - len(filtered_queries)
+            self.logger.debug(f"Semantic filtering removed {removed_count} similar queries")
+            
+            # Rank by diversity (optional, helps prioritize diverse queries)
+            ranked_queries = SemanticFilter.rank_queries_by_diversity(filtered_queries, original_query)
+            
+            self.logger.debug(f"Generated {len(ranked_queries)} semantically diverse queries")
+            return ranked_queries
+        else:
+            self.logger.debug(f"Generated {len(unique_queries)} alternative queries (semantic filtering disabled)")
+            return unique_queries
 
 
 class ChatService:
@@ -625,10 +650,32 @@ class ChatService:
                     f"AGENT ROUTING: Calling RAG agent with potential query rewrites: {actual_query[:100]}...")
 
                 # Get expected answer for this query (if it exists)
-                expected_answer = self._get_answer(user_input)
-                if expected_answer:
-                    self.logger.info(f"Found expected answer for query: '{user_input[:50]}...'")
+                # Use test_query instead of user_input when in test mode
+                lookup_query = test_query if force_refresh else user_input
+                expected_answer = self._get_answer(lookup_query)
+                if force_refresh:
+                    self.logger.debug(f"TEST MODE: Looking up expected answer using: '{lookup_query}'")
+                
+                # Debug feature flags
+                self.logger.debug(f"Feature flags: {self.config.CHAT_FEATURE_FLAGS}")
+                
+                # Check if expected answer enrichment is enabled in feature flags
+                use_expected_answer = self.config.CHAT_FEATURE_FLAGS.get("expected_answer_enrichment", False)
+                self.logger.debug(f"Expected answer enrichment enabled: {use_expected_answer}")
 
+                if not use_expected_answer:
+                    if expected_answer:
+                        self.logger.info(f"Found expected answer but feature flag disabled: '{user_input[:50]}...'")
+                    else:
+                        self.logger.info(f"Did not find expected answer and feature flag disabled: '{user_input[:50]}...'")
+
+                    rag_response, queries_tried = await self._execute_rag_with_retry(
+                        actual_query,
+                        chat_history.get_messages(),
+                        custom_system_prompt=custom_system_prompt
+                    )
+                elif expected_answer:
+                    self.logger.info(f"Found expected answer for query and feature flag enabled: '{user_input[:50]}...'")
                     # Get RAG agent with both custom system prompt and expected answer
                     rag_agent = agent_manager.get_rag_agent(
                         custom_system_prompt=custom_system_prompt,
@@ -641,7 +688,8 @@ class ChatService:
                         chat_history.get_messages(),
                         rag_agent=rag_agent  # Pass the custom agent with expected answer
                     )
-                else :
+                else:
+                    self.logger.info(f"Did not find expected answer for query and feature flag is not enabled: '{user_input[:50]}...'")
                     rag_response, queries_tried = await self._execute_rag_with_retry(
                         actual_query,
                         chat_history.get_messages(),
@@ -696,10 +744,17 @@ class ChatService:
 
         # Add the queries tried to the intermediate steps for transparency/debugging
         if 'intermediate_steps' in response_content.dict() and isinstance(response_content.intermediate_steps, list):
-            response_content.intermediate_steps.append({
+            # Add feature flags status and query information
+            feature_info = {
                 "queries_tried": queries_tried,
-                "query_count": len(queries_tried)
-            })
+                "query_count": len(queries_tried),
+                "feature_flags": {
+                    "semantic_filtering_enabled": self.config.CHAT_FEATURE_FLAGS.get("semantic_similarity_filtering", False),
+                    "expected_answer_enabled": self.config.CHAT_FEATURE_FLAGS.get("expected_answer_enrichment", False),
+                    "expected_answer_used": expected_answer is not None and self.config.CHAT_FEATURE_FLAGS.get("expected_answer_enrichment", False)
+                }
+            }
+            response_content.intermediate_steps.append(feature_info)
 
         # Cache the generated response
         chat_cache.cache_response(

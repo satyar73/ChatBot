@@ -254,18 +254,24 @@ class ChatCacheService:
             if cache_config.CACHE_SIZE_LIMIT > 0:
                 # Calculate the number of rows to limit in Python before executing the query
                 total_rows = cursor.execute("SELECT COUNT(*) FROM chat_cache").fetchone()[0]
-                rows_to_keep = max(0, total_rows - 10)
-
-                cursor.execute(
-                    """
-                    DELETE FROM chat_cache
-                    WHERE query_hash IN (
-                        select query_hash from chat_cache
-                            LIMIT  ?
-                        )                        
-                    """,
-                    (rows_to_keep,)
-                )
+                
+                if total_rows > cache_config.CACHE_SIZE_LIMIT:
+                    # Calculate how many rows to delete
+                    rows_to_delete = total_rows - cache_config.CACHE_SIZE_LIMIT
+                    
+                    # Delete oldest rows first, based on timestamp
+                    self.logger.info(f"Cache size ({total_rows}) exceeds limit ({cache_config.CACHE_SIZE_LIMIT}), removing {rows_to_delete} oldest entries")
+                    cursor.execute(
+                        """
+                        DELETE FROM chat_cache 
+                        WHERE query_hash IN (
+                            SELECT query_hash FROM chat_cache 
+                            ORDER BY timestamp ASC 
+                            LIMIT ?
+                        )
+                        """,
+                        (rows_to_delete,)
+                    )
             
             conn.commit()
             conn.close()
