@@ -1,18 +1,18 @@
 """
 Service layer for handling agent queries and responses with enhanced RAG query rewriting.
 """
-from typing import Dict, List, Any, Tuple, Union
+import re
 import sys
 import time
-import re
+from typing import Dict, List, Any, Tuple, Union
 
 from app.agents.chat_agents import agent_manager
+from app.config import prompt_config
+from app.config.chat_config import ChatConfig
 from app.models.chat_models import ChatHistory, ResponseContent, ResponseMessage, Source, Message
+from app.services.cache_service import chat_cache
 from app.utils.logging_utils import get_logger
 from app.utils.other_utlis import load_json
-from app.services.cache_service import chat_cache
-from app.config.chat_config import ChatConfig
-from app.config import prompt_config
 from app.utils.semantic_filtering import SemanticFilter
 
 
@@ -23,10 +23,11 @@ class QueryRewriter:
     def __init__(self):
         self.logger = get_logger(f"{__name__}.QueryRewriter", "DEBUG")
         self.logger.debug("QueryRewriter initialized")
-        
+
         # Get config to access feature flags
         self.config = ChatConfig()
-        self.logger.debug(f"Semantic similarity filtering enabled: {self.config.CHAT_FEATURE_FLAGS.get('semantic_similarity_filtering', False)}")
+        self.logger.debug(
+            f"Semantic similarity filtering enabled: {self.config.CHAT_FEATURE_FLAGS.get('semantic_similarity_filtering', False)}")
 
         # Common marketing and attribution terminology mapping for expansions
         self.term_expansions = {
@@ -178,24 +179,24 @@ class QueryRewriter:
 
         # Make sure we don't have duplicates (text matching)
         unique_queries = list(dict.fromkeys(alt_queries))
-        
+
         # Use semantic similarity filtering if enabled
         if self.config.CHAT_FEATURE_FLAGS.get("semantic_similarity_filtering", False):
             self.logger.debug(f"Applying semantic similarity filtering to {len(unique_queries)} queries")
-            
+
             # Apply semantic filtering to remove similar queries
             filtered_queries = SemanticFilter.filter_similar_queries(
-                unique_queries, 
+                unique_queries,
                 similarity_threshold=0.7  # Configurable threshold
             )
-            
+
             # Log the filtering results
             removed_count = len(unique_queries) - len(filtered_queries)
             self.logger.debug(f"Semantic filtering removed {removed_count} similar queries")
-            
+
             # Rank by diversity (optional, helps prioritize diverse queries)
             ranked_queries = SemanticFilter.rank_queries_by_diversity(filtered_queries, original_query)
-            
+
             self.logger.debug(f"Generated {len(ranked_queries)} semantically diverse queries")
             return ranked_queries
         else:
@@ -219,7 +220,7 @@ class ChatService:
         # Initialize the query rewriter
         self.query_rewriter = QueryRewriter()
 
-        #Initialize the qa data
+        # Initialize the qa data
         self.qa_data = {}
         if hasattr(self.config, 'QA_SOURCE_FILE_JSON') and self.config.QA_SOURCE_FILE_JSON:
             json_file = self.config.QA_SOURCE_FILE_JSON
@@ -390,7 +391,7 @@ class ChatService:
 
     async def _execute_rag_with_retry(self, query: str, history: List, max_attempts: int = 3,
                                       custom_system_prompt: str = None,
-                                      rag_agent = None) -> Tuple[Dict, List[str]]:
+                                      rag_agent=None) -> Tuple[Dict, List[str]]:
         """
         Execute RAG with multiple query formulations and retry logic.
 
@@ -504,17 +505,17 @@ class ChatService:
         # Call the agent with the specified style
         self.logger.debug(f"==== AGENT ROUTING: Selected {agent_name} AGENT with {prompt_style} style ====")
         self.logger.debug(f"AGENT ROUTING: Calling {agent_name} agent with query: {actual_query[:100]}...")
-        
+
         # Map internal agent names to prompt config names
         prompt_config_mapping = {
             "standard": "non_rag",
             "rag": "rag",
             "database": "database"
         }
-        
+
         # Get the correct config section name
         config_name = prompt_config_mapping.get(agent_name, agent_name)
-        
+
         try:
             # Get the appropriate prompt from the prompt cache using the mapped config name
             system_prompt = prompt_config.get_prompt(config_name, prompt_style)
@@ -522,10 +523,10 @@ class ChatService:
         except ValueError as e:
             self.logger.warning(f"Error retrieving prompt style '{prompt_style}' for {agent_name}: {e}. Using default.")
             system_prompt = prompt_config.get_prompt(config_name, "default")
-        
+
         # Get the agent with the selected prompt
         agent = agent_manager.get_agent(agent_name, system_prompt)
-        
+
         response = await agent.ainvoke(
             {"input": actual_query, "history": chat_history.get_messages()},
             include_run_info=True
@@ -540,7 +541,12 @@ class ChatService:
         Uses cache to avoid redundant API calls for identical queries.
 
         Args:
-            data: Message object containing user input, session ID, mode, and optional system prompt
+            data: Message object containing
+                user query,
+                session ID,
+                mode,
+                system prompt [Optional] (default: System prompt),
+                prompt style [Optional] (default: "default")
 
         Returns:
             ResponseMessage with RAG and non-RAG responses and sources
@@ -658,15 +664,15 @@ class ChatService:
 
         if is_database_query:
             rag_response, queries_tried_db = await self._invoke_agent_with_fallback(
-                                                                actual_query,
-                                                    "database",
-                                                                chat_history,
-                                                                prompt_style)
+                actual_query,
+                "database",
+                chat_history,
+                prompt_style)
             no_rag_response, queries_tried_std = await self._invoke_agent_with_fallback(
-                                                                actual_query,
-                                                    "standard",
-                                                                chat_history,
-                                                                prompt_style)
+                actual_query,
+                "standard",
+                chat_history,
+                prompt_style)
 
             queries_tried = queries_tried_db + queries_tried_std
         else:
@@ -682,10 +688,10 @@ class ChatService:
                 expected_answer = self._get_answer(lookup_query)
                 if force_refresh:
                     self.logger.debug(f"TEST MODE: Looking up expected answer using: '{lookup_query}'")
-                
+
                 # Debug feature flags
                 self.logger.debug(f"Feature flags: {self.config.CHAT_FEATURE_FLAGS}")
-                
+
                 # Get the appropriate system prompt based on the requested style
                 try:
                     # If no custom prompt is provided, use the prompt from the prompt cache
@@ -698,14 +704,15 @@ class ChatService:
                 except ValueError as e:
                     self.logger.warning(f"Error retrieving prompt style '{prompt_style}': {e}. Using default.")
                     system_prompt = prompt_config.get_prompt("rag", "default")
-                
+
                 # Check if expected answer enrichment is enabled in feature flags
                 use_expected_answer = self.config.CHAT_FEATURE_FLAGS.get("expected_answer_enrichment", False)
                 self.logger.debug(f"Expected answer enrichment enabled: {use_expected_answer}")
 
                 # Skip query rewriting and expected answer handling when using custom system prompt
                 if custom_system_prompt:
-                    self.logger.info(f"Using custom system prompt - skipping query rewriting and expected answer handling")
+                    self.logger.info(f"Using custom system prompt - skipping query rewriting"
+                                     f" and expected answer handling")
                     # Use the original query directly with the custom system prompt
                     rag_agent = agent_manager.get_rag_agent(custom_system_prompt=custom_system_prompt)
                     rag_response = await rag_agent.ainvoke(
@@ -715,9 +722,11 @@ class ChatService:
                     queries_tried = [actual_query]  # Only tried the original query
                 elif not use_expected_answer:
                     if expected_answer:
-                        self.logger.info(f"Found expected answer but feature flag disabled: '{user_input[:50]}...'")
+                        self.logger.info(f"Found expected answer but feature flag disabled:"
+                                         f" '{user_input[:50]}...'")
                     else:
-                        self.logger.info(f"Did not find expected answer and feature flag disabled: '{user_input[:50]}...'")
+                        self.logger.info(f"Did not find expected answer and feature flag disabled:"
+                                         f" '{user_input[:50]}...'")
 
                     rag_response, queries_tried = await self._execute_rag_with_retry(
                         actual_query,
@@ -725,7 +734,8 @@ class ChatService:
                         custom_system_prompt=system_prompt
                     )
                 elif expected_answer:
-                    self.logger.info(f"Found expected answer for query and feature flag enabled: '{user_input[:50]}...'")
+                    self.logger.info(f"Found expected answer for query and feature flag enabled:"
+                                     f" '{user_input[:50]}...'")
                     # Get RAG agent with both system prompt and expected answer
                     rag_agent = agent_manager.get_rag_agent(
                         custom_system_prompt=system_prompt,
@@ -739,7 +749,8 @@ class ChatService:
                         rag_agent=rag_agent  # Pass the custom agent with expected answer
                     )
                 else:
-                    self.logger.info(f"Did not find expected answer for query and feature flag is not enabled: '{user_input[:50]}...'")
+                    self.logger.info(f"Did not find expected answer for query and feature flag"
+                                     f" is not enabled: '{user_input[:50]}...'")
                     rag_response, queries_tried = await self._execute_rag_with_retry(
                         actual_query,
                         chat_history.get_messages(),
@@ -747,7 +758,8 @@ class ChatService:
                     )
 
                 self.logger.debug(
-                    f"AGENT ROUTING: RAG response received after trying {len(queries_tried)} queries, response length: {len(str(rag_response))}")
+                    f"AGENT ROUTING: RAG response received after trying {len(queries_tried)} queries,"
+                    f" response length: {len(str(rag_response))}")
                 self.logger.debug(f"AGENT ROUTING: RAG output: {rag_response['output'][:200]}...")
                 self.logger.debug(f"AGENT ROUTING: Queries tried: {queries_tried}")
             else:
@@ -758,11 +770,11 @@ class ChatService:
             # Generate response using agent executor without RAG
             if mode != "rag" and not is_database_query:
                 no_rag_response, queries_tried_std = await self._invoke_agent_with_fallback(
-                                                                    actual_query,
-                                                        "standard",
-                                                                    chat_history,
-                                                                    prompt_style
-                                                                )
+                    actual_query,
+                    "standard",
+                    chat_history,
+                    prompt_style
+                )
             else:
                 self.logger.debug(f"AGENT ROUTING: Using cached non-RAG response")
                 no_rag_response = cached_no_rag_response
@@ -798,16 +810,18 @@ class ChatService:
         # Create the response content, ensuring we handle None values properly
         output = None
         if primary_response is not None:
-            output = primary_response['output'] if isinstance(primary_response, dict) else primary_response
-            
+            output = primary_response['output'] if isinstance(primary_response, dict) \
+                else primary_response
+
         no_rag_output = None
         if no_rag_response is not None:
-            no_rag_output = no_rag_response['output'] if isinstance(no_rag_response, dict) else no_rag_response
-            
+            no_rag_output = no_rag_response['output'] if isinstance(no_rag_response, dict) \
+                else no_rag_response
+
         intermediate_steps = []
         if primary_response is not None and isinstance(primary_response, dict):
             intermediate_steps = primary_response.get('intermediate_steps', [])
-            
+
         response_content = ResponseContent(
             input=user_input,
             history=formatted_history,
@@ -817,18 +831,22 @@ class ChatService:
         )
 
         # Add the queries tried to the intermediate steps for transparency/debugging
-        if 'intermediate_steps' in response_content.dict() and isinstance(response_content.intermediate_steps, list):
+        if ('intermediate_steps' in response_content.dict() and
+                isinstance(response_content.intermediate_steps, list)):
             # Add feature flags status and query information
             # Initialize expected_answer variable if it might not be defined
             expected_answer = locals().get('expected_answer', None)
-            
+
             feature_info = {
                 "queries_tried": queries_tried,
                 "query_count": len(queries_tried),
                 "feature_flags": {
-                    "semantic_filtering_enabled": self.config.CHAT_FEATURE_FLAGS.get("semantic_similarity_filtering", False),
+                    "semantic_filtering_enabled":
+                        self.config.CHAT_FEATURE_FLAGS.get("semantic_similarity_filtering",
+                                                           False),
                     "expected_answer_enabled": self.config.CHAT_FEATURE_FLAGS.get("expected_answer_enrichment", False),
-                    "expected_answer_used": expected_answer is not None and self.config.CHAT_FEATURE_FLAGS.get("expected_answer_enrichment", False)
+                    "expected_answer_used": expected_answer is not None and self.config.CHAT_FEATURE_FLAGS.get(
+                        "expected_answer_enrichment", False)
                 }
             }
             response_content.intermediate_steps.append(feature_info)
@@ -837,11 +855,11 @@ class ChatService:
         rag_output_to_cache = None
         if rag_response is not None:
             rag_output_to_cache = rag_response['output'] if isinstance(rag_response, dict) else rag_response
-            
+
         no_rag_output_to_cache = None
         if no_rag_response is not None:
             no_rag_output_to_cache = no_rag_response['output'] if isinstance(no_rag_response, dict) else no_rag_response
-            
+
         chat_cache.cache_response(
             query_hash=query_hash,
             user_input=user_input,
@@ -918,12 +936,12 @@ class ChatService:
         if rag_response is None:
             self.logger.warning("Received None rag_response in _format_sources")
             return []
-            
+
         # Handle string responses (this happens when a custom system prompt is used)
         if isinstance(rag_response, str):
             self.logger.debug("Received string rag_response in _format_sources, no sources available")
             return []
-            
+
         # For dictionary responses, extract sources normally
         raw_sources = rag_response.get("sources", [])
         formatted_sources = []
@@ -958,6 +976,7 @@ class ChatService:
             }
             for msg in messages
         ]
+
 
 class AgentService:
     """

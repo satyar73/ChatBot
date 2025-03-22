@@ -174,7 +174,11 @@ class ChatConfig:
         self.DOCUMENT_PROMPT_TEMPLATE = "<DOC>\n# Title: {title}\n*Source*: ({url})\n## Content: {page_content}\n</DOC>"
 
     def update_setting(self, setting_name, value):
-        """Update a setting value if it exists"""
+        """Update a setting value if it exists
+               @param setting_name:
+               @param value:
+               @return:
+        """
         if hasattr(self, setting_name):
             setattr(self, setting_name, value)
             return True

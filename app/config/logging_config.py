@@ -21,7 +21,7 @@ SERVICE_LOG_LEVELS: Dict[str, str] = {
     "app.services.chat_service.ChatService": LogLevel.DEBUG
 }
 
-# You can also have environment-specific configurations
+# Environment-specific configurations
 DEVELOPMENT_LOG_LEVELS: Dict[str, str] = {
     "app": LogLevel.DEBUG,
     "app.services": LogLevel.DEBUG,
