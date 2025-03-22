@@ -551,12 +551,26 @@ CRITICAL INSTRUCTION: Your response must NOT contain any exact phrases from the 
         self.logger.debug("Creating RAG agent executor")
         return AgentFactory.create_agent_executor(agent, tools)
 
-    def _configure_standard_agent(self) -> AgentExecutor:
-        """Configure and return a standard (non-RAG) agent."""
+    def _configure_standard_agent(self, custom_system_prompt=None) -> AgentExecutor:
+        """
+        Configure and return a standard (non-RAG) agent.
+        
+        Args:
+            custom_system_prompt: Optional custom system prompt to override default
+        
+        Returns:
+            Configured agent executor
+        """
         self.logger.debug("Configuring standard agent with prompt")
         llm = AgentFactory.create_llm()
         tools = ToolManager.get_standard_tools()
-        prompt = AgentFactory.create_agent_prompt(self.config.NON_RAG_SYSTEM_PROMPT)
+        
+        # Use custom prompt if provided, otherwise use default
+        system_prompt = custom_system_prompt or self.config.NON_RAG_SYSTEM_PROMPT
+        if custom_system_prompt:
+            self.logger.info("Using custom system prompt for standard agent")
+            
+        prompt = AgentFactory.create_agent_prompt(system_prompt)
 
         self.logger.debug(f"Creating standard agent with {len(tools)} tools")
         agent = create_openai_functions_agent(
@@ -568,12 +582,26 @@ CRITICAL INSTRUCTION: Your response must NOT contain any exact phrases from the 
         self.logger.debug("Creating standard agent executor")
         return AgentFactory.create_agent_executor(agent, tools)
 
-    def _configure_database_agent(self) -> AgentExecutor:
-        """Configure and return a database-enabled agent."""
+    def _configure_database_agent(self, custom_system_prompt=None) -> AgentExecutor:
+        """
+        Configure and return a database-enabled agent.
+        
+        Args:
+            custom_system_prompt: Optional custom system prompt to override default
+            
+        Returns:
+            Configured agent executor
+        """
         self.logger.debug("Configuring database agent with prompt")
         llm = AgentFactory.create_llm()
         tools = ToolManager.get_database_tools()
-        prompt = AgentFactory.create_agent_prompt(self.config.DATABASE_SYSTEM_PROMPT)
+        
+        # Use custom prompt if provided, otherwise use default
+        system_prompt = custom_system_prompt or self.config.DATABASE_SYSTEM_PROMPT
+        if custom_system_prompt:
+            self.logger.info("Using custom system prompt for database agent")
+            
+        prompt = AgentFactory.create_agent_prompt(system_prompt)
 
         self.logger.debug(f"Creating database agent with {len(tools)} tools")
         agent = create_openai_functions_agent(
@@ -585,15 +613,35 @@ CRITICAL INSTRUCTION: Your response must NOT contain any exact phrases from the 
         self.logger.debug("Creating database agent executor")
         return AgentFactory.create_agent_executor(agent, tools)
 
-    def get_agent(self, agent_type: str) -> Optional[AgentExecutor]:
+    def get_agent(self, agent_type: str, custom_system_prompt: str = None) -> Optional[AgentExecutor]:
+        """
+        Get an agent by type, with optional custom system prompt.
+        
+        Args:
+            agent_type: The agent type ("rag", "standard", or "database")
+            custom_system_prompt: Optional custom system prompt to override default
+            
+        Returns:
+            Configured agent executor
+        """
+        # For RAG agent, we need special handling because of the get_rag_agent method
+        if agent_type == "rag":
+            return self.get_rag_agent(custom_system_prompt=custom_system_prompt)
+        
+        # For other agents, configure with custom prompt if provided
+        if custom_system_prompt:
+            if agent_type == "standard":
+                return self._configure_standard_agent(custom_system_prompt)
+            elif agent_type == "database":
+                return self._configure_database_agent(custom_system_prompt)
+        
+        # Use cached agents for default prompts
         agent_choice = {
-            "rag": self.get_rag_agent,
             "standard": self.standard_agent,
             "database": self.database_agent
         }
-
-        agent = agent_choice.get(agent_type, None)()
-        return agent() if agent else None
+        
+        return agent_choice.get(agent_type, None)
 
 # Create a singleton instance
 agent_manager = AgentManager()

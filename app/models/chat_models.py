@@ -29,8 +29,9 @@ class Message(BaseModel):
     """Model for user message with session identification."""
     message: str
     session_id: str
-    mode: str = "rag"
+    mode: str = "rag"  # "rag", "no_rag", or "both"
     system_prompt: Optional[str] = None
+    prompt_style: Optional[str] = "default"  # "default", "detailed", or "concise"
 
 class ResponseContent(BaseModel):
     """Model for the content of a response."""

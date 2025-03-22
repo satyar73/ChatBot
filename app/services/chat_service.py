@@ -1,7 +1,7 @@
 """
 Service layer for handling agent queries and responses with enhanced RAG query rewriting.
 """
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any, Tuple, Union
 import sys
 import time
 import re
@@ -12,6 +12,7 @@ from app.utils.logging_utils import get_logger
 from app.utils.other_utlis import load_json
 from app.services.cache_service import chat_cache
 from app.config.chat_config import ChatConfig
+from app.config import prompt_config
 from app.utils.semantic_filtering import SemanticFilter
 
 
@@ -498,11 +499,33 @@ class ChatService:
     async def _invoke_agent_with_fallback(self,
                                           actual_query: str,
                                           agent_name: str,
-                                          chat_history: ChatHistory) -> Tuple[Dict, List[str]]:
-        # Call the database agent
-        self.logger.debug(f"==== AGENT ROUTING: Selected {agent_name} AGENT ====")
+                                          chat_history: ChatHistory,
+                                          prompt_style: str = "default") -> Tuple[Dict, List[str]]:
+        # Call the agent with the specified style
+        self.logger.debug(f"==== AGENT ROUTING: Selected {agent_name} AGENT with {prompt_style} style ====")
         self.logger.debug(f"AGENT ROUTING: Calling {agent_name} agent with query: {actual_query[:100]}...")
-        agent = agent_manager.get_agent(agent_name)
+        
+        # Map internal agent names to prompt config names
+        prompt_config_mapping = {
+            "standard": "non_rag",
+            "rag": "rag",
+            "database": "database"
+        }
+        
+        # Get the correct config section name
+        config_name = prompt_config_mapping.get(agent_name, agent_name)
+        
+        try:
+            # Get the appropriate prompt from the prompt cache using the mapped config name
+            system_prompt = prompt_config.get_prompt(config_name, prompt_style)
+            self.logger.info(f"Using '{prompt_style}' style prompt for {agent_name} agent")
+        except ValueError as e:
+            self.logger.warning(f"Error retrieving prompt style '{prompt_style}' for {agent_name}: {e}. Using default.")
+            system_prompt = prompt_config.get_prompt(config_name, "default")
+        
+        # Get the agent with the selected prompt
+        agent = agent_manager.get_agent(agent_name, system_prompt)
+        
         response = await agent.ainvoke(
             {"input": actual_query, "history": chat_history.get_messages()},
             include_run_info=True
@@ -527,6 +550,7 @@ class ChatService:
         session_id = data.session_id
         mode = data.mode
         custom_system_prompt = data.system_prompt
+        prompt_style = data.prompt_style or "default"
 
         cache_hit = False
 
@@ -543,7 +567,8 @@ class ChatService:
             query=user_input,
             history=chat_history.get_messages(),
             session_id=session_id,
-            system_prompt=custom_system_prompt
+            system_prompt=custom_system_prompt,
+            prompt_style=prompt_style
         )
 
         # Check for special testing flags in the query
@@ -635,11 +660,13 @@ class ChatService:
             rag_response, queries_tried_db = await self._invoke_agent_with_fallback(
                                                                 actual_query,
                                                     "database",
-                                                                chat_history)
+                                                                chat_history,
+                                                                prompt_style)
             no_rag_response, queries_tried_std = await self._invoke_agent_with_fallback(
                                                                 actual_query,
                                                     "standard",
-                                                                chat_history)
+                                                                chat_history,
+                                                                prompt_style)
 
             queries_tried = queries_tried_db + queries_tried_std
         else:
@@ -659,11 +686,34 @@ class ChatService:
                 # Debug feature flags
                 self.logger.debug(f"Feature flags: {self.config.CHAT_FEATURE_FLAGS}")
                 
+                # Get the appropriate system prompt based on the requested style
+                try:
+                    # If no custom prompt is provided, use the prompt from the prompt cache
+                    if not custom_system_prompt:
+                        system_prompt = prompt_config.get_prompt("rag", prompt_style)
+                        self.logger.info(f"Using '{prompt_style}' style prompt from prompt cache")
+                    else:
+                        system_prompt = custom_system_prompt
+                        self.logger.info(f"Using custom system prompt, ignoring prompt style: '{prompt_style}'")
+                except ValueError as e:
+                    self.logger.warning(f"Error retrieving prompt style '{prompt_style}': {e}. Using default.")
+                    system_prompt = prompt_config.get_prompt("rag", "default")
+                
                 # Check if expected answer enrichment is enabled in feature flags
                 use_expected_answer = self.config.CHAT_FEATURE_FLAGS.get("expected_answer_enrichment", False)
                 self.logger.debug(f"Expected answer enrichment enabled: {use_expected_answer}")
 
-                if not use_expected_answer:
+                # Skip query rewriting and expected answer handling when using custom system prompt
+                if custom_system_prompt:
+                    self.logger.info(f"Using custom system prompt - skipping query rewriting and expected answer handling")
+                    # Use the original query directly with the custom system prompt
+                    rag_agent = agent_manager.get_rag_agent(custom_system_prompt=custom_system_prompt)
+                    rag_response = await rag_agent.ainvoke(
+                        {"input": actual_query, "history": chat_history.get_messages()},
+                        include_run_info=True
+                    )
+                    queries_tried = [actual_query]  # Only tried the original query
+                elif not use_expected_answer:
                     if expected_answer:
                         self.logger.info(f"Found expected answer but feature flag disabled: '{user_input[:50]}...'")
                     else:
@@ -672,13 +722,13 @@ class ChatService:
                     rag_response, queries_tried = await self._execute_rag_with_retry(
                         actual_query,
                         chat_history.get_messages(),
-                        custom_system_prompt=custom_system_prompt
+                        custom_system_prompt=system_prompt
                     )
                 elif expected_answer:
                     self.logger.info(f"Found expected answer for query and feature flag enabled: '{user_input[:50]}...'")
-                    # Get RAG agent with both custom system prompt and expected answer
+                    # Get RAG agent with both system prompt and expected answer
                     rag_agent = agent_manager.get_rag_agent(
-                        custom_system_prompt=custom_system_prompt,
+                        custom_system_prompt=system_prompt,
                         expected_answer=expected_answer
                     )
 
@@ -693,7 +743,7 @@ class ChatService:
                     rag_response, queries_tried = await self._execute_rag_with_retry(
                         actual_query,
                         chat_history.get_messages(),
-                        custom_system_prompt=custom_system_prompt
+                        custom_system_prompt=system_prompt
                     )
 
                 self.logger.debug(
@@ -710,7 +760,8 @@ class ChatService:
                 no_rag_response, queries_tried_std = await self._invoke_agent_with_fallback(
                                                                     actual_query,
                                                         "standard",
-                                                                    chat_history
+                                                                    chat_history,
+                                                                    prompt_style
                                                                 )
             else:
                 self.logger.debug(f"AGENT ROUTING: Using cached non-RAG response")
@@ -722,11 +773,22 @@ class ChatService:
         sources = self._format_sources(rag_response) if rag_response is not None else []
 
         if primary_response is not None:
-            chat_history.add_ai_message(primary_response['output'])
+            # Handle both dictionary and string responses
+            if isinstance(primary_response, dict):
+                chat_history.add_ai_message(primary_response['output'])
+            else:
+                # For string responses (when custom system prompt is used)
+                chat_history.add_ai_message(primary_response)
         elif rag_response is not None:
-            chat_history.add_ai_message(rag_response['output'])
+            if isinstance(rag_response, dict):
+                chat_history.add_ai_message(rag_response['output'])
+            else:
+                chat_history.add_ai_message(rag_response)
         elif no_rag_response is not None:
-            chat_history.add_ai_message(no_rag_response['output'])
+            if isinstance(no_rag_response, dict):
+                chat_history.add_ai_message(no_rag_response['output'])
+            else:
+                chat_history.add_ai_message(no_rag_response)
         else:
             self.logger.error("No valid response generated from RAG or non-RAG agents")
 
@@ -734,17 +796,32 @@ class ChatService:
         formatted_history = self._format_history(chat_history.get_messages())
 
         # Create the response content, ensuring we handle None values properly
+        output = None
+        if primary_response is not None:
+            output = primary_response['output'] if isinstance(primary_response, dict) else primary_response
+            
+        no_rag_output = None
+        if no_rag_response is not None:
+            no_rag_output = no_rag_response['output'] if isinstance(no_rag_response, dict) else no_rag_response
+            
+        intermediate_steps = []
+        if primary_response is not None and isinstance(primary_response, dict):
+            intermediate_steps = primary_response.get('intermediate_steps', [])
+            
         response_content = ResponseContent(
             input=user_input,
             history=formatted_history,
-            output=primary_response['output'] if primary_response is not None else None,
-            no_rag_output=no_rag_response['output'] if no_rag_response is not None else None,
-            intermediate_steps=primary_response.get('intermediate_steps', []) if primary_response is not None else []
+            output=output,
+            no_rag_output=no_rag_output,
+            intermediate_steps=intermediate_steps
         )
 
         # Add the queries tried to the intermediate steps for transparency/debugging
         if 'intermediate_steps' in response_content.dict() and isinstance(response_content.intermediate_steps, list):
             # Add feature flags status and query information
+            # Initialize expected_answer variable if it might not be defined
+            expected_answer = locals().get('expected_answer', None)
+            
             feature_info = {
                 "queries_tried": queries_tried,
                 "query_count": len(queries_tried),
@@ -757,13 +834,22 @@ class ChatService:
             response_content.intermediate_steps.append(feature_info)
 
         # Cache the generated response
+        rag_output_to_cache = None
+        if rag_response is not None:
+            rag_output_to_cache = rag_response['output'] if isinstance(rag_response, dict) else rag_response
+            
+        no_rag_output_to_cache = None
+        if no_rag_response is not None:
+            no_rag_output_to_cache = no_rag_response['output'] if isinstance(no_rag_response, dict) else no_rag_response
+            
         chat_cache.cache_response(
             query_hash=query_hash,
             user_input=user_input,
-            rag_response=rag_response['output'] if rag_response is not None else None,
-            no_rag_response=no_rag_response['output'] if no_rag_response is not None else None,
+            rag_response=rag_output_to_cache,
+            no_rag_response=no_rag_output_to_cache,
             sources=sources,
-            system_prompt=custom_system_prompt
+            system_prompt=custom_system_prompt,
+            prompt_style=prompt_style
         )
 
         # Log cache miss stats
@@ -819,12 +905,12 @@ class ChatService:
             return {session_id: self.chat_histories[session_id]}
         return None
 
-    def _format_sources(self, rag_response: Dict) -> List[Source]:
+    def _format_sources(self, rag_response: Union[Dict, str]) -> List[Source]:
         """
         Format sources from the RAG response.
 
         Args:
-            rag_response: Response from the RAG agent
+            rag_response: Response from the RAG agent, can be a dict or a string
 
         Returns:
             List of formatted Source objects
@@ -832,7 +918,13 @@ class ChatService:
         if rag_response is None:
             self.logger.warning("Received None rag_response in _format_sources")
             return []
-
+            
+        # Handle string responses (this happens when a custom system prompt is used)
+        if isinstance(rag_response, str):
+            self.logger.debug("Received string rag_response in _format_sources, no sources available")
+            return []
+            
+        # For dictionary responses, extract sources normally
         raw_sources = rag_response.get("sources", [])
         formatted_sources = []
 

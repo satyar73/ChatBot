@@ -23,6 +23,13 @@ const useChatActions = () => {
   }, [dispatch]);
   
   /**
+   * Set the prompt style (default, detailed, concise)
+   */
+  const setPromptStyle = useCallback((style) => {
+    dispatch({ type: ACTIONS.SET_PROMPT_STYLE, payload: style });
+  }, [dispatch]);
+  
+  /**
    * Set the system prompt
    */
   const setSystemPrompt = useCallback((prompt) => {
@@ -91,12 +98,13 @@ const useChatActions = () => {
     dispatch({ type: ACTIONS.SET_ERROR, payload: null });
     
     try {
-      // Send message to API with the current session ID, response mode, and system prompt
+      // Send message to API with the current session ID, response mode, system prompt, and prompt style
       const response = await chatApi.sendMessage(
         state.input, 
         state.responseMode, 
         state.sessionId,
-        state.systemPrompt || null
+        state.systemPrompt || null,
+        state.promptStyle || "default"
       );
       
       // Save or update the session ID for future requests
@@ -178,6 +186,7 @@ const useChatActions = () => {
     sendMessage,
     setInput,
     setResponseMode,
+    setPromptStyle,
     setSystemPrompt,
     toggleSystemPrompt,
     clearError,

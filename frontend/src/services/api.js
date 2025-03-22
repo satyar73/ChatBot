@@ -12,12 +12,12 @@ const api = axios.create({
 });
 
 export const chatApi = {
-  sendMessage: async (message, responseMode = "rag", sessionId = null, systemPrompt = null) => {
+  sendMessage: async (message, responseMode = "rag", sessionId = null, systemPrompt = null, promptStyle = "default") => {
     try {
       // Generate a random session ID if not provided
       const session_id = sessionId || `session_${Math.random().toString(36).substring(2, 15)}`;
       
-      console.log(`Sending chat request with session_id: ${session_id}, mode: ${responseMode}`);
+      console.log(`Sending chat request with session_id: ${session_id}, mode: ${responseMode}, promptStyle: ${promptStyle}`);
       if (systemPrompt) {
         console.log(`Using custom system prompt (${systemPrompt.length} chars)`);
       }
@@ -34,7 +34,8 @@ export const chatApi = {
       const payload = { 
         message,
         session_id,
-        mode
+        mode,
+        prompt_style: promptStyle
       };
       
       // Only include system_prompt if it's provided

@@ -24,18 +24,34 @@ class SimilarityEngines:
         # Convert to lowercase
         text = text.lower()
 
-        # Tokenize
-        tokens = word_tokenize(text)
+        # Simple tokenization fallback when NLTK is not available
+        try:
+            # Try to use NLTK tokenization
+            tokens = word_tokenize(text)
+        except (ImportError, LookupError):
+            # Fallback to basic tokenization
+            import re
+            tokens = re.findall(r'\b\w+\b', text)
 
         # Remove stopwords if requested
         if remove_stopwords:
-            stop_words = set(stopwords.words('english'))
-            tokens = [token for token in tokens if token not in stop_words]
+            try:
+                stop_words = set(stopwords.words('english'))
+                tokens = [token for token in tokens if token not in stop_words]
+            except (ImportError, LookupError):
+                # Fallback - just use a basic list of common English stopwords
+                basic_stopwords = {'a', 'an', 'the', 'and', 'or', 'but', 'if', 'because', 'as', 'what',
+                                  'is', 'in', 'into', 'of', 'for', 'with', 'by', 'to', 'from', 'at', 'on'}
+                tokens = [token for token in tokens if token not in basic_stopwords]
 
         # Lemmatize if requested
         if lemmatize:
-            lemmatizer = WordNetLemmatizer()
-            tokens = [lemmatizer.lemmatize(token) for token in tokens]
+            try:
+                lemmatizer = WordNetLemmatizer()
+                tokens = [lemmatizer.lemmatize(token) for token in tokens]
+            except (ImportError, LookupError):
+                # Skip lemmatization if NLTK is not available
+                pass
 
         return tokens
 

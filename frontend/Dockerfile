@@ -27,6 +27,10 @@ FROM nginx:alpine
 # Copy the build output from the build stage
 COPY --from=build /app/build /usr/share/nginx/html
 
+# Create setup script
+COPY setup-nginx.sh /docker-entrypoint.d/
+RUN chmod +x /docker-entrypoint.d/setup-nginx.sh
+
 # Copy custom nginx config to properly handle React Router
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 

@@ -5,6 +5,7 @@ import json
 import time
 import hashlib
 import sqlite3
+import os
 from typing import Dict, List, Tuple, Optional
 
 from app.config import cache_config
@@ -22,6 +23,14 @@ class ChatCacheService:
     def _initialize_db(self):
         """Initialize the SQLite database for the cache."""
         try:
+            # Check if we need to rebuild the database due to schema changes
+            db_exists = os.path.exists(cache_config.CACHE_DB_PATH)
+            if db_exists:
+                rebuild_needed = self._check_rebuild_needed()
+                if rebuild_needed:
+                    self.logger.info("Database schema needs update - rebuilding cache database")
+                    os.remove(cache_config.CACHE_DB_PATH)
+                    
             conn = sqlite3.connect(str(cache_config.CACHE_DB_PATH))
             cursor = conn.cursor()
             
@@ -34,6 +43,7 @@ class ChatCacheService:
                 no_rag_response TEXT,
                 sources TEXT,
                 system_prompt TEXT,
+                prompt_style TEXT DEFAULT 'default',
                 timestamp REAL,
                 hit_count INTEGER DEFAULT 1
             )
@@ -52,40 +62,32 @@ class ChatCacheService:
             )
             ''')
             
-            # Perform database migrations
-            self._run_migrations(conn)
-            
             conn.commit()
             conn.close()
             self.logger.info(f"Cache database initialized at {cache_config.CACHE_DB_PATH}")
         except Exception as e:
             self.logger.error(f"Failed to initialize cache database: {e}")
             raise
-            
-    def _run_migrations(self, conn):
-        """Run database migrations to update schema when needed.
-        
-        Args:
-            conn: SQLite connection
-        """
-        cursor = conn.cursor()
+    
+    def _check_rebuild_needed(self):
+        """Check if database needs to be rebuilt due to schema changes."""
         try:
-            # Check if system_prompt column exists in chat_cache table
+            conn = sqlite3.connect(str(cache_config.CACHE_DB_PATH))
+            cursor = conn.cursor()
+            
+            # Check if prompt_style column exists
             cursor.execute("PRAGMA table_info(chat_cache)")
             columns = [column[1] for column in cursor.fetchall()]
             
-            # Add system_prompt column if it doesn't exist
-            if "system_prompt" not in columns:
-                self.logger.info("Adding system_prompt column to chat_cache table")
-                cursor.execute("ALTER TABLE IF EXISTS chat_cache ADD COLUMN system_prompt TEXT")
-                conn.commit()
-                
+            conn.close()
+            return "prompt_style" not in columns
         except Exception as e:
-            self.logger.error(f"Error during database migration: {e}")
-            # Continue execution - don't let migration failure break the application
+            self.logger.error(f"Error checking database schema: {e}")
+            return False
     
     @staticmethod
-    def generate_query_hash(query: str, history: List = None, session_id: str = None, system_prompt: str = None) -> str:
+    def generate_query_hash(query: str, history: List = None, session_id: str = None, 
+                           system_prompt: str = None, prompt_style: str = "default") -> str:
         """
         Generate a hash to uniquely identify a query with its context.
         
@@ -94,6 +96,7 @@ class ChatCacheService:
             history: Optional chat history
             session_id: Optional session ID
             system_prompt: Optional custom system prompt
+            prompt_style: The prompt style (default, detailed, concise)
             
         Returns:
             String hash that uniquely identifies this query in its context
@@ -116,6 +119,9 @@ class ChatCacheService:
         # Add system prompt if provided (this is critical for proper caching)
         if system_prompt:
             hash_content += "system_prompt:" + system_prompt.strip()
+            
+        # Always include prompt style in hash (critical for proper caching with different styles)
+        hash_content += "prompt_style:" + (prompt_style or "default").strip().lower()
             
         # Generate hash
         query_hash = hashlib.md5(hash_content.encode('utf-8')).hexdigest()
@@ -141,20 +147,14 @@ class ChatCacheService:
             
             # Get cached response
             cursor.execute(
-                "SELECT rag_response, no_rag_response, sources, timestamp, hit_count, system_prompt FROM chat_cache WHERE query_hash = ?", 
+                "SELECT rag_response, no_rag_response, sources, timestamp, hit_count, system_prompt, prompt_style FROM chat_cache WHERE query_hash = ?", 
                 (query_hash,)
             )
             result = cursor.fetchone()
             
             if result:
-                # Handle the case where the result might not have system_prompt (older rows)
-                if len(result) >= 6:
-                    rag_response, no_rag_response, sources_json, timestamp, hit_count, system_prompt = result
-                else:
-                    rag_response, no_rag_response, sources_json, timestamp, hit_count = result
-                    system_prompt = None
+                rag_response, no_rag_response, sources_json, timestamp, hit_count, system_prompt, prompt_style = result
                 
-                # Check if cache entry has expired
                 # Check if cache entry has expired
                 age_in_seconds = time.time() - timestamp
                 if age_in_seconds > cache_config.CACHE_TTL:
@@ -178,7 +178,8 @@ class ChatCacheService:
                     "rag_response": rag_response,
                     "no_rag_response": no_rag_response,
                     "sources": sources,
-                    "system_prompt": system_prompt
+                    "system_prompt": system_prompt,
+                    "prompt_style": prompt_style
                 }
                 
                 self.logger.info(f"Cache hit for {query_hash}, hit count: {hit_count + 1}")
@@ -199,7 +200,8 @@ class ChatCacheService:
                       rag_response: str, 
                       no_rag_response: str, 
                       sources: List = None,
-                      system_prompt: str = None) -> bool:
+                      system_prompt: str = None,
+                      prompt_style: str = "default") -> bool:
         """
         Cache a response for future retrieval.
         
@@ -210,6 +212,7 @@ class ChatCacheService:
             no_rag_response: Response without RAG
             sources: Optional list of sources
             system_prompt: Optional custom system prompt
+            prompt_style: Optional prompt style (default, detailed, concise)
             
         Returns:
             Boolean indicating success/failure
@@ -224,31 +227,16 @@ class ChatCacheService:
             # Convert sources to JSON string
             sources_json = json.dumps(sources) if sources else None
             
-            # Check if we have the system_prompt column before trying to use it
-            cursor.execute("PRAGMA table_info(chat_cache)")
-            columns = [column[1] for column in cursor.fetchall()]
-            
-            if "system_prompt" in columns:
-                # Store response in cache with system_prompt
-                cursor.execute(
-                    """
-                    INSERT OR REPLACE INTO chat_cache 
-                    (query_hash, user_input, rag_response, no_rag_response, sources, system_prompt, timestamp, hit_count) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-                    """, 
-                    (query_hash, user_input, rag_response, no_rag_response, sources_json, system_prompt, time.time())
-                )
-            else:
-                # Handle case where system_prompt column doesn't exist (fallback)
-                self.logger.warning("system_prompt column not found, attempting to insert without it")
-                cursor.execute(
-                    """
-                    INSERT OR REPLACE INTO chat_cache 
-                    (query_hash, user_input, rag_response, no_rag_response, sources, timestamp, hit_count) 
-                    VALUES (?, ?, ?, ?, ?, ?, 1)
-                    """, 
-                    (query_hash, user_input, rag_response, no_rag_response, sources_json, time.time())
-                )
+            # Store response with all fields
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO chat_cache 
+                (query_hash, user_input, rag_response, no_rag_response, sources, system_prompt, prompt_style, timestamp, hit_count) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+                """, 
+                (query_hash, user_input, rag_response, no_rag_response, sources_json, 
+                 system_prompt, prompt_style, time.time())
+            )
             
             # Ensure cache size doesn't exceed limit
             if cache_config.CACHE_SIZE_LIMIT > 0:

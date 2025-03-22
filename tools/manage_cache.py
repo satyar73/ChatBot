@@ -17,7 +17,7 @@ import requests
 
 def get_api_url():
     """Get the API URL from environment or use default."""
-    return os.environ.get("API_URL", "http://localhost:8005")
+    return os.environ.get("API_URL", "http://localhost:8006")
 
 def get_stats():
     """Get and display cache statistics."""

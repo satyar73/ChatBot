@@ -6,6 +6,7 @@ const initialState = {
   input: '',
   loading: false,
   responseMode: 'rag', // Three modes: "rag", "standard", "compare"
+  promptStyle: 'default', // Three styles: "default", "detailed", "concise"
   sessionId: null,
   error: null,
   systemPrompt: '',  // Store custom system prompt
@@ -18,6 +19,7 @@ export const ACTIONS = {
   SET_LOADING: 'SET_LOADING',
   SET_ERROR: 'SET_ERROR',
   SET_RESPONSE_MODE: 'SET_RESPONSE_MODE',
+  SET_PROMPT_STYLE: 'SET_PROMPT_STYLE',
   ADD_USER_MESSAGE: 'ADD_USER_MESSAGE',
   ADD_ASSISTANT_MESSAGE: 'ADD_ASSISTANT_MESSAGE',
   ADD_ASSISTANT_MESSAGES: 'ADD_ASSISTANT_MESSAGES',
@@ -42,6 +44,9 @@ const chatReducer = (state, action) => {
     
     case ACTIONS.SET_RESPONSE_MODE:
       return { ...state, responseMode: action.payload };
+      
+    case ACTIONS.SET_PROMPT_STYLE:
+      return { ...state, promptStyle: action.payload };
     
     case ACTIONS.ADD_USER_MESSAGE:
       return {
