@@ -8,7 +8,7 @@ class ChatTestConfig:
         # Load environment variables
         load_dotenv()
 
-        self.DEFAULT_MSQUARED_API_URL = "http://localhost:8005"
+        self.DEFAULT_CHATBOT_API_URL = "http://localhost:8005"
 
         # LLM configuration
         self.LLM_MODEL = "gpt-4o"
@@ -21,7 +21,7 @@ class ChatTestConfig:
         self.START = "START"
         self.END = "END"
         self.NEXT = "next"
-        self.MSQUARED = "msquared_node"
+        self.START_GET_CHAT_RESPONSE = "start_get_chat_response_node"
         self.EVALUATE_RAG = "evaluate_rag"
         self.EVALUATE_NO_RAG = "evaluate_no_rag"
         self.EVALUATE_LLM_RAG = "evaluate_llm_rag"

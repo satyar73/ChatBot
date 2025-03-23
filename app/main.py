@@ -68,7 +68,7 @@ logger.setLevel("INFO")
 
 # Create FastAPI app
 app = FastAPI(
-    title="MSquared AttributionGPT Backend",
+    title="AttributionGPT Backend",
     version="1.0",
     description="Backend for AttributionGPT with chat and index management",
 )

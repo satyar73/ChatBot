@@ -166,8 +166,10 @@ class ChatConfig:
 
         # Retriever Tool Configuration
         self.RETRIEVER_TOOL_CONFIG = {
-            "name": "search_msquared_docs",
-            "description": "Searches and returns docs, products and blogs from MSquared. You do not know anything about MSquared, so if you are ever asked about MSquared, you should use this tool."
+            "name": "search_rag_docs",
+            "description": "Searches and returns docs, products and blogs from RAG."
+                           " You do not know anything about MSquared, so if you are"
+                           " ever asked about MSquared, you should use this tool."
         }
 
         # Document prompt template

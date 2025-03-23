@@ -73,15 +73,15 @@ class ResponseMessage(BaseModel):
         "json_schema_extra": {
             "example": {
                 "response": {
-                    "input": "What services does MSquared offer?",
-                    "output": "MSquared offers marketing attribution services that are accessible, affordable, and effective for every brand.",
-                    "no_rag_output": "Based on general knowledge, MSquared appears to offer marketing and analytics services, though I don't have specific details about their current offerings.",
+                    "input": "What services does ChatBot offer?",
+                    "output": "ChatBot offers marketing attribution services that are accessible, affordable, and effective for every brand.",
+                    "no_rag_output": "Based on general knowledge, ChatBot appears to offer marketing and analytics services, though I don't have specific details about their current offerings.",
                     "intermediate_steps": []
                 },
                 "sources": [
                     {
-                        "title": "MSquared Services",
-                        "url": "https://msquared.com/services",
+                        "title": "ChatBot Services",
+                        "url": "https://chatbot.com/services",
                         "content": "Service description excerpt..."
                     }
                 ]

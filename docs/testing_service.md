@@ -52,7 +52,7 @@ Runs tests from a CSV file with multiple test cases.
 **Returns**:
 - ChatBatchTestResponse with batch results and statistics
 
-#### `msquared_node(state: DualState) -> DualState`
+#### `start_node(state: DualState) -> DualState`
 GraphNode that calls MSquared API to get both RAG and non-RAG responses.
 
 **Parameters**:
@@ -270,13 +270,13 @@ from app.services.chat_test_service import ChatTestService
 from app.models.chat_test_models import ChatTestRequest
 
 # Initialize test service
-test_service = ChatTestService(msquared_api_url="http://localhost:8005")
+test_service = ChatTestService(chatbot_api_url="http://localhost:8005")
 
 # Create a test request
 request = ChatTestRequest(
-    prompt="What is marketing attribution?",
-    expected_result="Marketing attribution is the process of identifying which marketing actions contribute to sales or conversions.",
-    similarity_threshold=0.7
+   prompt="What is marketing attribution?",
+   expected_result="Marketing attribution is the process of identifying which marketing actions contribute to sales or conversions.",
+   similarity_threshold=0.7
 )
 
 # Run the test
@@ -284,9 +284,9 @@ result = await test_service.run_test(request)
 
 # Check if the test passed
 if result.passed:
-    print("Test passed with similarity score:", result.similarity_score)
+   print("Test passed with similarity score:", result.similarity_score)
 else:
-    print("Test failed:", result.reasoning)
+   print("Test failed:", result.reasoning)
 
 # Access detailed analysis
 rag_score = result.detailed_analysis["rag_test"]["weighted_similarity"]
@@ -304,21 +304,23 @@ print(f"RAG value rating: {value_rating}")
 import asyncio
 from app.services.chat_test_service import ChatTestService
 
+
 async def run_batch_tests():
-    # Initialize test service
-    test_service = ChatTestService(msquared_api_url="http://localhost:8005")
-    
-    # Run batch test
-    results = await test_service.run_batch_test(
-        csv_file="tests/test_cases.csv",
-        similarity_threshold=0.7
-    )
-    
-    # Print summary
-    print(f"Ran {results.total_tests} tests")
-    print(f"Passed: {results.passed} ({results.pass_rate:.2f}%)")
-    print(f"Failed: {results.failed}")
-    print(f"Results saved to: {results.output_file}")
+   # Initialize test service
+   test_service = ChatTestService(chatbot_api_url="http://localhost:8005")
+
+   # Run batch test
+   results = await test_service.run_batch_test(
+      csv_file="tests/test_cases.csv",
+      similarity_threshold=0.7
+   )
+
+   # Print summary
+   print(f"Ran {results.total_tests} tests")
+   print(f"Passed: {results.passed} ({results.pass_rate:.2f}%)")
+   print(f"Failed: {results.failed}")
+   print(f"Results saved to: {results.output_file}")
+
 
 # Run the batch test
 asyncio.run(run_batch_tests())

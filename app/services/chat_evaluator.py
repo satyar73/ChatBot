@@ -31,7 +31,7 @@ class ChatTesterCLI:
         self.session_id = f"test_session_{int(datetime.now().timestamp())}"
 
         # Initialize test service with the API URL
-        self.test_service = ChatTestService(msquared_api_url=api_url)
+        self.test_service = ChatTestService(chatbot_api_url=api_url)
 
     async def load_test_cases(self) -> pd.DataFrame:
         """Load test cases from the CSV file."""

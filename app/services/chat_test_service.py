@@ -5,7 +5,7 @@ from app.models.chat_test_models import (
     ChatLLMTestOutput
 )
 from app.config.chat_test_config import ChatTestConfig
-from app.utils.msquared_client import MSquaredClient
+from app.utils.chatbot_client import ChatBotClient
 from app.utils.similarity_engines import SimilarityEngines
 from app.utils.llm_client import LLMClientManager  # Import the LLMClientManager
 from app.utils.logging_utils import get_logger
@@ -52,9 +52,9 @@ class DualState(TypedDict):
 
 
 class ChatTestService:
-    def __init__(self, msquared_api_url: str = "http://localhost:8005"):
+    def __init__(self, chatbot_api_url: str = "http://localhost:8005"):
         self.config = ChatTestConfig()
-        self.msquared_client = MSquaredClient(msquared_api_url)
+        self.chatbot_client = ChatBotClient(chatbot_api_url)
 
         # Define weights for enhanced evaluation
         self.evaluation_weights = {
@@ -74,19 +74,19 @@ class ChatTestService:
             temperature=self.config.LLM_TEMPERATURE
         )
 
-    async def msquared_node(self, state: DualState) -> DualState:
-        """Node that calls MSquared API to get both RAG and non-RAG responses"""
-        logger.debug(f"Starting msquared_node with prompt: {state['prompt'][:50]}...")
+    async def start_get_chat_response_node(self, state: DualState) -> DualState:
+        """Node that calls Chatbot API to get both RAG and non-RAG responses"""
+        logger.debug(f"Starting start_node with prompt: {state['prompt'][:50]}...")
         prompt = state["prompt"]
 
         try:
             # Get both RAG and non-RAG responses in a single API call
-            logger.debug("Calling MSquared API for responses")
-            rag_response, no_rag_response = await self.msquared_client.get_response(prompt)
+            logger.debug("Calling Chatbot API for responses")
+            rag_response, no_rag_response = await self.chatbot_client.get_response(prompt)
             logger.debug(f"Received responses - RAG: {len(rag_response)} chars, non-RAG: {len(no_rag_response)} chars")
 
             # Return updated state with both responses
-            logger.debug(f"msquared_node completed successfully, next step: {self.config.EVALUATE_RAG}")
+            logger.debug(f"start_node completed successfully, next step: {self.config.EVALUATE_RAG}")
             return {
                 **state,
                 "rag_response": rag_response,
@@ -94,13 +94,13 @@ class ChatTestService:
                 self.config.NEXT: self.config.EVALUATE_RAG
             }
         except Exception as e:
-            logger.error(f"Error getting MSquared responses: {str(e)}")
+            logger.error(f"Error getting ChatBot responses: {str(e)}")
             # Return error state
             return {
                 **state,
                 "rag_response": f"Error getting response: {str(e)}",
                 "no_rag_response": f"Error getting response: {str(e)}",
-                "reasoning": f"Error communicating with MSquared API: {str(e)}",
+                "reasoning": f"Error communicating with ChatBot API: {str(e)}",
                 self.config.NEXT: self.config.END
             }
 
@@ -736,7 +736,7 @@ class ChatTestService:
             self.config.ENHANCE_EVALUATION = "enhance_evaluation"
 
         # Add nodes
-        builder.add_node(self.config.MSQUARED, self.msquared_node)
+        builder.add_node(self.config.START_GET_CHAT_RESPONSE, self.start_get_chat_response_node)
         builder.add_node(self.config.EVALUATE_RAG, self.evaluate_rag_node)
         builder.add_node(self.config.EVALUATE_NO_RAG, self.evaluate_no_rag_node)
         builder.add_node(self.config.EVALUATE_LLM_RAG, self.llm_evaluate_rag_node)
@@ -745,8 +745,8 @@ class ChatTestService:
         builder.add_node(self.config.COMPARE, self.compare_node)
 
         # Set up the flow
-        builder.add_edge(START, self.config.MSQUARED)
-        builder.add_edge(self.config.MSQUARED, self.config.EVALUATE_RAG)
+        builder.add_edge(START, self.config.START_GET_CHAT_RESPONSE)
+        builder.add_edge(self.config.START_GET_CHAT_RESPONSE, self.config.EVALUATE_RAG)
 
         # Add conditional edges
         builder.add_conditional_edges(
@@ -1051,4 +1051,4 @@ class ChatTestService:
 
     async def cleanup(self):
         """Cleanup resources"""
-        await self.msquared_client.cleanup()
+        await self.chatbot_client.cleanup()

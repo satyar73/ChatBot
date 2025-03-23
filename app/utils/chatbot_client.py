@@ -1,18 +1,18 @@
 """
-Client for communicating with the MSquared API.
+Client for communicating with the ChatBot API.
 """
 import aiohttp
 from typing import Tuple
 
-class MSquaredClient:
-    """Client for interacting with the MSquared API."""
+class ChatBotClient:
+    """Client for interacting with the ChatBot API."""
 
     def __init__(self, api_url: str = "http://localhost:8005"):
         """
-        Initialize the MSquared client.
+        Initialize the ChatBot client.
 
         Args:
-            api_url: URL of the MSquared API
+            api_url: URL of the ChatBot API
         """
         self.api_url = api_url
         self.session = None
@@ -25,7 +25,7 @@ class MSquaredClient:
 
     async def get_response(self, prompt: str, session_id: str = "test") -> Tuple[str, str]:
         """
-        Get both RAG and non-RAG responses from the MSquared API.
+        Get both RAG and non-RAG responses from the ChatBot API.
 
         Args:
             prompt: User prompt

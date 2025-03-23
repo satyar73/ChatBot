@@ -55,10 +55,10 @@ The rewriting process applies several techniques:
 
 ### 4. Document Retrieval
 
-The rewritten query is sent to Pinecone through the `search_msquared_docs` tool:
+The rewritten query is sent to Pinecone through the `search_rag_docs` tool:
 
 ```json
-{"event": "tool_start", "timestamp": "2025-03-19T08:00:46.661629", "tool": "search_msquared_docs", "input": "{'query': 'self attribution frameworks platform bias'}"}
+{"event": "tool_start", "timestamp": "2025-03-19T08:00:46.661629", "tool": "search_rag_docs", "input": "{'query': 'self attribution frameworks platform bias'}"}
 ```
 
 This retrieval process is configured in `gpt_tools.py`:

@@ -37,8 +37,8 @@ def get_chat_service():
 def get_test_service():
     """Dependency to get a TestService instance."""
     # You could load configuration from environment variables here
-    msquared_api_url = os.getenv("MSQUARED_API_URL", "http://localhost:8005")
-    return ChatTestService(msquared_api_url)
+    chatbot_api_url = os.getenv("CHATBOT_API_URL", "http://localhost:8005")
+    return ChatTestService(chatbot_api_url)
 
 
 # Chat routes

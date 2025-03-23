@@ -1061,7 +1061,7 @@ class AgentService:
         sources = []
 
         for step in steps:
-            if (len(step) > 1 and step[0].tool == "search_msquared_docs"
+            if (len(step) > 1 and step[0].tool == "search_rag_docs"
                     and isinstance(step[1], dict)):
                 docs = step[1].get("documents", [])
                 for doc in docs:

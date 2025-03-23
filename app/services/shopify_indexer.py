@@ -22,7 +22,6 @@ from app.config.chat_config import ChatConfig
 from app.utils.logging_utils import get_logger
 from app.utils.other_utlis import load_json
 
-
 class ShopifyIndexer:
     """
     Shopify content indexer for RAG applications.
@@ -30,7 +29,6 @@ class ShopifyIndexer:
     This class fetches content from a Shopify store (blogs and products) and
     indexes it to a Pinecone vector database for retrieval-augmented generation.
     """
-
     def __init__(self, config: ChatConfig = None):
         """
         Initialize the ShopifyIndexer with configuration.
@@ -42,7 +40,8 @@ class ShopifyIndexer:
         self.logger = get_logger(__name__)
 
         # API base URLs
-        self.shopify_admin_api_base = f"https://{self.config.SHOPIFY_SHOP_DOMAIN}/admin/api/{self.config.SHOPIFY_API_VERSION}"
+        self.shopify_admin_api_base = (f"https://{self.config.SHOPIFY_SHOP_DOMAIN}"
+                                       f"/admin/api/{self.config.SHOPIFY_API_VERSION}")
 
         self.qa_data = {}
         if hasattr(self.config, 'QA_SOURCE_FILE_JSON') and self.config.QA_SOURCE_FILE_JSON:
@@ -216,9 +215,9 @@ class ShopifyIndexer:
 
         # Define key topic areas and related terms
         keyword_map = {
-            "attribution": ["attribution", "base attribution", "advanced attribution",
+            "causal attribution": ["attribution", "base attribution", "advanced attribution",
                             "self-attribution", "self-attributed", "attribution multiplier",
-                            "advanced attribution multiplier"],
+                            "advanced attribution multiplier", "causal attribution",],
             "incrementality": ["incrementality", "incrementality testing", "geo testing",
                                "holdout test", "scale test", "lift"],
             "mmm": ["marketing mix modeling", "mmm", "marketing mix model", "media mix"],
@@ -233,15 +232,15 @@ class ShopifyIndexer:
             "channels": ["facebook", "google", "tiktok", "search", "social", "display"]
         }
 
-        # Extract all questions to build a frequency map
-        questions = [q.strip().lower() for q in self.qa_data.keys()]
+        # Extract all questions/answers as a list to build a frequency map
+        q_a = list(self.qa_data.items())
 
         # Count frequency of keywords in questions
         keyword_frequency = {}
-        for question in questions:
+        for q_a_item in q_a:
             for category, terms in keyword_map.items():
                 for term in terms:
-                    if term.lower() in question:
+                    if term.lower() in q_a_item:
                         if category not in keyword_frequency:
                             keyword_frequency[category] = 0
                         keyword_frequency[category] += 1
@@ -314,14 +313,23 @@ class ShopifyIndexer:
             keyword_map = self.extract_keywords_from_qa()
 
             # Enhance records with keywords
-            enhanced_article_records = self.enhance_records_with_keywords(article_records,
-                                                                          keyword_map) if keyword_map else article_records
-            enhanced_product_records = self.enhance_records_with_keywords(product_records,
-                                                                          keyword_map) if keyword_map else product_records
-            enhanced_blog_records = self.enhance_records_with_keywords(blog_records,
-                                                                       keyword_map) if keyword_map else blog_records
+            if keyword_map:
+                enhanced_article_records = self.enhance_records_with_keywords(
+                                                            article_records,
+                                                            keyword_map)
+                enhanced_product_records = self.enhance_records_with_keywords(
+                                                            product_records,
+                                                            keyword_map)
+                enhanced_blog_records = self.enhance_records_with_keywords(
+                                                            blog_records,
+                                                            keyword_map)
+            else:
+                enhanced_article_records = article_records
+                enhanced_product_records = product_records
+                enhanced_blog_records = blog_records
 
-            # Combine all records. Blog records not included as there is not much to be included in them
+            # Combine all records. Blog records not included as there is not
+            # much to be included in them
             all_records = enhanced_article_records + enhanced_product_records
 
             # Save intermediate files if configured
@@ -648,42 +656,6 @@ class ShopifyIndexer:
             self.logger.error(f"Error indexing to Pinecone: {str(e)}")
             return False
 
-    def prepare_qa_pairs(self) -> List[Dict[str, Any]]:
-        """
-        Process Q&A content to preserve question-answer relationships
-
-        Returns:
-            List of processed Q&A records
-        """
-
-        qa_records = []
-        # Split into question-answer pairs
-
-        for question, answer in self.qa_data.items():
-            question = question.strip()
-            answer = answer.strip()
-            self.logger.info(f"Processing Q&A pair: {question} - {answer}")
-
-            if "tracking" in question.lower() and "web and app" in question.lower():
-                # Add special metadata for tracking questions
-                record = {
-                    'title': f"Q&A: {question[:50]}...",
-                    'url': '#tracking-types',
-                    'markdown': f"Q: {question}\n\nA: {answer}",
-                    'type': 'qa_pair',
-                    'special_type': 'tracking_types_examples'
-                }
-                qa_records.append(record)
-            else:
-                record = {
-                    'title': f"Q&A: {question[:50]}...",
-                    'url': '#qa',
-                    'markdown': f"Q: {question}\n\nA: {answer}",
-                    'type': 'qa_pair'
-                }
-                qa_records.append(record)
-
-        return qa_records
 
     def enrich_attribution_metadata(self, content: str) -> Dict[str, Any]:
         """
@@ -704,15 +676,15 @@ class ShopifyIndexer:
             "advanced attribution", "advanced attribution multiplier"
         ]
 
-        metadata = {}
+        metadata: Dict[str, Any] = {"attribution_terms": []}
+
+        content_lower = content.lower()
+
         # Check for attribution terms
         for term in attribution_terms:
-            if term.lower() in content.lower():
+            if term.lower() in content_lower:
                 metadata[f"has_{term.replace(' ', '_').lower()}"] = True
-
-            if "attribution_terms" not in metadata:
-                metadata["attribution_terms"] = []
-            metadata["attribution_terms"].append(term.lower())
+                metadata["attribution_terms"].append(term.lower())
 
         return metadata
 
@@ -786,3 +758,42 @@ class ShopifyIndexer:
                 "status": "error",
                 "message": str(e)
             }
+
+    ## Unused -- These can be used as hints
+    def prepare_qa_pairs(self) -> List[Dict[str, Any]]:
+        """
+        Process Q&A content to preserve question-answer relationships
+
+        Returns:
+            List of processed Q&A records
+        """
+
+        qa_records = []
+        # Split into question-answer pairs
+        q_a = list(self.qa_data.items())
+
+        for question, answer in q_a:
+            question = question.strip()
+            answer = answer.strip()
+            self.logger.info(f"Processing Q&A pair: {question} - {answer}")
+
+            if "tracking" in question.lower() and "web and app" in question.lower():
+                # Add special metadata for tracking questions
+                record = {
+                    'title': f"Q&A: {question[:50]}...",
+                    'url': '#tracking-types',
+                    'markdown': f"Q: {question}\n\nA: {answer}",
+                    'type': 'qa_pair',
+                    'special_type': 'tracking_types_examples'
+                }
+                qa_records.append(record)
+            else:
+                record = {
+                    'title': f"Q&A: {question[:50]}...",
+                    'url': '#qa',
+                    'markdown': f"Q: {question}\n\nA: {answer}",
+                    'type': 'qa_pair'
+                }
+                qa_records.append(record)
+
+        return qa_records

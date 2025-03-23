@@ -1,4 +1,6 @@
 import json
+from typing import Dict
+
 
 # Load feature flags from a configuration file
 def load_feature_flags(flag_type="chat"):
@@ -24,7 +26,7 @@ def load_feature_flags(flag_type="chat"):
         print(f"JSON decode error in feature flags: {e}")
         return {}
 
-def load_json(json_file):
+def load_json(json_file) -> Dict[str, str]:
     """
     Load QA pairs from a JSON file and cache them in memory.
 
