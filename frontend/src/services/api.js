@@ -60,7 +60,7 @@ export const chatApi = {
     try {
       // Case 1: Single prompt test with expected result
       if (testData && typeof testData === 'object' && testData.prompt) {
-        const response = await api.post('/chat/test', {
+        const response = await api.post('/test/single', {
           prompt: testData.prompt,
           expected_result: testData.expected_result || ""
         });
@@ -70,7 +70,7 @@ export const chatApi = {
       else if (typeof testData === 'string') {
         // Single test case with a string path
         if (!testData.includes('.csv')) {
-          const response = await api.post('/chat/test', { test_file: testData });
+          const response = await api.post('/test/single', { test_file: testData });
           return response.data;
         } 
         // Batch test with filepath
@@ -84,11 +84,52 @@ export const chatApi = {
       }
       // Case 3: No test data (default test)
       else {
-        const response = await api.post('/chat/test');
+        const response = await api.post('/test/single');
         return response.data;
       }
     } catch (error) {
       console.error('Error running chat tests:', error);
+      throw error;
+    }
+  },
+  
+  // New methods for long-running tests
+  startBatchTest: async (file, similarityThreshold = 0.7) => {
+    try {
+      const formData = new FormData();
+      formData.append('csv_file', file);
+      
+      const response = await api.post(`/test/batch/start?similarity_threshold=${similarityThreshold}`, 
+        formData,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data'
+          }
+        }
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Error starting batch test:', error);
+      throw error;
+    }
+  },
+  
+  getTestJobStatus: async (jobId) => {
+    try {
+      const response = await api.get(`/test/jobs/${jobId}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error getting test job status:', error);
+      throw error;
+    }
+  },
+  
+  getAllTestJobs: async () => {
+    try {
+      const response = await api.get('/test/jobs');
+      return response.data;
+    } catch (error) {
+      console.error('Error listing test jobs:', error);
       throw error;
     }
   }
@@ -118,9 +159,15 @@ export const indexApi = {
   },
   
   // Google Drive Indexing
-  indexGoogleDrive: async (folderId = null) => {
+  indexGoogleDrive: async (folderId = null, recursive = true, enhancedSlides = false) => {
     try {
-      const response = await api.post('/index/google-drive', { folder_id: folderId });
+      // Send folder_id as a query parameter instead of in the request body
+      const params = {};
+      if (folderId) params.folder_id = folderId;
+      if (recursive !== undefined) params.recursive = recursive;
+      if (enhancedSlides !== undefined) params.enhanced_slides = enhancedSlides;
+      
+      const response = await api.post('/index/google-drive', {}, { params });
       return response.data;
     } catch (error) {
       console.error('Error indexing Google Drive:', error);

@@ -958,10 +958,17 @@ class ChatTestService:
 
         # Save results to CSV
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_file = f"attribution_test_results_{timestamp}.csv"
-
-        # Also save a detailed RAG comparison report
-        rag_report_file = f"rag_comparison_report_{timestamp}.csv"
+        results_dir = os.path.join(os.getcwd(), "test_results")
+        
+        # Create results directory if it doesn't exist
+        os.makedirs(results_dir, exist_ok=True)
+        
+        output_file = os.path.join(results_dir, f"attribution_test_results_{timestamp}.csv")
+        rag_report_file = os.path.join(results_dir, f"rag_comparison_report_{timestamp}.csv")
+        
+        # Log the file paths
+        print(f"Saving test results to: {output_file}")
+        print(f"Saving RAG comparison report to: {rag_report_file}")
 
         # Convert results to DataFrame and save
         results_df = pd.DataFrame(results)

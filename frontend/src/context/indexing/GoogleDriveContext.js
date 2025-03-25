@@ -6,6 +6,8 @@ const initialState = {
   indexing: false,
   files: [],
   folderId: '',
+  recursive: true,
+  enhancedSlides: false,
   error: null,
   success: null,
   stats: {
@@ -20,6 +22,8 @@ export const ACTIONS = {
   SET_INDEXING: 'SET_INDEXING',
   SET_FILES: 'SET_FILES',
   SET_FOLDER_ID: 'SET_FOLDER_ID',
+  SET_RECURSIVE: 'SET_RECURSIVE',
+  SET_ENHANCED_SLIDES: 'SET_ENHANCED_SLIDES',
   SET_ERROR: 'SET_ERROR',
   SET_SUCCESS: 'SET_SUCCESS',
   SET_STATS: 'SET_STATS',
@@ -41,6 +45,12 @@ const googleDriveReducer = (state, action) => {
     case ACTIONS.SET_FOLDER_ID:
       return { ...state, folderId: action.payload };
     
+    case ACTIONS.SET_RECURSIVE:
+      return { ...state, recursive: action.payload };
+    
+    case ACTIONS.SET_ENHANCED_SLIDES:
+      return { ...state, enhancedSlides: action.payload };
+    
     case ACTIONS.SET_ERROR:
       return { ...state, error: action.payload };
     
@@ -61,12 +71,15 @@ const googleDriveReducer = (state, action) => {
   }
 };
 
-// Create the context
+// Create context
 export const GoogleDriveContext = createContext();
 
 // Provider component
 export const GoogleDriveProvider = ({ children }) => {
   const [state, dispatch] = useReducer(googleDriveReducer, initialState);
+
+  // For debugging only
+  console.log('GoogleDriveProvider rendering with state:', state);
 
   return (
     <GoogleDriveContext.Provider value={{ state, dispatch }}>
@@ -75,7 +88,7 @@ export const GoogleDriveProvider = ({ children }) => {
   );
 };
 
-// Custom hook for using the context
+// Custom hook for using context
 export const useGoogleDriveContext = () => {
   const context = useContext(GoogleDriveContext);
   if (!context) {

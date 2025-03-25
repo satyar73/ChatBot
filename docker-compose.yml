@@ -9,6 +9,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./.env:/app/.env
+      - /Users/satyaramachandran/credentials:/app/credentials
     environment:
       - ENVIRONMENT=${MODE:-production}
     networks:
@@ -44,6 +45,7 @@ services:
       - ./data:/app/data
       - ./.env:/app/.env
       - ./app:/app/app  # Mount app directory for live code changes
+      - /Users/satyaramachandran/credentials:/app/credentials
     environment:
       - ENVIRONMENT=development
       - PYTHONDONTWRITEBYTECODE=1

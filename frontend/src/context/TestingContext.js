@@ -11,7 +11,14 @@ const initialState = {
   uploadError: null,
   testMode: 'file', // 'file' or 'prompt'
   singlePrompt: '',
-  expectedAnswer: ''
+  expectedAnswer: '',
+  
+  // New fields for long-running jobs
+  testJobId: null,
+  jobStatus: null,
+  jobProgress: 0,
+  statusMessage: null,
+  pollInterval: null
 };
 
 // Action types
@@ -26,7 +33,14 @@ export const ACTIONS = {
   SET_TEST_MODE: 'SET_TEST_MODE',
   SET_SINGLE_PROMPT: 'SET_SINGLE_PROMPT',
   SET_EXPECTED_ANSWER: 'SET_EXPECTED_ANSWER',
-  RESET_UPLOAD_STATE: 'RESET_UPLOAD_STATE'
+  RESET_UPLOAD_STATE: 'RESET_UPLOAD_STATE',
+  
+  // New actions for long-running jobs
+  SET_TEST_JOB_ID: 'SET_TEST_JOB_ID',
+  SET_JOB_STATUS: 'SET_JOB_STATUS',
+  SET_JOB_PROGRESS: 'SET_JOB_PROGRESS',
+  SET_STATUS_MESSAGE: 'SET_STATUS_MESSAGE',
+  SET_POLL_INTERVAL: 'SET_POLL_INTERVAL'
 };
 
 // Reducer for state management
@@ -69,6 +83,22 @@ const testingReducer = (state, action) => {
         uploadError: null,
         customTestFile: ''
       };
+      
+    // New actions for long-running jobs
+    case ACTIONS.SET_TEST_JOB_ID:
+      return { ...state, testJobId: action.payload };
+      
+    case ACTIONS.SET_JOB_STATUS:
+      return { ...state, jobStatus: action.payload };
+      
+    case ACTIONS.SET_JOB_PROGRESS:
+      return { ...state, jobProgress: action.payload };
+      
+    case ACTIONS.SET_STATUS_MESSAGE:
+      return { ...state, statusMessage: action.payload };
+      
+    case ACTIONS.SET_POLL_INTERVAL:
+      return { ...state, pollInterval: action.payload };
     
     default:
       return state;

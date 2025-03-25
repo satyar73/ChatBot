@@ -112,39 +112,8 @@ const useTestingActions = () => {
           prompt: state.singlePrompt,
           expected_result: state.expectedAnswer
         });
-      }
-      // Handle file upload mode
-      else if (state.uploadedFile) {
-        // If we have an uploaded file, use that instead of a filepath
-        const formData = new FormData();
-        formData.append('csv_file', state.uploadedFile);
         
-        // Add the similarity threshold parameter
-        const params = new URLSearchParams({ similarity_threshold: 0.7 });
-        
-        // Use a direct fetch to handle FormData with file upload
-        const response = await fetch(`/chat/batch-test?${params.toString()}`, {
-          method: 'POST',
-          body: formData,
-          // Important: Do not set Content-Type header, browser will set it with boundary
-        });
-        
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => null);
-          const errorMessage = errorData?.detail || response.statusText;
-          throw new Error(`Server returned ${response.status}: ${errorMessage}`);
-        }
-        
-        results = await response.json();
-      } 
-      // Handle file path mode
-      else {
-        // Otherwise use the API with filepath
-        results = await chatApi.runTests(testFile || state.customTestFile);
-      }
-      
-      // If we get a single test result (not a batch), convert it to the expected format
-      if (results && !results.results && !Array.isArray(results)) {
+        // Convert single test result to batch format
         results = {
           total_tests: 1,
           passed: results.passed ? 1 : 0,
@@ -152,17 +121,117 @@ const useTestingActions = () => {
           pass_rate: results.passed ? 100 : 0,
           results: [results]
         };
+        
+        dispatch({ type: ACTIONS.SET_TEST_RESULTS, payload: results });
       }
-      
-      dispatch({ type: ACTIONS.SET_TEST_RESULTS, payload: results });
+      // Handle file upload mode with long-running job
+      else if (state.uploadedFile) {
+        // Start a background job for the test
+        const jobResponse = await chatApi.startBatchTest(state.uploadedFile, 0.7);
+        
+        if (!jobResponse || !jobResponse.job_id) {
+          throw new Error('Invalid job response from server');
+        }
+        
+        dispatch({ type: ACTIONS.SET_TEST_JOB_ID, payload: jobResponse.job_id });
+        dispatch({ type: ACTIONS.SET_JOB_STATUS, payload: 'pending' });
+        
+        // Show job started message
+        dispatch({ 
+          type: ACTIONS.SET_STATUS_MESSAGE, 
+          payload: `Test job started with ID: ${jobResponse.job_id}. Status will update automatically.` 
+        });
+        
+        // Start polling for job status - set up a polling interval
+        const pollInterval = setInterval(async () => {
+          try {
+            const jobStatus = await chatApi.getTestJobStatus(jobResponse.job_id);
+            
+            // Update job status in state
+            dispatch({ type: ACTIONS.SET_JOB_STATUS, payload: jobStatus.status });
+            
+            // Update progress if available
+            if (jobStatus.progress !== undefined) {
+              dispatch({ type: ACTIONS.SET_JOB_PROGRESS, payload: jobStatus.progress });
+            }
+            
+            // If job complete or failed, stop polling and update results
+            if (jobStatus.status === 'completed') {
+              clearInterval(pollInterval);
+              
+              // Set the test results from the job result
+              if (jobStatus.result) {
+                dispatch({ type: ACTIONS.SET_TEST_RESULTS, payload: jobStatus.result });
+                
+                // Show completion message
+                dispatch({ 
+                  type: ACTIONS.SET_STATUS_MESSAGE, 
+                  payload: `Test job completed in ${jobStatus.duration_seconds?.toFixed(1) || '?'} seconds with ${jobStatus.result.passed || 0} passed tests.` 
+                });
+              }
+              
+              // Mark as not loading
+              dispatch({ type: ACTIONS.SET_LOADING, payload: false });
+            }
+            else if (jobStatus.status === 'failed') {
+              clearInterval(pollInterval);
+              
+              // Show error message
+              dispatch({ 
+                type: ACTIONS.SET_ERROR, 
+                payload: `Test job failed: ${jobStatus.error?.message || 'Unknown error'}` 
+              });
+              
+              // Mark as not loading
+              dispatch({ type: ACTIONS.SET_LOADING, payload: false });
+            }
+            else {
+              // Update status message with progress
+              dispatch({ 
+                type: ACTIONS.SET_STATUS_MESSAGE, 
+                payload: `Test job running... (${jobStatus.progress || 0}% complete)` 
+              });
+            }
+          } catch (error) {
+            console.error('Error polling job status:', error);
+            // Don't stop polling on a temporary error
+            dispatch({ 
+              type: ACTIONS.SET_STATUS_MESSAGE, 
+              payload: `Error checking job status: ${error.message}. Will retry...` 
+            });
+          }
+        }, 5000); // Poll every 5 seconds
+        
+        // Save poll interval for cleanup
+        dispatch({ type: ACTIONS.SET_POLL_INTERVAL, payload: pollInterval });
+      } 
+      // Handle file path mode (direct, not async)
+      else {
+        // Use the API with filepath directly (shorter tests)
+        results = await chatApi.runTests(testFile || state.customTestFile);
+        
+        // If we get a single test result (not a batch), convert it to the expected format
+        if (results && !results.results && !Array.isArray(results)) {
+          results = {
+            total_tests: 1,
+            passed: results.passed ? 1 : 0,
+            failed: results.passed ? 0 : 1,
+            pass_rate: results.passed ? 100 : 0,
+            results: [results]
+          };
+        }
+        
+        dispatch({ type: ACTIONS.SET_TEST_RESULTS, payload: results });
+        dispatch({ type: ACTIONS.SET_LOADING, payload: false });
+      }
     } catch (err) {
       console.error('Test execution error:', err);
       dispatch({ 
         type: ACTIONS.SET_ERROR, 
         payload: 'Failed to run tests: ' + (err.message || 'Unknown error') 
       });
-    } finally {
       dispatch({ type: ACTIONS.SET_LOADING, payload: false });
+    } finally {
       // Reset upload state
       dispatch({ type: ACTIONS.RESET_UPLOAD_STATE });
       // Also clear the file input field
@@ -179,6 +248,14 @@ const useTestingActions = () => {
     dispatch, 
     fileInputRef
   ]);
+  
+  // Cleanup function for test job polling
+  const cleanupTestJob = useCallback(() => {
+    if (state.pollInterval) {
+      clearInterval(state.pollInterval);
+      dispatch({ type: ACTIONS.SET_POLL_INTERVAL, payload: null });
+    }
+  }, [state.pollInterval, dispatch]);
   
   /**
    * Calculate metrics from test results
@@ -236,7 +313,8 @@ const useTestingActions = () => {
     handleFileChange,
     handleBrowseClick,
     runTests,
-    calculateMetrics
+    calculateMetrics,
+    cleanupTestJob
   };
 };
 

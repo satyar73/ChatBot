@@ -2,12 +2,16 @@ import React from 'react';
 import { 
   Box, Paper, Typography, TextField, Button, 
   FormControlLabel, Switch, InputAdornment, 
-  IconButton, Tooltip, Alert 
+  IconButton, Tooltip, Alert, LinearProgress,
+  CircularProgress, Chip
 } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import FolderIcon from '@mui/icons-material/Folder';
 import FileOpenIcon from '@mui/icons-material/FileOpen';
+import PendingIcon from '@mui/icons-material/Pending';
+import ErrorIcon from '@mui/icons-material/Error';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { useTestingContext } from '../../context/TestingContext';
 import useTestingActions from '../../hooks/useTestingActions';
 
@@ -15,14 +19,25 @@ const TestingControls = () => {
   const { state, fileInputRef } = useTestingContext();
   const { 
     testMode, customTestFile, uploadedFile, uploadError, 
-    singlePrompt, expectedAnswer, showComparison, loading 
+    singlePrompt, expectedAnswer, showComparison, loading,
+    jobStatus, jobProgress, statusMessage, testJobId
   } = state;
   
   const { 
     setTestMode, setCustomTestFile, setSinglePrompt, 
     setExpectedAnswer, toggleShowComparison, 
-    handleFileChange, handleBrowseClick, runTests 
+    handleFileChange, handleBrowseClick, runTests,
+    cleanupTestJob
   } = useTestingActions();
+  
+  // Cleanup test job polling on unmount
+  React.useEffect(() => {
+    return () => {
+      if (testJobId) {
+        cleanupTestJob();
+      }
+    };
+  }, [testJobId, cleanupTestJob]);
 
   return (
     <Paper elevation={3} sx={{ p: 3 }}>
@@ -108,6 +123,44 @@ const TestingControls = () => {
               <Alert severity="info" sx={{ mt: 1 }}>
                 File selected: {uploadedFile.name} ({(uploadedFile.size / 1024).toFixed(2)} KB)
               </Alert>
+            )}
+            
+            {/* Job status and progress bar */}
+            {jobStatus && (
+              <Box sx={{ mt: 2 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                  <Typography variant="body2" color="text.secondary">
+                    {statusMessage || `Job status: ${jobStatus}`}
+                  </Typography>
+                  <Chip 
+                    label={jobStatus} 
+                    size="small"
+                    color={
+                      jobStatus === 'completed' ? 'success' : 
+                      jobStatus === 'failed' ? 'error' : 
+                      jobStatus === 'running' ? 'primary' : 'default'
+                    }
+                    icon={
+                      jobStatus === 'completed' ? <CheckCircleIcon /> : 
+                      jobStatus === 'failed' ? <ErrorIcon /> : 
+                      jobStatus === 'running' ? <CircularProgress size={16} /> : 
+                      <PendingIcon />
+                    }
+                  />
+                </Box>
+                
+                <LinearProgress 
+                  variant="determinate" 
+                  value={jobProgress} 
+                  sx={{ height: 10, borderRadius: 1 }} 
+                />
+                
+                {testJobId && (
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                    Job ID: {testJobId}
+                  </Typography>
+                )}
+              </Box>
             )}
           </>
         )}

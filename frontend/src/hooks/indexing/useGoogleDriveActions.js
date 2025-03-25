@@ -22,8 +22,13 @@ const useGoogleDriveActions = () => {
       // Calculate stats
       const fileTypes = {};
       response.files.forEach(file => {
-        const extension = file.name.split('.').pop().toLowerCase();
-        fileTypes[extension] = (fileTypes[extension] || 0) + 1;
+        const fileName = file.title || file.name || "";
+        if (fileName && fileName.includes('.')) {
+          const extension = fileName.split('.').pop().toLowerCase();
+          fileTypes[extension] = (fileTypes[extension] || 0) + 1;
+        } else {
+          fileTypes['other'] = (fileTypes['other'] || 0) + 1;
+        }
       });
       
       dispatch({ 
@@ -51,6 +56,20 @@ const useGoogleDriveActions = () => {
   }, [dispatch]);
   
   /**
+   * Set recursive option
+   */
+  const setRecursive = useCallback((value) => {
+    dispatch({ type: ACTIONS.SET_RECURSIVE, payload: value });
+  }, [dispatch]);
+  
+  /**
+   * Set enhanced slides option
+   */
+  const setEnhancedSlides = useCallback((value) => {
+    dispatch({ type: ACTIONS.SET_ENHANCED_SLIDES, payload: value });
+  }, [dispatch]);
+  
+  /**
    * Clear error message
    */
   const clearError = useCallback(() => {
@@ -73,10 +92,16 @@ const useGoogleDriveActions = () => {
     dispatch({ type: ACTIONS.SET_SUCCESS, payload: null });
     
     try {
-      const response = await indexApi.indexGoogleDrive(state.folderId || null);
+      const response = await indexApi.indexGoogleDrive(
+        state.folderId || null, 
+        state.recursive,
+        state.enhancedSlides
+      );
+      const fileCount = response.files_processed || 0;
+      const chunkCount = response.chunks_indexed || 0;
       dispatch({ 
         type: ACTIONS.SET_SUCCESS, 
-        payload: `Successfully indexed ${response.files_processed || 0} files from Google Drive.` 
+        payload: `Successfully indexed ${fileCount} files (${chunkCount} chunks) from Google Drive.` 
       });
       // Refresh the file list
       fetchFiles();
@@ -88,7 +113,7 @@ const useGoogleDriveActions = () => {
     } finally {
       dispatch({ type: ACTIONS.SET_INDEXING, payload: false });
     }
-  }, [state.folderId, dispatch, fetchFiles]);
+  }, [state.folderId, state.recursive, state.enhancedSlides, dispatch, fetchFiles]);
   
   /**
    * Delete a file from the index
@@ -117,6 +142,8 @@ const useGoogleDriveActions = () => {
   return {
     fetchFiles,
     setFolderId,
+    setRecursive,
+    setEnhancedSlides,
     clearError,
     clearSuccess,
     handleIndexFolder,

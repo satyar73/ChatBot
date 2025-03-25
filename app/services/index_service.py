@@ -52,7 +52,8 @@ class IndexService:
             self,
             folder_id: Optional[str] = None,
             recursive: Optional[bool] = True,
-            summarize: Optional[bool] = None
+            summarize: Optional[bool] = None,
+            enhanced_slides: Optional[bool] = None
     ) -> Dict[str, Any]:
         """Create and populate a vector index with Google Drive data"""
         try:
@@ -65,6 +66,9 @@ class IndexService:
 
             if summarize is not None:
                 self.config.update_setting("SUMMARIZE_CONTENT", summarize)
+                
+            if enhanced_slides is not None:
+                self.config.update_setting("USE_ENHANCED_SLIDES", enhanced_slides)
 
             # Set environment variable to use Google Drive
             os.environ["USE_GOOGLE_DRIVE"] = "true"
@@ -135,6 +139,62 @@ class IndexService:
 
         except Exception as e:
             print(f"Error in get_index_info: {str(e)}")
+            return {"status": "error", "message": str(e)}
+            
+    async def get_google_drive_files(self) -> Dict:
+        """Get list of indexed Google Drive files"""
+        try:
+            # Try to load the Google Drive processed files
+            drive_path = os.path.join(self.config.OUTPUT_DIR, "drive_processed.json")
+            
+            if os.path.exists(drive_path):
+                with open(drive_path, "r") as f:
+                    files = json.load(f)
+                    
+                # Extract basic file information
+                file_list = [
+                    {
+                        "id": idx,
+                        "title": file.get("title", "Unknown"),
+                        "url": file.get("url", ""),
+                        "size": len(file.get("markdown", "")) if "markdown" in file else 0
+                    }
+                    for idx, file in enumerate(files)
+                ]
+                
+                return {
+                    "status": "success",
+                    "files": file_list,
+                    "count": len(file_list)
+                }
+            else:
+                # Check if we can query the vector store directly
+                try:
+                    pc = Pinecone(api_key=self.config.PINECONE_API_KEY)
+                    
+                    if self.config.PINECONE_INDEX_NAME in pc.list_indexes().names():
+                        index = pc.Index(self.config.PINECONE_INDEX_NAME)
+                        stats = index.describe_index_stats()
+                        
+                        return {
+                            "status": "success",
+                            "files": [],
+                            "count": 0,
+                            "vector_count": stats.total_vector_count,
+                            "message": "Drive file list not available, but vectors are in the index"
+                        }
+                except Exception as e:
+                    self.logger.error(f"Error querying Pinecone for Google Drive files: {str(e)}")
+                
+                return {
+                    "status": "success",
+                    "files": [],
+                    "count": 0,
+                    "message": "No Google Drive files indexed or file list not available"
+                }
+                
+        except Exception as e:
+            self.logger.error(f"Error retrieving Google Drive files: {str(e)}")
             return {"status": "error", "message": str(e)}
 
     async def delete_index(self) -> Dict:

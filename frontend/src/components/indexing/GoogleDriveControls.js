@@ -1,13 +1,13 @@
 import React from 'react';
-import { Box, Paper, Typography, TextField, Button, CircularProgress } from '@mui/material';
+import { Box, Paper, Typography, TextField, Button, CircularProgress, FormControlLabel, Switch, FormGroup } from '@mui/material';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import { useGoogleDriveContext } from '../../context/indexing/GoogleDriveContext';
 import useGoogleDriveActions from '../../hooks/indexing/useGoogleDriveActions';
 
 const GoogleDriveControls = () => {
   const { state } = useGoogleDriveContext();
-  const { folderId, indexing } = state;
-  const { setFolderId, handleIndexFolder } = useGoogleDriveActions();
+  const { folderId, indexing, recursive, enhancedSlides } = state;
+  const { setFolderId, setRecursive, setEnhancedSlides, handleIndexFolder } = useGoogleDriveActions();
 
   return (
     <Paper elevation={3} sx={{ p: 3 }}>
@@ -34,6 +34,29 @@ const GoogleDriveControls = () => {
             {indexing ? 'Indexing...' : 'Index Folder'}
           </Button>
         </Box>
+        
+        <FormGroup>
+          <FormControlLabel 
+            control={
+              <Switch 
+                checked={recursive} 
+                onChange={(e) => setRecursive(e.target.checked)}
+                disabled={indexing}
+              />
+            } 
+            label="Process subfolders recursively" 
+          />
+          <FormControlLabel 
+            control={
+              <Switch 
+                checked={enhancedSlides} 
+                onChange={(e) => setEnhancedSlides(e.target.checked)}
+                disabled={indexing}
+              />
+            } 
+            label="Use enhanced slide processing (GPT-4 Vision)" 
+          />
+        </FormGroup>
         
         {indexing && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>

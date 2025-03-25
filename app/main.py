@@ -25,21 +25,23 @@ else:
 
 # Import with the determined path
 if import_base:
-    from app.routes import chat_routes, index_routes
+    from app.routes import chat_routes, index_routes, test_routes
     from app.utils.logging_utils import configure_logging, update_logger_levels, get_logger
     from app.config.logging_config import (
         SERVICE_LOG_LEVELS,
         DEVELOPMENT_LOG_LEVELS,
         PRODUCTION_LOG_LEVELS
     )
+    from app.services.background_jobs import lifespan
 else:
-    from routes import chat_routes, index_routes
+    from routes import chat_routes, index_routes, test_routes
     from utils.logging_utils import configure_logging, update_logger_levels, get_logger
     from config.logging_config import (
         SERVICE_LOG_LEVELS,
         DEVELOPMENT_LOG_LEVELS,
         PRODUCTION_LOG_LEVELS
     )
+    from services.background_jobs import lifespan
 
 # Initialize logging first
 configure_logging()
@@ -71,6 +73,7 @@ app = FastAPI(
     title="AttributionGPT Backend",
     version="1.0",
     description="Backend for AttributionGPT with chat and index management",
+    lifespan=lifespan,
 )
 
 # Allow all origins (replace "*" with the specific origin of your Angular app if possible)
@@ -85,6 +88,7 @@ app.add_middleware(
 # Include routers
 app.include_router(chat_routes.router)
 app.include_router(index_routes.router)
+app.include_router(test_routes.router)
 
 
 @app.get("/health")

@@ -21,6 +21,12 @@ from langchain_openai import OpenAIEmbeddings
 from openai import OpenAI
 
 # Import from your existing project structure
+import base64
+import requests
+from PIL import Image
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+
 from app.config.chat_config import ChatConfig
 
 class CustomJsonLoader(BaseLoader):
@@ -47,6 +53,7 @@ class GoogleDriveIndexer:
     def __init__(self, config: Optional[ChatConfig] = None):
         """Initialize the indexer with configuration"""
         self.config = config or ChatConfig()
+        self.last_chunks = []  # Store chunks for reporting
 
         # Validate configuration
         missing_settings = self.config.validate_settings()
@@ -172,10 +179,15 @@ class GoogleDriveIndexer:
                     return content.decode('utf-8')
 
                 elif mime_type == 'application/vnd.google-apps.presentation':
-                    # Export Google Slides as plain text
-                    request = self.drive_service.files().export_media(fileId=file_id, mimeType='text/plain')
-                    content = self._download_file(request)
-                    return content.decode('utf-8')
+                    # Check if we should use the enhanced slide extraction
+                    if hasattr(self.config, 'USE_ENHANCED_SLIDES') and self.config.USE_ENHANCED_SLIDES:
+                        # Use the enhanced slide extraction with GPT-4 Vision
+                        return self._extract_slides_with_vision(file_id, file_name)
+                    else:
+                        # Fallback to basic text extraction
+                        request = self.drive_service.files().export_media(fileId=file_id, mimeType='text/plain')
+                        content = self._download_file(request)
+                        return content.decode('utf-8')
 
                 else:
                     self.logger.warning(f"Unsupported Google Workspace format: {mime_type}")
@@ -275,6 +287,198 @@ class GoogleDriveIndexer:
         except Exception as e:
             self.logger.error(f"Error extracting text from PPTX: {str(e)}")
             return ""
+            
+    def _extract_slides_with_vision(self, presentation_id, presentation_name):
+        """
+        Enhanced method to extract content from Google Slides using the Slides API
+        and GPT-4 Vision for richer content extraction including visuals.
+        
+        Args:
+            presentation_id: The ID of the Google Slides presentation
+            presentation_name: The name of the presentation
+            
+        Returns:
+            A markdown string containing the enhanced slide content
+        """
+        self.logger.info(f"Extracting slides with vision for {presentation_name} ({presentation_id})")
+        
+        try:
+            # Initialize slides service if not already done
+            if not hasattr(self, 'slides_service'):
+                credentials = service_account.Credentials.from_service_account_file(
+                    self.config.GOOGLE_DRIVE_CREDENTIALS_FILE,
+                    scopes=['https://www.googleapis.com/auth/drive.readonly']
+                )
+                self.slides_service = build('slides', 'v1', credentials=credentials)
+                
+            # Get presentation
+            presentation = self.slides_service.presentations().get(
+                presentationId=presentation_id
+            ).execute()
+            
+            # Get all slides
+            slides = presentation.get('slides', [])
+            self.logger.info(f"Processing {len(slides)} slides from {presentation_name}")
+            
+            # Final markdown content
+            full_content = f"# {presentation_name}\n\n"
+            
+            # Limit number of slides to process if specified in config
+            max_slides = getattr(self.config, 'MAX_SLIDES_TO_PROCESS', len(slides))
+            slides_to_process = slides[:max_slides]
+            
+            # Process each slide
+            for slide_index, slide in enumerate(slides_to_process):
+                slide_number = slide_index + 1
+                self.logger.info(f"Processing slide {slide_number}/{len(slides)}")
+                
+                # Export the slide as PNG
+                try:
+                    export_request = self.slides_service.presentations().pages().getThumbnail(
+                        presentationId=presentation_id,
+                        pageObjectId=slide['objectId'],
+                        thumbnailProperties_thumbnailSize='LARGE'
+                    ).execute()
+                    
+                    # Get the thumbnail URL
+                    thumbnail_url = export_request.get('contentUrl')
+                    
+                    # Download the image
+                    image_response = requests.get(thumbnail_url, timeout=30)
+                    if image_response.status_code != 200:
+                        self.logger.warning(f"Failed to download slide {slide_number} image: {image_response.status_code}")
+                        continue
+                        
+                    image_content = image_response.content
+                    
+                    # Analyze with GPT-4 Vision
+                    slide_markdown = self._analyze_slide_with_llm(image_content, slide_number)
+                    if slide_markdown:
+                        full_content += f"{slide_markdown}\n\n---\n\n"
+                    else:
+                        # Fallback to basic extraction if vision analysis fails
+                        slide_title = f"Slide {slide_number}"
+                        slide_content = []
+                        
+                        # Extract text elements
+                        for element in slide.get('pageElements', []):
+                            if 'shape' in element and 'text' in element['shape']:
+                                text_content = ""
+                                for textElement in element['shape']['text'].get('textElements', []):
+                                    if 'textRun' in textElement and 'content' in textElement['textRun']:
+                                        text_content += textElement['textRun']['content']
+                                
+                                # Check if this might be a title
+                                if 'title' in element.get('objectId', '').lower() or (
+                                        'transform' in element and element['transform'].get('scaleY', 0) > 1):
+                                    slide_title = text_content.strip()
+                                else:
+                                    # Add to content if not empty
+                                    if text_content.strip():
+                                        slide_content.append(text_content.strip())
+                        
+                        # Format as markdown
+                        slide_md = f"## {slide_title}\n\n"
+                        for item in slide_content:
+                            slide_md += f"{item}\n\n"
+                            
+                        full_content += f"{slide_md}\n\n---\n\n"
+                
+                except Exception as e:
+                    self.logger.error(f"Error processing slide {slide_number}: {str(e)}")
+                    continue
+            
+            return full_content
+            
+        except Exception as e:
+            self.logger.error(f"Error extracting slides with vision: {str(e)}")
+            # Fall back to plain text extraction
+            request = self.drive_service.files().export_media(fileId=presentation_id, mimeType='text/plain')
+            content = self._download_file(request)
+            return content.decode('utf-8')
+    
+    def _analyze_slide_with_llm(self, image_content, slide_number):
+        """
+        Analyze a slide image using GPT-4 Vision
+        
+        Args:
+            image_content: Raw image data
+            slide_number: The slide number for reference
+            
+        Returns:
+            Markdown string with the analysis result
+        """
+        try:
+            # Resize image if needed to meet API requirements
+            img = Image.open(io.BytesIO(image_content))
+            
+            # GPT-4 Vision has a maximum dimension requirement
+            max_dimension = 2048  # Max dimension allowed
+            width, height = img.size
+            
+            if width > max_dimension or height > max_dimension:
+                # Calculate new dimensions while maintaining aspect ratio
+                if width > height:
+                    new_width = max_dimension
+                    new_height = int(height * (max_dimension / width))
+                else:
+                    new_height = max_dimension
+                    new_width = int(width * (max_dimension / height))
+                
+                img = img.resize((new_width, new_height))
+                self.logger.info(f"Resized slide {slide_number} image from {width}x{height} to {new_width}x{new_height}")
+            
+            # Convert to bytes and encode as base64
+            buffer = io.BytesIO()
+            img.save(buffer, format="PNG")
+            image_bytes = buffer.getvalue()
+            base64_image = base64.b64encode(image_bytes).decode('utf-8')
+            
+            # Prepare the prompt for LLM analysis
+            prompt = """
+            Please provide a complete and detailed transcription of ALL content in this slide image, formatted as clean markdown:
+
+            1. Use "## Title" for the slide title (exactly as it appears, without mentioning it's the slide title)
+            2. Use "### Subtitle" for any subtitles (exactly as they appear)
+            3. Format ALL bullet points as proper markdown lists (using - or * for each item) with proper indentation for nested lists
+            4. If it's a table: render the ENTIRE table in markdown table format (|---|---|) with ALL rows, columns, and cell contents
+            5. If it contains a chart/graph: create a detailed section describing the chart including:
+               - Chart type and title (as a heading)
+               - All axis labels and ranges
+               - Each data series and its values
+               - Legend information
+               - Key trends or data points
+            6. If it contains images: create a section describing each image in detail
+            7. Include all footnotes, citations, or small text using appropriate markdown (e.g., > for quotes, *italics* for emphasis)
+
+            Do NOT add any meta-commentary (like "This slide contains") - just transcribe the content directly using proper markdown formatting.
+            Do NOT summarize or paraphrase - transcribe EVERYTHING exactly as it appears.
+            Format your response as a clean, properly structured markdown document that could be used as-is.
+            """
+            
+            # Make the API request
+            client = OpenAI(api_key=self.config.OPENAI_API_KEY)
+            response = client.chat.completions.create(
+                model=getattr(self.config, 'OPENAI_VISION_MODEL', 'gpt-4o'),
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}
+                        ]
+                    }
+                ],
+                max_tokens=getattr(self.config, 'VISION_MAX_TOKENS', 4000),
+                temperature=0
+            )
+            
+            # Extract and return the LLM's description
+            return response.choices[0].message.content
+            
+        except Exception as e:
+            self.logger.error(f"Error analyzing slide {slide_number} with LLM: {str(e)}")
+            return None
 
     def condense_content_using_llm(self, content):
         """Summarize content using OpenAI's API"""
@@ -411,12 +615,20 @@ class GoogleDriveIndexer:
             )
         )
 
-        # Initialize embeddings
-        embeddings = OpenAIEmbeddings(
-            api_key=self.config.OPENAI_API_KEY,
-            model=self.config.OPENAI_EMBEDDING_MODEL,
-            dimensions=embedding_dim
-        )
+        # Initialize embeddings with model-appropriate parameters
+        # Newer models don't support explicit dimensions parameter
+        if self.config.OPENAI_EMBEDDING_MODEL in ["text-embedding-3-small", "text-embedding-3-large"]:
+            embeddings = OpenAIEmbeddings(
+                api_key=self.config.OPENAI_API_KEY,
+                model=self.config.OPENAI_EMBEDDING_MODEL
+            )
+        else:
+            # Older models like text-embedding-ada-002 support dimensions
+            embeddings = OpenAIEmbeddings(
+                api_key=self.config.OPENAI_API_KEY,
+                model=self.config.OPENAI_EMBEDDING_MODEL,
+                dimensions=embedding_dim
+            )
 
         # Load and split documents
         documents = loader.load()
@@ -429,6 +641,7 @@ class GoogleDriveIndexer:
             chunk_overlap=self.config.CHUNK_OVERLAP
         )
         docs = text_splitter.split_documents(documents)
+        self.last_chunks = docs  # Store for reporting
         self.logger.info(f"Split into {len(docs)} chunks.")
 
         # Store in Pinecone
@@ -458,7 +671,12 @@ class GoogleDriveIndexer:
 
             if success:
                 self.logger.info("✅ Complete process finished successfully!")
-                return {"status": "success", "message": "Indexing completed successfully"}
+                return {
+                    "status": "success", 
+                    "message": "Indexing completed successfully",
+                    "files_processed": len(records),
+                    "chunks_indexed": len(records) > 0 and len(self.last_chunks) or 0
+                }
             else:
                 self.logger.error("❌ Process completed with errors in indexing step.")
                 return {"status": "error", "message": "Indexing failed"}

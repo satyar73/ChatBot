@@ -18,6 +18,12 @@ class ChatConfig:
         self.GOOGLE_DRIVE_CREDENTIALS_FILE = os.getenv("GOOGLE_DRIVE_CREDENTIALS_FILE")
         self.GOOGLE_DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", None)  # Optional, can be None to use root
         self.GOOGLE_DRIVE_RECURSIVE = True  # Process subfolders recursively
+        
+        # Google Slides Enhanced Processing
+        self.USE_ENHANCED_SLIDES = os.getenv("USE_ENHANCED_SLIDES", "false").lower() == "true"
+        self.OPENAI_VISION_MODEL = os.getenv("OPENAI_VISION_MODEL", "gpt-4o")
+        self.VISION_MAX_TOKENS = int(os.getenv("VISION_MAX_TOKENS", "4000"))
+        self.MAX_SLIDES_TO_PROCESS = int(os.getenv("MAX_SLIDES_TO_PROCESS", "50"))
 
         # Google Drive specific file paths
         self.DRIVE_DOCUMENTS_FILE = os.path.join(self.OUTPUT_DIR, "drive_documents.json")
@@ -44,7 +50,7 @@ class ChatConfig:
 
         # OpenAI Settings
         self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-        self.OPENAI_EMBEDDING_MODEL = "text-embedding-ada-002"
+        self.OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
         self.OPENAI_SUMMARY_MODEL = "gpt-3.5-turbo"
         self.EMBEDDING_CONTEXT_LENGTH = 8192
 
@@ -81,7 +87,7 @@ class ChatConfig:
         # Vector Store Configuration
         self.VECTOR_STORE_CONFIG = {
             "index_name": "attributiongpt-23082024",
-            "embedding_model": "text-embedding-3-small",
+            "embedding_model": self.OPENAI_EMBEDDING_MODEL,
             "dimensions": 1536
         }
 

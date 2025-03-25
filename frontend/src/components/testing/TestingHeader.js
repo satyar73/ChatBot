@@ -1,8 +1,15 @@
 import React from 'react';
-import { Typography } from '@mui/material';
+import { Typography, Box } from '@mui/material';
 
 const TestingHeader = () => {
-  return <Typography variant="h5">Chat Testing Interface</Typography>;
+  return (
+    <Box sx={{ mb: 1 }}>
+      <Typography variant="h5">Chat Testing Interface</Typography>
+      <Typography variant="body2" color="text.secondary">
+        Run tests to evaluate chat performance with both quick tests and long-running batch operations
+      </Typography>
+    </Box>
+  );
 };
 
 export default TestingHeader;
