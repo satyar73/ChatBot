@@ -142,6 +142,9 @@ const useTestingActions = () => {
           payload: `Test job started with ID: ${jobResponse.job_id}. Status will update automatically.` 
         });
         
+        // Record start time for progress calculation
+        const startTime = Date.now();
+        
         // Start polling for job status - set up a polling interval
         const pollInterval = setInterval(async () => {
           try {
@@ -150,23 +153,46 @@ const useTestingActions = () => {
             // Update job status in state
             dispatch({ type: ACTIONS.SET_JOB_STATUS, payload: jobStatus.status });
             
+            // Debug job status response
+            console.log('Job status response:', jobStatus);
+            
             // Update progress if available
             if (jobStatus.progress !== undefined) {
+              console.log('Setting job progress to:', jobStatus.progress);
               dispatch({ type: ACTIONS.SET_JOB_PROGRESS, payload: jobStatus.progress });
+            } else {
+              console.log('Progress not available in jobStatus, using default progress indicator');
+              // Always set some progress for running jobs, even if backend doesn't provide it
+              if (jobStatus.status === 'running') {
+                // Just set a default value that increases over time
+                const timeBasedProgress = Math.min(
+                  10 + Math.floor((Date.now() - startTime) / 1000), // +1% per second
+                  90 // Cap at 90%
+                );
+                console.log('Using time-based progress:', timeBasedProgress);
+                dispatch({ type: ACTIONS.SET_JOB_PROGRESS, payload: timeBasedProgress });
+              }
             }
             
             // If job complete or failed, stop polling and update results
             if (jobStatus.status === 'completed') {
               clearInterval(pollInterval);
               
+              // Set the poll interval to null to prevent memory leaks
+              dispatch({ type: ACTIONS.SET_POLL_INTERVAL, payload: null });
+              
               // Set the test results from the job result
               if (jobStatus.result) {
                 dispatch({ type: ACTIONS.SET_TEST_RESULTS, payload: jobStatus.result });
                 
-                // Show completion message
+                // Show completion message with any file paths from the message
+                const completionMessage = jobStatus.message && typeof jobStatus.message === 'string' 
+                  ? jobStatus.message  // Use the message from the server which includes file paths
+                  : `Test job completed in ${jobStatus.duration_seconds?.toFixed(1) || '?'} seconds with ${jobStatus.result.passed || 0} passed tests.`;
+                
                 dispatch({ 
                   type: ACTIONS.SET_STATUS_MESSAGE, 
-                  payload: `Test job completed in ${jobStatus.duration_seconds?.toFixed(1) || '?'} seconds with ${jobStatus.result.passed || 0} passed tests.` 
+                  payload: completionMessage
                 });
               }
               
@@ -175,6 +201,9 @@ const useTestingActions = () => {
             }
             else if (jobStatus.status === 'failed') {
               clearInterval(pollInterval);
+              
+              // Set the poll interval to null to prevent memory leaks
+              dispatch({ type: ACTIONS.SET_POLL_INTERVAL, payload: null });
               
               // Show error message
               dispatch({ 
@@ -187,9 +216,12 @@ const useTestingActions = () => {
             }
             else {
               // Update status message with progress
-              dispatch({ 
+              const statusMessage = jobStatus.message && typeof jobStatus.message === 'string'
+                  ? `Current status message: ${jobStatus.message}`
+                  : '';
+              dispatch({
                 type: ACTIONS.SET_STATUS_MESSAGE, 
-                payload: `Test job running... (${jobStatus.progress || 0}% complete)` 
+                payload: `Test job running... (${jobStatus.progress || 0}% complete) - ${statusMessage}`
               });
             }
           } catch (error) {

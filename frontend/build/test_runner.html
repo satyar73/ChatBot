@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test Runner</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    h1 {
+      color: #333;
+    }
+    .form-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+    button {
+      background-color: #4CAF50;
+      color: white;
+      padding: 10px 15px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+    #result {
+      margin-top: 20px;
+      border: 1px solid #ddd;
+      padding: 10px;
+      border-radius: 4px;
+      background-color: #f9f9f9;
+      min-height: 100px;
+    }
+    .progress-container {
+      width: 100%;
+      margin-top: 20px;
+      display: none;
+    }
+    .progress-bar {
+      height: 20px;
+      background-color: #4CAF50;
+      width: 0%;
+      border-radius: 4px;
+    }
+    .status {
+      margin-top: 10px;
+      font-style: italic;
+    }
+    input[type="file"] {
+      display: block;
+      margin-top: 5px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Long-Running Test Runner</h1>
+  
+  <div class="form-group">
+    <label for="file">Upload Test CSV File:</label>
+    <input type="file" id="file" accept=".csv">
+  </div>
+  
+  <div class="form-group">
+    <label for="threshold">Similarity Threshold:</label>
+    <input type="number" id="threshold" value="0.7" min="0" max="1" step="0.1">
+  </div>
+  
+  <button id="startButton">Start Test Job</button>
+  
+  <div class="progress-container" id="progressContainer">
+    <h3>Job Progress</h3>
+    <div class="progress-bar" id="progressBar"></div>
+    <div class="status" id="jobStatus">Starting job...</div>
+  </div>
+  
+  <div id="result">
+    <p>Results will appear here...</p>
+  </div>
+  
+  <script>
+    // DOM elements
+    const fileInput = document.getElementById('file');
+    const thresholdInput = document.getElementById('threshold');
+    const startButton = document.getElementById('startButton');
+    const progressContainer = document.getElementById('progressContainer');
+    const progressBar = document.getElementById('progressBar');
+    const jobStatus = document.getElementById('jobStatus');
+    const resultDiv = document.getElementById('result');
+    
+    // Variables to track job
+    let jobId = null;
+    let pollInterval = null;
+    
+    // Event listener for start button
+    startButton.addEventListener('click', async () => {
+      if (!fileInput.files || fileInput.files.length === 0) {
+        alert('Please select a CSV file first.');
+        return;
+      }
+      
+      const file = fileInput.files[0];
+      const threshold = parseFloat(thresholdInput.value);
+      
+      try {
+        // Disable button while job is running
+        startButton.disabled = true;
+        
+        // Show progress container
+        progressContainer.style.display = 'block';
+        progressBar.style.width = '0%';
+        jobStatus.textContent = 'Starting job...';
+        resultDiv.innerHTML = '<p>Job starting...</p>';
+        
+        // Create form data
+        const formData = new FormData();
+        formData.append('csv_file', file);
+        
+        // Start the batch test job
+        const response = await fetch(`/test/batch/start?similarity_threshold=${threshold}`, {
+          method: 'POST',
+          body: formData
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Error starting job: ${response.status} ${response.statusText}`);
+        }
+        
+        const jobData = await response.json();
+        jobId = jobData.job_id;
+        
+        jobStatus.textContent = `Job started with ID: ${jobId}`;
+        resultDiv.innerHTML = `<p>Job started with ID: ${jobId}</p>`;
+        
+        // Start polling for job status
+        pollInterval = setInterval(checkJobStatus, 5000);
+      } catch (error) {
+        console.error('Error starting job:', error);
+        jobStatus.textContent = `Error: ${error.message}`;
+        resultDiv.innerHTML = `<p>Error: ${error.message}</p>`;
+        startButton.disabled = false;
+      }
+    });
+    
+    // Function to check job status
+    async function checkJobStatus() {
+      if (!jobId) return;
+      
+      try {
+        const response = await fetch(`/test/jobs/${jobId}`);
+        
+        if (!response.ok) {
+          throw new Error(`Error checking job: ${response.status} ${response.statusText}`);
+        }
+        
+        const jobData = await response.json();
+        
+        // Update progress bar
+        if (jobData.progress !== undefined) {
+          progressBar.style.width = `${jobData.progress}%`;
+        }
+        
+        // Update status message
+        jobStatus.textContent = `Status: ${jobData.status} - ${jobData.message || ''}`;
+        
+        // If job completed or failed, stop polling
+        if (jobData.status === 'completed') {
+          clearInterval(pollInterval);
+          startButton.disabled = false;
+          
+          // Format and display results
+          const result = jobData.result || {};
+          const resultHtml = `
+            <h3>Test Results</h3>
+            <p>Total tests: ${result.total_tests || 0}</p>
+            <p>Passed: ${result.passed || 0}</p>
+            <p>Failed: ${result.failed || 0}</p>
+            <p>Pass rate: ${result.pass_rate?.toFixed(2) || 0}%</p>
+            <p>Duration: ${jobData.duration_seconds?.toFixed(2) || '?'} seconds</p>
+          `;
+          
+          resultDiv.innerHTML = resultHtml;
+        } 
+        else if (jobData.status === 'failed') {
+          clearInterval(pollInterval);
+          startButton.disabled = false;
+          
+          resultDiv.innerHTML = `<p>Job failed: ${jobData.error?.message || 'Unknown error'}</p>`;
+        }
+      } catch (error) {
+        console.error('Error checking job status:', error);
+        jobStatus.textContent = `Error checking status: ${error.message}`;
+      }
+    }
+  </script>
+</body>
+</html>

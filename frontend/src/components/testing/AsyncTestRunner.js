@@ -22,9 +22,9 @@ const AsyncTestRunner = () => {
   const [file, setFile] = useState(null);
   const [fileError, setFileError] = useState(null);
   const fileInputRef = useRef(null);
-  const { state } = useTestingContext();
+  const { state, dispatch } = useTestingContext();
   const { 
-    runTests, cleanupTestJob
+    runTests, cleanupTestJob, clearError
   } = useTestingActions();
   
   const { 
@@ -39,6 +39,18 @@ const AsyncTestRunner = () => {
       }
     };
   }, [testJobId, cleanupTestJob]);
+  
+  // Function to manually reset the test job state
+  const handleReset = () => {
+    cleanupTestJob();
+    clearError();
+    dispatch({ type: ACTIONS.SET_JOB_STATUS, payload: null });
+    dispatch({ type: ACTIONS.SET_JOB_PROGRESS, payload: 0 });
+    dispatch({ type: ACTIONS.SET_STATUS_MESSAGE, payload: null });
+    dispatch({ type: ACTIONS.SET_TEST_JOB_ID, payload: null });
+    dispatch({ type: ACTIONS.SET_LOADING, payload: false });
+    setFile(null);
+  };
 
   const handleFileChange = (event) => {
     const selectedFile = event.target.files?.[0];
@@ -74,7 +86,6 @@ const AsyncTestRunner = () => {
     
     try {
       // Update the uploadedFile in the context state first
-      const { dispatch } = useTestingContext();
       dispatch({ type: ACTIONS.SET_UPLOADED_FILE, payload: file });
       
       // Run the tests with the file in context
@@ -148,37 +159,60 @@ const AsyncTestRunner = () => {
         />
       </Box>
 
-      {/* Job Status Section */}
+      {/* Job Status Section - always visible while running or after completion */}
       {(jobStatus || loading) && (
         <Box sx={{ mb: 3 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
             <Typography variant="body2" color="text.secondary">
               {statusMessage 
-                ? statusMessage.split("\n")[0] // Show only the first line in the header
+                ? statusMessage.includes("\n") 
+                  ? statusMessage.split("\n").slice(0, 2).join(" - ") // Show the first two lines of status (test # and current test)
+                  : statusMessage
                 : `Test job status: ${jobStatus || 'initializing...'}`
               }
             </Typography>
-            <Chip 
-              label={jobStatus || 'initializing'} 
-              size="small"
-              color={
-                jobStatus === 'completed' ? 'success' : 
-                jobStatus === 'failed' ? 'error' : 
-                jobStatus === 'running' ? 'primary' : 'default'
-              }
-              icon={
-                jobStatus === 'completed' ? <CheckCircleIcon /> : 
-                jobStatus === 'failed' ? <ErrorIcon /> : 
-                jobStatus === 'running' ? <CircularProgress size={16} /> : 
-                <PendingIcon />
-              }
-            />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Chip 
+                label={jobStatus || 'initializing'} 
+                size="small"
+                color={
+                  jobStatus === 'completed' ? 'success' : 
+                  jobStatus === 'failed' ? 'error' : 
+                  jobStatus === 'running' ? 'primary' : 'default'
+                }
+                icon={
+                  jobStatus === 'completed' ? <CheckCircleIcon /> : 
+                  jobStatus === 'failed' ? <ErrorIcon /> : 
+                  jobStatus === 'running' ? <CircularProgress size={16} /> : 
+                  <PendingIcon />
+                }
+              />
+              {/* Reset button for completed or failed jobs */}
+              {(jobStatus === 'completed' || jobStatus === 'failed') && (
+                <Button 
+                  variant="outlined" 
+                  size="small" 
+                  color="primary" 
+                  onClick={handleReset}
+                >
+                  Reset
+                </Button>
+              )}
+            </Box>
           </Box>
           
+          {/* Always show a progress bar */}
           <LinearProgress 
-            variant="determinate" 
+            variant={jobStatus === 'running' && (!jobProgress || jobProgress < 5) ? "indeterminate" : "determinate"}
             value={jobProgress || 0} 
-            sx={{ height: 10, borderRadius: 1 }} 
+            sx={{ 
+              height: 10, 
+              borderRadius: 1,
+              visibility: 'visible', // Always visible
+              '& .MuiLinearProgress-bar': {
+                transition: 'transform 0.5s ease' // Smoother transitions
+              }
+            }} 
           />
           
           {testJobId && (
@@ -191,7 +225,14 @@ const AsyncTestRunner = () => {
           {statusMessage && statusMessage.includes("\n") && (
             <Alert severity="info" sx={{ mt: 2, fontSize: '0.875rem' }}>
               {statusMessage.split("\n").slice(1).map((line, index) => (
-                <div key={index}>{line}</div>
+                // Add style to ensure file paths can be read without being cut off
+                <div key={index} style={{ 
+                  wordBreak: 'break-word', 
+                  marginBottom: '4px',
+                  whiteSpace: 'normal' 
+                }}>
+                  {line}
+                </div>
               ))}
             </Alert>
           )}

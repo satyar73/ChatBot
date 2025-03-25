@@ -327,7 +327,16 @@ async def main():
 
             # Save results to CSV
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_file = f"semantic_test_results_{timestamp}.csv"
+            
+            # Get the absolute path to the test_results directory
+            # Use project root instead of current working directory
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+            results_dir = os.path.join(project_root, "test_results")
+            
+            # Create results directory if it doesn't exist
+            os.makedirs(results_dir, exist_ok=True)
+            
+            output_file = os.path.join(results_dir, f"semantic_test_results_{timestamp}.csv")
             results.to_csv(output_file, index=False)
             print(f"Results saved to {output_file}")
 
@@ -340,7 +349,7 @@ async def main():
                 ]
 
                 rag_report = results[rag_columns] if all(col in results.columns for col in rag_columns) else results
-                rag_report_file = f"rag_comparison_{timestamp}.csv"
+                rag_report_file = os.path.join(results_dir, f"rag_comparison_{timestamp}.csv")
                 rag_report.to_csv(rag_report_file, index=False)
                 print(f"RAG comparison report saved to {rag_report_file}")
 

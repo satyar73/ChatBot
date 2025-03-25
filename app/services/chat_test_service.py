@@ -958,21 +958,76 @@ class ChatTestService:
 
         # Save results to CSV
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        results_dir = os.path.join(os.getcwd(), "test_results")
         
-        # Create results directory if it doesn't exist
-        os.makedirs(results_dir, exist_ok=True)
+        # Try multiple approaches to ensure we save results somewhere accessible
         
+        # Approach 1: Use absolute path from project root
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        results_dir_1 = os.path.join(project_root, "test_results")
+        
+        # Approach 2: Use Docker volume path (if running in Docker)
+        results_dir_2 = "/app/test_results"
+        
+        # Approach 3: Use current working directory
+        results_dir_3 = os.path.join(os.getcwd(), "test_results")
+        
+        # Print debug info about directories
+        print(f"DEBUG: Current working directory: {os.getcwd()}")
+        print(f"DEBUG: Project root path: {project_root}")
+        print(f"DEBUG: Results dir 1: {results_dir_1}")
+        print(f"DEBUG: Results dir 2: {results_dir_2}")
+        print(f"DEBUG: Results dir 3: {results_dir_3}")
+        
+        # Try to create all possible directories
+        for results_dir in [results_dir_1, results_dir_2, results_dir_3]:
+            try:
+                os.makedirs(results_dir, exist_ok=True)
+                print(f"DEBUG: Successfully created/verified directory: {results_dir}")
+            except Exception as e:
+                print(f"DEBUG: Error creating directory {results_dir}: {str(e)}")
+        
+        # Decide which directory to use - prioritize Docker volume if it exists
+        if os.path.exists(results_dir_2) and os.access(results_dir_2, os.W_OK):
+            results_dir = results_dir_2
+        elif os.path.exists(results_dir_1) and os.access(results_dir_1, os.W_OK):
+            results_dir = results_dir_1
+        else:
+            results_dir = results_dir_3
+            
+        print(f"DEBUG: Selected results directory: {results_dir}")
+        
+        # Define output file paths
         output_file = os.path.join(results_dir, f"attribution_test_results_{timestamp}.csv")
         rag_report_file = os.path.join(results_dir, f"rag_comparison_report_{timestamp}.csv")
         
         # Log the file paths
         print(f"Saving test results to: {output_file}")
         print(f"Saving RAG comparison report to: {rag_report_file}")
+        
+        # Also log to the Python logger
+        logger.info(f"Saving test results to: {output_file}")
+        logger.info(f"Saving RAG comparison report to: {rag_report_file}")
 
         # Convert results to DataFrame and save
-        results_df = pd.DataFrame(results)
-        results_df.to_csv(output_file, index=False)
+        try:
+            results_df = pd.DataFrame(results)
+            print(f"DEBUG: Created DataFrame with {len(results_df)} rows")
+            
+            # Save main results file
+            results_df.to_csv(output_file, index=False)
+            print(f"DEBUG: Successfully saved results to {output_file}")
+            
+            # Verify file was created
+            if os.path.exists(output_file):
+                file_size = os.path.getsize(output_file)
+                print(f"DEBUG: Verified file exists at {output_file}, size: {file_size} bytes")
+            else:
+                print(f"DEBUG: ERROR - File was not created at {output_file}")
+                
+        except Exception as e:
+            print(f"DEBUG: Error saving results file: {str(e)}")
+            import traceback
+            print(f"DEBUG: Traceback: {traceback.format_exc()}")
 
         # Create a separate RAG comparison report
         try:
@@ -1007,7 +1062,19 @@ class ChatTestService:
             # Create and save RAG comparison report
             if rag_report_data:
                 rag_report_df = pd.DataFrame(rag_report_data)
+                print(f"DEBUG: Created RAG report DataFrame with {len(rag_report_df)} rows")
+                
+                # Save RAG report file
                 rag_report_df.to_csv(rag_report_file, index=False)
+                print(f"DEBUG: Successfully saved RAG report to {rag_report_file}")
+                
+                # Verify file was created
+                if os.path.exists(rag_report_file):
+                    file_size = os.path.getsize(rag_report_file)
+                    print(f"DEBUG: Verified RAG report file exists, size: {file_size} bytes")
+                else:
+                    print(f"DEBUG: ERROR - RAG report file was not created at {rag_report_file}")
+                    
                 print(f"RAG comparison report saved to {rag_report_file}")
 
                 # Calculate RAG value statistics
@@ -1047,12 +1114,14 @@ class ChatTestService:
             print(f"Error creating RAG comparison report: {str(e)}")
 
 
+        # Create response with both file paths
         return ChatBatchTestResponse(
             total_tests=total,
             passed=passed,
             failed=failed,
             pass_rate=(passed / total) * 100 if total > 0 else 0,
             output_file=output_file,
+            rag_report_file=rag_report_file,  # Added rag_report_file attribute
             results=results
         )
 

@@ -11,14 +11,18 @@ from fastapi import (
     File,
 )
 
-from typing import Optional, Dict, Any, List
+# Import needed modules
+import pandas as pd
+import time
+import asyncio
+
+from typing import Dict, Any, List
 import os
 import tempfile
 
 from app.models.chat_test_models import (
     ChatTestRequest,
-    ChatTestResponse,
-    ChatBatchTestResponse,
+    ChatTestResponse
 )
 from app.services.chat_test_service import ChatTestService
 from app.services.background_jobs import (
@@ -92,37 +96,80 @@ async def start_batch_test(
         # Define the background task function
         async def run_batch_test_job(file_path: str, threshold: float):
             try:
-                # Count total tests in CSV for progress tracking
-                import pandas as pd
+
+                # Setup progress tracking variables
+                start_time = time.time()
+                last_progress_time = start_time
+                current_progress = 0
+                
+                # Setup progress update timer
+                async def progress_timer():
+                    nonlocal current_progress, last_progress_time
+                    while current_progress < 90:
+                        # If no progress update in 5 seconds, increment by 1%
+                        current_time = time.time()
+                        if current_time - last_progress_time > 5 and current_progress < 90:
+                            current_progress += 1
+                            last_progress_time = current_time
+                            update_job_progress(job_id, current_progress, 
+                                f"Still working... ({current_progress}% complete)")
+                        await asyncio.sleep(3)
+                
+                # Start the timer in the background
+                timer_task = asyncio.create_task(progress_timer())
                 
                 # Update job progress - reading file
-                update_job_progress(job_id, 5, "Reading test file")
+                current_progress = 5
+                last_progress_time = time.time()
+                update_job_progress(job_id, current_progress, "Reading test file")
                 
                 # Read the CSV file to get total count
                 df = pd.read_csv(file_path)
                 total_tests = len(df)
                 
                 # Update job progress - preparing tests
-                update_job_progress(job_id, 10, f"Starting batch test with {total_tests} test cases")
+                current_progress = 10
+                last_progress_time = time.time()
+                update_job_progress(job_id, current_progress, f"Starting batch test with {total_tests} test cases")
                 
                 # Create a wrapper function to track progress during batch test execution
                 original_run_test = test_service.run_test
                 test_count = 0
                 
                 async def run_test_with_progress(request):
-                    nonlocal test_count
+                    nonlocal test_count, current_progress, last_progress_time
                     result = await original_run_test(request)
                     test_count += 1
                     
                     # Calculate progress percentage (10-90% range for tests)
-                    progress = 10 + int(80 * (test_count / total_tests))
+                    # Ensure minimum 10% progress and always show some movement
+                    progress = max(10, 10 + int(80 * (test_count / total_tests)))
                     
-                    # Update job progress
-                    update_job_progress(
-                        job_id, 
-                        progress, 
-                        f"Running test {test_count}/{total_tests} ({progress}% complete)"
+                    # Always ensure progress increases from the current value
+                    progress = max(progress, current_progress + 1)
+                    
+                    # Cap at 90% (the remaining 10% is for finalizing)
+                    progress = min(progress, 90)
+                    
+                    # Update our tracking variables
+                    current_progress = progress
+                    last_progress_time = time.time()
+                    
+                    # Get the prompt content from the request (truncate if too long)
+                    prompt_text = request.prompt[:50] + "..." if len(request.prompt) > 50 else request.prompt
+                    
+                    # Create a more informative status message with the test content
+                    status_message = (
+                        f"Test {test_count}/{total_tests} ({progress}% complete)\n"
+                        f"Current test: \"{prompt_text}\""
                     )
+                    
+                    # Add console output for debugging
+                    print(f"Updating progress: {progress}% - Test {test_count}/{total_tests}")
+                    print(f"Running test prompt: {prompt_text}")
+                    
+                    # Update job progress with the enhanced message
+                    update_job_progress(job_id, progress, status_message)
                     
                     return result
                 
@@ -141,6 +188,13 @@ async def start_batch_test(
                 # Update job progress - finalizing
                 update_job_progress(job_id, 95, "Finalizing results")
                 
+                # Cancel the progress timer task
+                timer_task.cancel()
+                try:
+                    await timer_task
+                except asyncio.CancelledError:
+                    pass
+                
                 # Clean up temporary file
                 if os.path.exists(file_path):
                     os.unlink(file_path)
@@ -149,20 +203,40 @@ async def start_batch_test(
                 result_files = []
                 if hasattr(response, 'output_file') and response.output_file:
                     result_files.append(f"Results saved to: {response.output_file}")
+                if hasattr(response, 'rag_report_file') and response.rag_report_file:
+                    result_files.append(f"RAG comparison report saved to: {response.rag_report_file}")
                 
                 # Include file paths in final status message
                 status_message = f"Completed {total_tests} tests: {response.passed} passed, {response.failed} failed"
-                if result_files:
-                    status_message += f"\n{' '.join(result_files)}"
                 
-                # Final update
+                # Add more details about storage location for debugging
+                if 'results_dir' in locals():
+                    status_message += f"\n\nResults stored in: {results_dir}"
+
+                if result_files:
+                    # Add each file path on a new line for better UI display
+                    status_message += f"\n\n" + "\n".join(result_files)
+                
+                # Final update - make sure to set 100% to indicate completion
                 update_job_progress(job_id, 100, status_message)
                 
                 return response.dict()
             except Exception as e:
+                # Cancel the timer task if it existsZ
+                if 'timer_task' in locals():
+                    # pylint: disable=used-before-assignment
+                    timer_task.cancel()
+                    try:
+                        await timer_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                
                 # Clean up temporary file in case of error
                 if os.path.exists(file_path):
                     os.unlink(file_path)
+                
+                # Log the error
+                print(f"Error in batch test: {str(e)}")
                 raise e
 
         # Start the background job

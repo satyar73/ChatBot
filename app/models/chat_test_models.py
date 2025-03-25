@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Dict, List, TypedDict, Literal, Union, Optional
+from typing import Dict, List, TypedDict, Literal, Union, Optional, Any
 
 class ChatTestRequest(BaseModel):
     prompt: str
@@ -27,7 +27,8 @@ class ChatBatchTestResponse(BaseModel):
     failed: int
     pass_rate: float
     output_file: str
-    results: List[ChatTestResponse]
+    rag_report_file: Optional[str] = None  # Added this field
+    results: List[Dict]  # Changed to List[Dict] to handle raw dict results
 
 class ChatMarketingTestState(TypedDict):
     prompt: str

@@ -8,6 +8,7 @@ services:
     container_name: chatbot-backend
     volumes:
       - ./data:/app/data
+      - ./test_results:/app/test_results
       - ./.env:/app/.env
       - /Users/satyaramachandran/credentials:/app/credentials
     environment:
@@ -43,6 +44,7 @@ services:
     hostname: backend
     volumes:
       - ./data:/app/data
+      - ./test_results:/app/test_results
       - ./.env:/app/.env
       - ./app:/app/app  # Mount app directory for live code changes
       - /Users/satyaramachandran/credentials:/app/credentials

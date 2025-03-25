@@ -15,7 +15,6 @@
     "react-dom": "^18.2.0",
     "react-markdown": "^9.0.1",
     "react-router-dom": "^6.22.3",
-    "react-scripts": "5.0.1",
     "remark-gfm": "^4.0.1",
     "web-vitals": "^2.1.4"
   },
@@ -60,6 +59,7 @@
     "@storybook/test": "^8.6.4",
     "eslint-plugin-storybook": "^0.11.4",
     "prop-types": "^15.8.1",
+    "react-scripts": "^5.0.1",
     "storybook": "^8.6.4",
     "webpack": "^5.98.0"
   }

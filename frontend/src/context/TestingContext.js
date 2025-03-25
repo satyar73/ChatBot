@@ -40,7 +40,10 @@ export const ACTIONS = {
   SET_JOB_STATUS: 'SET_JOB_STATUS',
   SET_JOB_PROGRESS: 'SET_JOB_PROGRESS',
   SET_STATUS_MESSAGE: 'SET_STATUS_MESSAGE',
-  SET_POLL_INTERVAL: 'SET_POLL_INTERVAL'
+  SET_POLL_INTERVAL: 'SET_POLL_INTERVAL',
+  
+  // Special action to get state
+  GET_STATE: 'GET_STATE'
 };
 
 // Reducer for state management
@@ -99,6 +102,13 @@ const testingReducer = (state, action) => {
       
     case ACTIONS.SET_POLL_INTERVAL:
       return { ...state, pollInterval: action.payload };
+      
+    case ACTIONS.GET_STATE:
+      // Special action that calls the provided callback with the current state
+      if (typeof action.payload === 'function') {
+        action.payload(state);
+      }
+      return state;
     
     default:
       return state;
