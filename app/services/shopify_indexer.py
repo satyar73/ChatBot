@@ -19,8 +19,8 @@ from pinecone import Pinecone, ServerlessSpec
 import markdownify as md
 
 from app.config.chat_config import ChatConfig
+from app.services.qa_service import qa_service
 from app.utils.logging_utils import get_logger
-from app.utils.other_utlis import load_json
 
 class ShopifyIndexer:
     """
@@ -43,10 +43,8 @@ class ShopifyIndexer:
         self.shopify_admin_api_base = (f"https://{self.config.SHOPIFY_SHOP_DOMAIN}"
                                        f"/admin/api/{self.config.SHOPIFY_API_VERSION}")
 
-        self.qa_data = {}
-        if hasattr(self.config, 'QA_SOURCE_FILE_JSON') and self.config.QA_SOURCE_FILE_JSON:
-            json_file = self.config.QA_SOURCE_FILE_JSON
-            self.qa_data = load_json(json_file)
+        # Use the QA service
+        self.qa_service = qa_service
 
         # logging
         self.logger.info(f"ShopifyIndexer initialized with shop domain: {self.config.SHOPIFY_SHOP_DOMAIN}")
@@ -212,45 +210,8 @@ class ShopifyIndexer:
         Returns:
             Dictionary mapping keywords to related terms
         """
-
-        # Define key topic areas and related terms
-        keyword_map = {
-            "causal attribution": ["attribution", "base attribution", "advanced attribution",
-                            "self-attribution", "self-attributed", "attribution multiplier",
-                            "advanced attribution multiplier", "causal attribution",],
-            "incrementality": ["incrementality", "incrementality testing", "geo testing",
-                               "holdout test", "scale test", "lift"],
-            "mmm": ["marketing mix modeling", "mmm", "marketing mix model", "media mix"],
-            "mta": ["multi-touch attribution", "mta", "multi touch", "touchpoints"],
-            "measurement": ["measurement", "metrics", "kpi", "measure", "statistical significance",
-                            "minimum detectable lift", "mdl", "confidence"],
-            "marketing_funnel": ["funnel", "awareness", "consideration", "conversion",
-                                 "retention", "advocacy"],
-            "tracking": ["tracking", "cookies", "first-party", "third-party", "pixels"],
-            "optimization": ["optimization", "budget allocation", "diminishing returns",
-                             "roas", "roi", "cpa", "cac", "icac"],
-            "channels": ["facebook", "google", "tiktok", "search", "social", "display"]
-        }
-
-        # Extract all questions/answers as a list to build a frequency map
-        q_a = list(self.qa_data.items())
-
-        # Count frequency of keywords in questions
-        keyword_frequency = {}
-        for q_a_item in q_a:
-            for category, terms in keyword_map.items():
-                for term in terms:
-                    if term.lower() in q_a_item:
-                        if category not in keyword_frequency:
-                            keyword_frequency[category] = 0
-                        keyword_frequency[category] += 1
-
-        # Sort by frequency for each category
-        sorted_keywords = {k: v for k, v in sorted(
-            keyword_frequency.items(), key=lambda item: item[1], reverse=True)}
-
-        self.logger.info(f"Extracted keywords with frequencies: {sorted_keywords}")
-        return keyword_map
+        # Use the QA service to extract keywords
+        return self.qa_service.extract_keywords_from_qa()
 
     def enhance_records_with_keywords(self, records: List[Dict[str, Any]],
                                       keyword_map: Dict[str, List[str]]) -> List[Dict[str, Any]]:
@@ -264,33 +225,8 @@ class ShopifyIndexer:
         Returns:
             Enhanced records with keywords
         """
-        enhanced_records = []
-
-        for record in records:
-            # Skip if no markdown content
-            if 'markdown' not in record:
-                enhanced_records.append(record)
-                continue
-
-            content = record['markdown'].lower()
-            record_keywords = set()
-
-            # Check for each keyword category in the content
-            for category, terms in keyword_map.items():
-                for term in terms:
-                    if term.lower() in content:
-                        record_keywords.add(category)
-                        # Add the specific term that matched
-                        record_keywords.add(term.lower())
-
-            # Add keywords to record
-            if record_keywords:
-                record['keywords'] = list(record_keywords)
-
-            enhanced_records.append(record)
-
-        self.logger.info(f"Enhanced {len(enhanced_records)} records with keywords")
-        return enhanced_records
+        # Use the QA service to enhance records with keywords
+        return self.qa_service.enhance_records_with_keywords(records, keyword_map)
 
     def index_all_content(self) -> bool:
         """
@@ -455,46 +391,8 @@ class ShopifyIndexer:
         Returns:
             Enhanced prompt for embedding
         """
-        metadata = metadata or {}
-
-        # Check for specific technical terms to highlight
-        technical_terms = {
-            "advanced attribution multiplier": "A coefficient used in advanced attribution to adjust the credit given to marketing channels based on their true incremental value",
-            "attribution multiplier": "A factor used to adjust attribution models to reflect true marketing contribution",
-            # Add other technical terms as needed
-        }
-
-        # Add definitions for any technical terms found in the text
-        term_definitions = []
-        for term, definition in technical_terms.items():
-            if term.lower() in text.lower():
-                term_definitions.append(f"{term}: {definition}")
-
-        if term_definitions:
-            term_context = "\n".join(term_definitions)
-            return f"Technical marketing terms context:\n{term_context}\n\n{text}"
-
-        # For tracking-specific Q&A
-        if 'special_type' in metadata and metadata['special_type'] == 'tracking_types_examples':
-            return f"""
-            Context: Web and app tracking methods categorized as first-party and third-party tracking. 
-            First-party tracking uses first-party cookies and internal systems.
-            Third-party tracking uses third-party cookies and external platforms.
-
-            {text}
-            """
-
-        # For attribution-specific texts, add context
-        is_attribution_related = any(term in text.lower() for term in [
-            "attribution", "incrementality", "MDL", "MMM", "MTA", "CAC", "last click",
-            "self-attribution", "self-attributed", "base attribution",
-            "advanced attribution", "advanced attribution multiplier"
-        ])
-
-        if is_attribution_related:
-            return f"Marketing attribution context: {text}"
-
-        return text
+        # Use the QA service to create an optimized embedding prompt
+        return self.qa_service.create_embedding_prompt(text, metadata)
 
     def index_to_pinecone(self, records: List[Dict[str, Any]]) -> bool:
         """
@@ -667,26 +565,8 @@ class ShopifyIndexer:
         Returns:
             Dictionary of attribution-related metadata
         """
-        # Key attribution terms to identify
-        attribution_terms = [
-            "attribution", "incrementality", "MDL", "Minimum Detectable Lift",
-            "MMM", "marketing mix modeling", "MTA", "multi-touch attribution",
-            "CAC", "iCAC", "multiplier", "last click", "geo testing", "holdout test",
-            "scale test", "self-attribution", "self-attributed", "base attribution",
-            "advanced attribution", "advanced attribution multiplier"
-        ]
-
-        metadata: Dict[str, Any] = {"attribution_terms": []}
-
-        content_lower = content.lower()
-
-        # Check for attribution terms
-        for term in attribution_terms:
-            if term.lower() in content_lower:
-                metadata[f"has_{term.replace(' ', '_').lower()}"] = True
-                metadata["attribution_terms"].append(term.lower())
-
-        return metadata
+        # Use the QA service to enrich attribution metadata
+        return self.qa_service.enrich_attribution_metadata(content)
 
     def run_full_process(self) -> dict:
         """
@@ -767,33 +647,5 @@ class ShopifyIndexer:
         Returns:
             List of processed Q&A records
         """
-
-        qa_records = []
-        # Split into question-answer pairs
-        q_a = list(self.qa_data.items())
-
-        for question, answer in q_a:
-            question = question.strip()
-            answer = answer.strip()
-            self.logger.info(f"Processing Q&A pair: {question} - {answer}")
-
-            if "tracking" in question.lower() and "web and app" in question.lower():
-                # Add special metadata for tracking questions
-                record = {
-                    'title': f"Q&A: {question[:50]}...",
-                    'url': '#tracking-types',
-                    'markdown': f"Q: {question}\n\nA: {answer}",
-                    'type': 'qa_pair',
-                    'special_type': 'tracking_types_examples'
-                }
-                qa_records.append(record)
-            else:
-                record = {
-                    'title': f"Q&A: {question[:50]}...",
-                    'url': '#qa',
-                    'markdown': f"Q: {question}\n\nA: {answer}",
-                    'type': 'qa_pair'
-                }
-                qa_records.append(record)
-
-        return qa_records
+        # Use the QA service to prepare Q&A pairs
+        return self.qa_service.prepare_qa_pairs()

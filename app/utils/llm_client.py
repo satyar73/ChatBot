@@ -7,6 +7,10 @@ import os
 import hashlib
 import json
 import logging
+import base64
+import io
+from PIL import Image
+from openai import OpenAI
 from portkey_ai import Portkey
 from dotenv import load_dotenv
 
@@ -357,6 +361,114 @@ class LLMClientManager:
             # Additional error information
             logger.error(f"Error type: {type(e).__name__}")
             raise
+
+    @classmethod
+    def analyze_image(
+            cls, 
+            image_content: bytes, 
+            prompt: str, 
+            model: str = None,
+            max_tokens: int = None,
+            temperature: float = None
+    ):
+        """
+        Analyze image content using OpenAI Vision API.
+        
+        Args:
+            image_content: Raw bytes of the image
+            prompt: The text prompt to guide the analysis
+            model: Vision model to use (defaults to gpt-4o)
+            max_tokens: Maximum tokens in response (defaults to 4000)
+            temperature: Temperature for response generation (defaults to 0)
+            
+        Returns:
+            Text response from the vision model
+        """
+        try:
+            # Set default values
+            model = model or os.getenv("OPENAI_VISION_MODEL", "gpt-4o")
+            max_tokens = max_tokens or int(os.getenv("VISION_MAX_TOKENS", "4000"))
+            temperature = temperature if temperature is not None else 0
+            
+            # Process the image (resize if needed)
+            img = Image.open(io.BytesIO(image_content))
+            
+            # GPT-4 Vision has a maximum dimension requirement
+            max_dimension = 2048  # Max dimension allowed
+            width, height = img.size
+            
+            if width > max_dimension or height > max_dimension:
+                # Calculate new dimensions while maintaining aspect ratio
+                if width > height:
+                    new_width = max_dimension
+                    new_height = int(height * (max_dimension / width))
+                else:
+                    new_height = max_dimension
+                    new_width = int(width * (max_dimension / height))
+                
+                img = img.resize((new_width, new_height))
+                logger.info(f"Resized image from {width}x{height} to {new_width}x{new_height}")
+            
+            # Convert to bytes and encode as base64
+            buffer = io.BytesIO()
+            img.save(buffer, format="PNG")
+            image_bytes = buffer.getvalue()
+            base64_image = base64.b64encode(image_bytes).decode('utf-8')
+            
+            # Get Portkey client
+            portkey_client = cls._get_portkey_client()
+            
+            # If Portkey is available, use it as a proxy
+            if portkey_client:
+                try:
+                    # Get cache settings
+                    cache_ttl = int(os.getenv("PORTKEY_CACHE_TTL", "3600"))
+                    
+                    # Configure the OpenAI client with Portkey
+                    client = OpenAI(
+                        api_key=os.getenv("OPENAI_API_KEY"),
+                        base_url="https://api.portkey.ai/v1/proxy",
+                        default_headers={
+                            "x-portkey-api-key": portkey_client.api_key,
+                            "x-portkey-mode": "proxy",
+                            "x-portkey-provider": "openai",
+                            "x-portkey-cache": "true",
+                            "x-portkey-cache-ttl": str(cache_ttl)
+                        }
+                    )
+                    logger.info(f"Using Portkey-proxied OpenAI client for vision model: {model}")
+                except Exception as e:
+                    logger.error(f"Error configuring Portkey for vision: {str(e)}")
+                    # Fall back to standard client
+                    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+                    logger.info(f"Fallback - Using standard OpenAI client for vision model: {model}")
+            else:
+                # Use standard OpenAI client
+                client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+                logger.info(f"Using standard OpenAI client for vision model: {model}")
+            
+            # Make the API request
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}
+                        ]
+                    }
+                ],
+                max_tokens=max_tokens,
+                temperature=temperature
+            )
+            
+            # Extract and return the response
+            return response.choices[0].message.content
+            
+        except Exception as e:
+            logger.error(f"Error analyzing image with LLM: {str(e)}")
+            return None
 
     @classmethod
     def clear_cache(cls):

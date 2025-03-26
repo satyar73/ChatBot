@@ -10,6 +10,7 @@ from typing_extensions import Optional
 
 from app.tools.gpt_tools import ToolManager
 from app.config.chat_config import ChatConfig
+from app.services.qa_service import qa_service
 from app.utils.llm_client import LLMClientManager
 from app.utils.logging_utils import get_logger
 from app.utils.other_utlis import write_data_logfile
@@ -421,61 +422,8 @@ class AgentManager:
             # Extract key concepts from the expected answer without including the full text
             # This helps prevent verbatim copying while still providing guidance
 
-            # Analyze the expected answer to extract key points
-            # First, break it into sentences
-            sentences = expected_answer.split('.')
-
-            # Filter out empty sentences
-            sentences = [s.strip() + '.' for s in sentences if s.strip()]
-
-            # Handle short expected answers differently
-            if len(sentences) <= 2:
-                # For very short answers, extract key concepts instead of using full sentences
-                key_concepts = expected_answer.replace('.', ',').split(',')
-                key_concepts = [c.strip() for c in key_concepts if c.strip()]
-
-                # Format as bullet points of key ideas
-                key_points = "\n".join([f"- Concept: {concept}" for concept in key_concepts if len(concept) > 5])
-            else:
-                # For longer answers, use a summary approach
-                # Take alternate sentences or first and last, depending on length
-                if len(sentences) <= 4:
-                    selected_sentences = [sentences[0]] + [sentences[-1]]
-                else:
-                    # Take first, one from middle, and last sentence
-                    selected_sentences = [sentences[0], sentences[len(sentences) // 2], sentences[-1]]
-
-                # Create bullet points with key facts, not complete sentences
-                key_points = ""
-                for sentence in selected_sentences:
-                    # Extract key phrases from the sentence
-                    words = sentence.split()
-                    if len(words) > 8:
-                        # For longer sentences, take phrases rather than whole sentence
-                        chunks = [' '.join(words[i:i + 4]) for i in range(0, len(words), 4)]
-                        for chunk in chunks:
-                            if len(chunk) > 10:  # Only meaningful chunks
-                                key_points += f"- Key fact: {chunk}\n"
-                    else:
-                        # For shorter sentences, use core concept
-                        key_points += f"- Main point: {' '.join(words[:min(5, len(words))])}\n"
-
-            # Add the expected answer with instructions to avoid direct copying
-            enhanced_prompt = f"""{base_prompt}
-                    IMPORTANT - RESPONSE GUIDANCE:
-                    I'm providing you with key concepts about this topic. Your task is to:
-
-                    1. STRICTLY AVOID any phrasing that matches the reference material
-                    2. Use only the concepts and facts to inform your response
-                    3. Write a COMPLETELY ORIGINAL answer in your own words and structure
-                    4. Include source links from the retrieved context, not these concepts
-                    5. If these concepts contradict retrieved information, prioritize information from retrieval
-
-                    KEY CONCEPTS FROM REFERENCE:
-                    {key_points}
-
-                    CRITICAL INSTRUCTION: Your response must NOT contain any exact phrases from the reference concepts. Rephrase everything completely while preserving the meaning.
-                    """
+            # Use the QA service to enhance the prompt with expected answer
+            enhanced_prompt = qa_service.enhance_prompt_with_expected_answer(base_prompt, expected_answer)
 
             custom_system_prompt = enhanced_prompt
             self.logger.info("Enhanced system prompt with expected answer")

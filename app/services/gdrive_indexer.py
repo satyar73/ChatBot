@@ -28,6 +28,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
 from app.config.chat_config import ChatConfig
+from app.services.qa_service import qa_service
 
 class CustomJsonLoader(BaseLoader):
     """Custom loader for JSON data"""
@@ -408,102 +409,34 @@ class GoogleDriveIndexer:
         Returns:
             Markdown string with the analysis result
         """
-        try:
-            # Resize image if needed to meet API requirements
-            img = Image.open(io.BytesIO(image_content))
-            
-            # GPT-4 Vision has a maximum dimension requirement
-            max_dimension = 2048  # Max dimension allowed
-            width, height = img.size
-            
-            if width > max_dimension or height > max_dimension:
-                # Calculate new dimensions while maintaining aspect ratio
-                if width > height:
-                    new_width = max_dimension
-                    new_height = int(height * (max_dimension / width))
-                else:
-                    new_height = max_dimension
-                    new_width = int(width * (max_dimension / height))
-                
-                img = img.resize((new_width, new_height))
-                self.logger.info(f"Resized slide {slide_number} image from {width}x{height} to {new_width}x{new_height}")
-            
-            # Convert to bytes and encode as base64
-            buffer = io.BytesIO()
-            img.save(buffer, format="PNG")
-            image_bytes = buffer.getvalue()
-            base64_image = base64.b64encode(image_bytes).decode('utf-8')
-            
-            # Prepare the prompt for LLM analysis
-            prompt = """
-            Please provide a complete and detailed transcription of ALL content in this slide image, formatted as clean markdown:
+        # Use the QA service to analyze the image
+        prompt = """
+        Please provide a complete and detailed transcription of ALL content in this slide image, formatted as clean markdown:
 
-            1. Use "## Title" for the slide title (exactly as it appears, without mentioning it's the slide title)
-            2. Use "### Subtitle" for any subtitles (exactly as they appear)
-            3. Format ALL bullet points as proper markdown lists (using - or * for each item) with proper indentation for nested lists
-            4. If it's a table: render the ENTIRE table in markdown table format (|---|---|) with ALL rows, columns, and cell contents
-            5. If it contains a chart/graph: create a detailed section describing the chart including:
-               - Chart type and title (as a heading)
-               - All axis labels and ranges
-               - Each data series and its values
-               - Legend information
-               - Key trends or data points
-            6. If it contains images: create a section describing each image in detail
-            7. Include all footnotes, citations, or small text using appropriate markdown (e.g., > for quotes, *italics* for emphasis)
+        1. Use "## Title" for the slide title (exactly as it appears, without mentioning it's the slide title)
+        2. Use "### Subtitle" for any subtitles (exactly as they appear)
+        3. Format ALL bullet points as proper markdown lists (using - or * for each item) with proper indentation for nested lists
+        4. If it's a table: render the ENTIRE table in markdown table format (|---|---|) with ALL rows, columns, and cell contents
+        5. If it contains a chart/graph: create a detailed section describing the chart including:
+           - Chart type and title (as a heading)
+           - All axis labels and ranges
+           - Each data series and its values
+           - Legend information
+           - Key trends or data points
+        6. If it contains images: create a section describing each image in detail
+        7. Include all footnotes, citations, or small text using appropriate markdown (e.g., > for quotes, *italics* for emphasis)
 
-            Do NOT add any meta-commentary (like "This slide contains") - just transcribe the content directly using proper markdown formatting.
-            Do NOT summarize or paraphrase - transcribe EVERYTHING exactly as it appears.
-            Format your response as a clean, properly structured markdown document that could be used as-is.
-            """
-            
-            # Make the API request
-            client = OpenAI(api_key=self.config.OPENAI_API_KEY)
-            response = client.chat.completions.create(
-                model=getattr(self.config, 'OPENAI_VISION_MODEL', 'gpt-4o'),
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}
-                        ]
-                    }
-                ],
-                max_tokens=getattr(self.config, 'VISION_MAX_TOKENS', 4000),
-                temperature=0
-            )
-            
-            # Extract and return the LLM's description
-            return response.choices[0].message.content
-            
-        except Exception as e:
-            self.logger.error(f"Error analyzing slide {slide_number} with LLM: {str(e)}")
-            return None
+        Do NOT add any meta-commentary (like "This slide contains") - just transcribe the content directly using proper markdown formatting.
+        Do NOT summarize or paraphrase - transcribe EVERYTHING exactly as it appears.
+        Format your response as a clean, properly structured markdown document that could be used as-is.
+        """
+        
+        return qa_service.analyze_image_with_llm(image_content, prompt, getattr(self.config, 'OPENAI_VISION_MODEL', 'gpt-4o'))
 
     def condense_content_using_llm(self, content):
         """Summarize content using OpenAI's API"""
-        client = OpenAI(api_key=self.config.OPENAI_API_KEY)
-
-        response = client.chat.completions.create(
-            model=self.config.OPENAI_SUMMARY_MODEL,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": f"<markdown>\n{content}\n</markdown>\nYou should shorten the above markdown text to MAXIMUM OF 800 characters while making sure ALL THE HEADINGS AND HYPERLINKS are retained so that the users can refer to those links later. In your response, don't include <markdown> tags."
-                        }
-                    ]
-                }
-            ],
-            temperature=0,
-            max_tokens=1000,
-            top_p=1,
-            frequency_penalty=0,
-            presence_penalty=0
-        )
-        return response.choices[0].message.content
+        # Use the QA service to condense content
+        return qa_service.condense_content_using_llm(content)
 
     def html_to_markdown(self, html_text):
         """Convert HTML to Markdown format"""

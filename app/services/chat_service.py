@@ -11,8 +11,8 @@ from app.config import prompt_config
 from app.config.chat_config import ChatConfig
 from app.models.chat_models import ChatHistory, ResponseContent, ResponseMessage, Source, Message
 from app.services.cache_service import chat_cache
+from app.services.qa_service import qa_service
 from app.utils.logging_utils import get_logger
-from app.utils.other_utlis import load_json
 from app.utils.semantic_filtering import SemanticFilter
 
 
@@ -220,11 +220,8 @@ class ChatService:
         # Initialize the query rewriter
         self.query_rewriter = QueryRewriter()
 
-        # Initialize the qa data
-        self.qa_data = {}
-        if hasattr(self.config, 'QA_SOURCE_FILE_JSON') and self.config.QA_SOURCE_FILE_JSON:
-            json_file = self.config.QA_SOURCE_FILE_JSON
-            self.qa_data = load_json(json_file)
+        # Use the QA service
+        self.qa_service = qa_service
 
     def _get_answer(self, question):
         """
@@ -236,17 +233,8 @@ class ChatService:
         Returns:
             str or None: The expected answer if found, None otherwise
         """
-        # Look for exact match
-        if question in self.qa_data:
-            return self.qa_data[question]
-
-        # Case-insensitive match
-        for q, a in self.qa_data.items():
-            if q.lower() == question.lower():
-                return a
-
-        # No match found
-        return None
+        # Use the QA service to get the answer
+        return self.qa_service.get_answer(question)
 
     def _is_database_query(self, query: str) -> bool:
         """

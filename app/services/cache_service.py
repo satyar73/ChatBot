@@ -147,7 +147,10 @@ class ChatCacheService:
             
             # Get cached response
             cursor.execute(
-                "SELECT rag_response, no_rag_response, sources, timestamp, hit_count, system_prompt, prompt_style FROM chat_cache WHERE query_hash = ?", 
+                "SELECT rag_response, no_rag_response, sources, timestamp,"
+                            " hit_count, system_prompt, prompt_style"
+                            " FROM chat_cache"
+                            " WHERE query_hash = ?",
                 (query_hash,)
             )
             result = cursor.fetchone()
@@ -159,7 +162,8 @@ class ChatCacheService:
                 age_in_seconds = time.time() - timestamp
                 if age_in_seconds > cache_config.CACHE_TTL:
                     self.logger.info(f"Cache hit but expired for {query_hash} (age: {age_in_seconds/3600:.1f} hours)")
-                    cursor.execute("DELETE FROM chat_cache WHERE query_hash = ?", (query_hash,))
+                    cursor.execute("DELETE FROM chat_cache "
+                                   "WHERE query_hash = ?", (query_hash,))
                     conn.commit()
                     conn.close()
                     return None, False
@@ -230,12 +234,15 @@ class ChatCacheService:
             # Store response with all fields
             cursor.execute(
                 """
-                INSERT OR REPLACE INTO chat_cache 
-                (query_hash, user_input, rag_response, no_rag_response, sources, system_prompt, prompt_style, timestamp, hit_count) 
+                INSERT OR REPLACE 
+                    INTO
+                chat_cache 
+                (query_hash, user_input, rag_response, no_rag_response, sources,
+                system_prompt, prompt_style, timestamp, hit_count) 
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
                 """, 
-                (query_hash, user_input, rag_response, no_rag_response, sources_json, 
-                 system_prompt, prompt_style, time.time())
+                (query_hash, user_input, rag_response, no_rag_response,
+                 sources_json, system_prompt, prompt_style, time.time())
             )
             
             # Ensure cache size doesn't exceed limit
@@ -248,7 +255,9 @@ class ChatCacheService:
                     rows_to_delete = total_rows - cache_config.CACHE_SIZE_LIMIT
                     
                     # Delete oldest rows first, based on timestamp
-                    self.logger.info(f"Cache size ({total_rows}) exceeds limit ({cache_config.CACHE_SIZE_LIMIT}), removing {rows_to_delete} oldest entries")
+                    self.logger.info(f"Cache size ({total_rows}) exceeds limit"
+                                     f" ({cache_config.CACHE_SIZE_LIMIT}),"
+                                     f" removing {rows_to_delete} oldest entries")
                     cursor.execute(
                         """
                         DELETE FROM chat_cache 
@@ -398,8 +407,13 @@ class ChatCacheService:
                 
                 # Get information about what will be deleted for logging
                 cursor.execute(
-                    "SELECT COUNT(*), MIN(time() - timestamp) / 3600, MAX(time() - timestamp) / 3600, AVG(hit_count) " +
-                    "FROM chat_cache WHERE timestamp < ?", 
+                    "SELECT "
+                        "COUNT(*),"
+                        "MIN(time() - timestamp) / 3600,"
+                        "MAX(time() - timestamp) / 3600,"
+                        "AVG(hit_count) " +
+                    "FROM chat_cache"
+                    "WHERE timestamp < ?",
                     (threshold_time,)
                 )
                 count_result = cursor.fetchone()
@@ -412,14 +426,17 @@ class ChatCacheService:
                     avg_hits = 0 if avg_hits is None else avg_hits
                     
                     self.logger.info(
-                        f"Clearing {entries_to_delete} cache entries older than {older_than_days} days " +
-                        f"(age range: {min_age_hours:.1f} to {max_age_hours:.1f} hours, avg hits: {avg_hits:.1f})"
+                        f"Clearing {entries_to_delete} cache entries"
+                        f" older than {older_than_days} days " +
+                        f"(age range: {min_age_hours:.1f} to {max_age_hours:.1f} hours,"
+                        f" avg hits: {avg_hits:.1f})"
                     )
                 else:
                     entries_to_delete = 0
                 
                 # Perform the deletion
-                cursor.execute("DELETE FROM chat_cache WHERE timestamp < ?", (threshold_time,))
+                cursor.execute("DELETE FROM chat_cache WHERE timestamp < ?",
+                               (threshold_time,))
             else:
                 # Clearing all entries
                 cursor.execute(
