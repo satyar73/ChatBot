@@ -1,23 +1,28 @@
+import asyncio
 import os
 import json
-import asyncio
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 import logging
 from pinecone import Pinecone
 
 from app.config.chat_config import ChatConfig
 from app.services.shopify_indexer import ShopifyIndexer
 from app.services.gdrive_indexer import GoogleDriveIndexer
+from app.services.content_processor import ContentProcessor
+from app.utils.logging_utils import get_logger
 
 class IndexService:
     def __init__(self):
         self.config = ChatConfig()
-        self.logger = logging.getLogger(__name__)
+        self.logger = get_logger(__name__, "DEBUG")
+        self.content_processor = ContentProcessor(self.config)
 
-    async def create_index(self, store: Optional[str] = None, summarize: Optional[bool] = None) -> Dict:
-        """Create and populate a new vector index"""
+    async def create_index_from_shopify_store(self,
+                                              store: Optional[str] = None,
+                                              summarize: Optional[bool] = None) -> Dict:
+        """Create and populate a new vector index from Shopify content"""
         try:
-            # Initialize the indexer
+            # Initialize the Shopify indexer for content reading only
             indexer = ShopifyIndexer()
 
             # Override configuration if parameters are provided
@@ -27,28 +32,43 @@ class IndexService:
             if store:
                 indexer.config.SHOPIFY_STORE = store
 
-            # Run the indexing process
-            result = indexer.run_full_process()
-
-            # Ensure the result is serializable
-            if isinstance(result, dict):
-                # Return a new dict with only serializable items
+            # Initialize Shopify client and parameters
+            setup = indexer.setup_shopify_indexer()
+            if setup.get("status") != "success":
+                return setup
+                
+            # Fetch all content from Shopify
+            self.logger.debug("Fetching content from Shopify")
+            all_records = indexer.get_all_content()
+            self.logger.info(f"Fetched {len(all_records)} records from Shopify")
+            
+            # Process and enhance records
+            self.logger.debug("Processing and enhancing records")
+            enhanced_records = self.content_processor.process_records(all_records)
+            
+            # File saving is handled in the Shopify indexer
+            
+            # Index the enhanced records to Pinecone
+            self.logger.debug("Indexing records to Pinecone")
+            success = self.content_processor.index_to_pinecone(enhanced_records)
+            
+            if success:
                 return {
-                    "status": result.get("status", "success"),
-                    "message": result.get("message", "Indexing completed successfully"),
-                    # Add any other important keys from result that are serializable
+                    "status": "success",
+                    "message": f"Successfully indexed {len(enhanced_records)} Shopify records",
+                    "record_count": len(enhanced_records)
+                }
+            else:
+                return {
+                    "status": "error",
+                    "message": "Failed to index content to Pinecone"
                 }
 
-            # Create a serializable response by default
-            return {
-                    "status": "success",
-                    "message": "Indexing completed successfully"
-            }
-
         except Exception as e:
+            self.logger.error(f"Error creating index from Shopify: {str(e)}")
             return {"status": "error", "message": str(e)}
 
-    async def create_index_from_drive(
+    async def create_index_from_google_drive(
             self,
             folder_id: Optional[str] = None,
             recursive: Optional[bool] = True,
@@ -73,10 +93,34 @@ class IndexService:
             # Set environment variable to use Google Drive
             os.environ["USE_GOOGLE_DRIVE"] = "true"
 
-            # Create indexer and run process in a separate thread to avoid blocking
+            # Create indexer for content reading
             indexer = GoogleDriveIndexer(self.config)
-            result = await asyncio.to_thread(indexer.run_full_process)
-            return result
+            
+            # Use asyncio to run the document preparation in a separate thread
+            records = await asyncio.to_thread(indexer.prepare_drive_documents)
+            self.logger.info(f"Fetched {len(records)} records from Google Drive")
+            
+            # File saving is handled in the Google Drive indexer
+                    
+            # Process and enhance records
+            self.logger.debug("Processing and enhancing records")
+            enhanced_records = self.content_processor.process_records(records)
+            
+            # Index the enhanced records to Pinecone
+            self.logger.debug("Indexing records to Pinecone")
+            success = self.content_processor.index_to_pinecone(enhanced_records)
+            
+            if success:
+                return {
+                    "status": "success",
+                    "message": f"Successfully indexed {len(enhanced_records)} Google Drive records",
+                    "files_processed": len(enhanced_records)
+                }
+            else:
+                return {
+                    "status": "error",
+                    "message": "Failed to index content to Pinecone"
+                }
 
         except Exception as e:
             self.logger.error(f"Error creating index from Google Drive: {str(e)}")
@@ -141,58 +185,15 @@ class IndexService:
             print(f"Error in get_index_info: {str(e)}")
             return {"status": "error", "message": str(e)}
             
-    async def get_google_drive_files(self) -> Dict:
+    async def get_google_drive_files(self) -> Dict[str, Any]:
         """Get list of indexed Google Drive files"""
         try:
-            # Try to load the Google Drive processed files
-            drive_path = os.path.join(self.config.OUTPUT_DIR, "drive_processed.json")
+            # Create Google Drive indexer
+            indexer = GoogleDriveIndexer(self.config)
             
-            if os.path.exists(drive_path):
-                with open(drive_path, "r") as f:
-                    files = json.load(f)
-                    
-                # Extract basic file information
-                file_list = [
-                    {
-                        "id": idx,
-                        "title": file.get("title", "Unknown"),
-                        "url": file.get("url", ""),
-                        "size": len(file.get("markdown", "")) if "markdown" in file else 0
-                    }
-                    for idx, file in enumerate(files)
-                ]
-                
-                return {
-                    "status": "success",
-                    "files": file_list,
-                    "count": len(file_list)
-                }
-            else:
-                # Check if we can query the vector store directly
-                try:
-                    pc = Pinecone(api_key=self.config.PINECONE_API_KEY)
-                    
-                    if self.config.PINECONE_INDEX_NAME in pc.list_indexes().names():
-                        index = pc.Index(self.config.PINECONE_INDEX_NAME)
-                        stats = index.describe_index_stats()
-                        
-                        return {
-                            "status": "success",
-                            "files": [],
-                            "count": 0,
-                            "vector_count": stats.total_vector_count,
-                            "message": "Drive file list not available, but vectors are in the index"
-                        }
-                except Exception as e:
-                    self.logger.error(f"Error querying Pinecone for Google Drive files: {str(e)}")
-                
-                return {
-                    "status": "success",
-                    "files": [],
-                    "count": 0,
-                    "message": "No Google Drive files indexed or file list not available"
-                }
-                
+            # Use the indexer's method to get file information
+            return indexer.get_google_drive_files()
+            
         except Exception as e:
             self.logger.error(f"Error retrieving Google Drive files: {str(e)}")
             return {"status": "error", "message": str(e)}

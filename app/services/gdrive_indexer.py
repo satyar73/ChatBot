@@ -2,13 +2,11 @@ import os
 import json
 from tqdm import tqdm
 from markdownify import markdownify as md
-from typing import Callable, Dict, List, Union, Optional
+from typing import Callable, Dict, List, Union, Optional, Any
 from pathlib import Path
 import logging
 import io
-from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
-from google.oauth2 import service_account
 import docx
 import PyPDF2
 import pptx
@@ -18,12 +16,9 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from pinecone import Pinecone, ServerlessSpec
 from langchain_pinecone import PineconeVectorStore
 from langchain_openai import OpenAIEmbeddings
-from openai import OpenAI
 
 # Import from your existing project structure
-import base64
 import requests
-from PIL import Image
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
@@ -409,28 +404,8 @@ class GoogleDriveIndexer:
         Returns:
             Markdown string with the analysis result
         """
+        prompt = self.config.GOOGLE_SLIDE_IMAGE_TO_TEXT_PROMPT
         # Use the QA service to analyze the image
-        prompt = """
-        Please provide a complete and detailed transcription of ALL content in this slide image, formatted as clean markdown:
-
-        1. Use "## Title" for the slide title (exactly as it appears, without mentioning it's the slide title)
-        2. Use "### Subtitle" for any subtitles (exactly as they appear)
-        3. Format ALL bullet points as proper markdown lists (using - or * for each item) with proper indentation for nested lists
-        4. If it's a table: render the ENTIRE table in markdown table format (|---|---|) with ALL rows, columns, and cell contents
-        5. If it contains a chart/graph: create a detailed section describing the chart including:
-           - Chart type and title (as a heading)
-           - All axis labels and ranges
-           - Each data series and its values
-           - Legend information
-           - Key trends or data points
-        6. If it contains images: create a section describing each image in detail
-        7. Include all footnotes, citations, or small text using appropriate markdown (e.g., > for quotes, *italics* for emphasis)
-
-        Do NOT add any meta-commentary (like "This slide contains") - just transcribe the content directly using proper markdown formatting.
-        Do NOT summarize or paraphrase - transcribe EVERYTHING exactly as it appears.
-        Format your response as a clean, properly structured markdown document that could be used as-is.
-        """
-        
         return qa_service.analyze_image_with_llm(image_content, prompt, getattr(self.config, 'OPENAI_VISION_MODEL', 'gpt-4o'))
 
     def condense_content_using_llm(self, content):
@@ -495,9 +470,8 @@ class GoogleDriveIndexer:
 
         # Save intermediate file if needed
         if self.config.SAVE_INTERMEDIATE_FILES:
-            processed_file = getattr(self.config, 'DRIVE_PROCESSED_FILE',
-                                     os.path.join(self.config.OUTPUT_DIR, "drive_processed.json"))
-            with open(self.config.DRIVE_PROCESSED_FILE, 'w') as f:
+            processed_file = os.path.join(self.config.OUTPUT_DIR, "drive_processed.json")
+            with open(processed_file, 'w') as f:
                 json.dump(records, f, indent=2)
 
         return records
@@ -594,33 +568,75 @@ class GoogleDriveIndexer:
             return False
 
     def run_full_process(self):
-        """Run the complete indexing process"""
+        """Initialize the Google Drive API and validate settings"""
         try:
-            # Step 1: Process all files from Google Drive
-            records = self.prepare_drive_documents()
-
-            # Step 2: Index to Pinecone
-            success = self.index_to_pinecone(records)
-
-            if success:
-                self.logger.info("✅ Complete process finished successfully!")
-                return {
-                    "status": "success", 
-                    "message": "Indexing completed successfully",
-                    "files_processed": len(records),
-                    "chunks_indexed": len(records) > 0 and len(self.last_chunks) or 0
-                }
-            else:
-                self.logger.error("❌ Process completed with errors in indexing step.")
-                return {"status": "error", "message": "Indexing failed"}
+            # Validate credentials and API access
+            files = self.list_folder_contents()
+            
+            self.logger.info(f"Successfully connected to Google Drive API, found {len(files)} accessible files")
+            return {
+                "status": "success", 
+                "message": f"Successfully connected to Google Drive API, found {len(files)} accessible files",
+                "files_count": len(files)
+            }
 
         except Exception as e:
-            self.logger.error(f"Error in main process: {str(e)}")
+            self.logger.error(f"Error initializing Google Drive API: {str(e)}")
             return {"status": "error", "message": str(e)}
-
-
-if __name__ == "__main__":
-    # Run the indexer directly if executed as a script
-    indexer = GoogleDriveIndexer()
-    result = indexer.run_full_process()
-    print(result)
+            
+    def get_google_drive_files(self) -> Dict[str, Any]:
+        """Get list of indexed Google Drive files"""
+        try:
+            # Try to load the Google Drive processed files
+            drive_path = os.path.join(self.config.OUTPUT_DIR, "drive_processed.json")
+            
+            if os.path.exists(drive_path):
+                with open(drive_path, "r") as f:
+                    files = json.load(f)
+                    
+                # Extract basic file information
+                file_list = [
+                    {
+                        "id": idx,
+                        "title": file.get("title", "Unknown"),
+                        "url": file.get("url", ""),
+                        "size": len(file.get("markdown", "")) if "markdown" in file else 0
+                    }
+                    for idx, file in enumerate(files)
+                ]
+                
+                return {
+                    "status": "success",
+                    "files": file_list,
+                    "count": len(file_list)
+                }
+            else:
+                # Check if we can query the vector store directly
+                try:
+                    pc = Pinecone(api_key=self.config.PINECONE_API_KEY)
+                    
+                    if self.config.PINECONE_INDEX_NAME in pc.list_indexes().names():
+                        index = pc.Index(self.config.PINECONE_INDEX_NAME)
+                        stats = index.describe_index_stats()
+                        
+                        return {
+                            "status": "success",
+                            "files": [],
+                            "count": 0,
+                            "vector_count": stats.total_vector_count,
+                            "message": "Drive file list not available, but vectors are in the index"
+                        }
+                except Exception as e:
+                    self.logger.error(f"Error querying Pinecone for Google Drive files: {str(e)}")
+                
+                # No processed files available
+                return {
+                    "status": "success",
+                    "files": [],
+                    "count": 0,
+                    "message": "No Google Drive files indexed or file list not available"
+                }
+                
+        except Exception as e:
+            self.logger.error(f"Error retrieving Google Drive files: {str(e)}")
+            return {"status": "error", "message": str(e)}

@@ -314,7 +314,7 @@ from app.services.index_service import IndexService
 index_service = IndexService()
 
 # Create an index
-result = await index_service.create_index(
+result = await index_service.create_index_from_shopify_store(
     store="your-store.myshopify.com",
     summarize=True
 )
@@ -335,17 +335,17 @@ from app.services.index_service import IndexService
 index_service = IndexService()
 
 # Create an index from Google Drive
-result = await index_service.create_index_from_drive(
-    folder_id="your_folder_id",
-    recursive=True,
-    summarize=True
+result = await index_service.create_index_from_google_drive(
+  folder_id="your_folder_id",
+  recursive=True,
+  summarize=True
 )
 
 # Check the result
 if result["status"] == "success":
-    print("Google Drive content indexed successfully")
+  print("Google Drive content indexed successfully")
 else:
-    print(f"Indexing failed: {result['message']}")
+  print(f"Indexing failed: {result['message']}")
 ```
 
 ### 5.3 Getting Index Information

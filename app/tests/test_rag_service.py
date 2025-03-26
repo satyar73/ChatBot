@@ -162,7 +162,7 @@ Choosing the right attribution model depends on your business goals, sales cycle
                 self.assertTrue(result, "Indexing to Pinecone failed")
 
                 # Verify that create_index was called
-                mock_pinecone_instance.create_index.assert_called_once()
+                mock_pinecone_instance.create_index_from_shopify_store.assert_called_once()
 
                 # Verify that from_documents was called
                 mock_pinecone_vectorstore.from_documents.assert_called_once()
