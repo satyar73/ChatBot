@@ -9,8 +9,9 @@ The Indexing Service is responsible for:
 - Indexing content to a vector database (Right now only Pinecone is supported)
 - Managing vector indexes
 
-The service consists of three main components:
+The service consists of four main components:
 - **IndexService**: The primary service interface that coordinates indexing
+- **ContentProcessor**: Base class for processing and indexing document content
 - **ShopifyIndexer**: Fetches and processes Shopify content
 - **GoogleDriveIndexer**: Fetches and processes Google Drive content
 
@@ -61,11 +62,52 @@ Deletes the current vector index.
 The IndexService relies on configuration from:
 - `app.config.chat_config.ChatConfig`: Contains API keys and index settings
 
-## 3. ShopifyIndexer
+## 3. ContentProcessor
+The `ContentProcessor` class provides a base class for processing and indexing document content to Pinecone.
+
+### 3.1 Key Components
+- **Base Processing Framework**: Provides a common foundation for different indexers
+- **Integration with EnhancementService**: Leverages the enhancement service for content enrichment
+- **Adaptive Chunking**: Implements specialized chunking strategies for different content types
+- **Attribution Metadata**: Enriches documents with attribution-related metadata
+- **Embedding Optimization**: Creates enhanced embedding prompts for technical content
+
+### 3.2 Key Methods
+
+#### `process_records(records) -> List[Dict[str, Any]]`
+Processes and enhances records before indexing.
+
+**Parameters**:
+- `records`: List of content records with title, url, and markdown
+
+**Returns**:
+- Enhanced records with additional metadata
+
+#### `index_to_pinecone(records) -> bool`
+Indexes content records to Pinecone vector database with enhanced metadata.
+
+**Parameters**:
+- `records`: List of enhanced content records with title, url, and markdown
+
+**Flow**:
+1. Initializes Pinecone connection
+2. Creates index if it doesn't exist
+3. Prepares documents with special handling for different content types:
+   - Preserves Q&A pairs without splitting
+   - Uses smaller chunks with more overlap for technical content
+   - Uses standard chunking for general content
+4. Enriches documents with attribution metadata
+5. Creates optimized embedding prompts
+6. Generates embeddings and uploads to Pinecone
+
+**Returns**:
+- True if indexing was successful, False otherwise
+
+## 4. ShopifyIndexer
 The `ShopifyIndexer` class fetches content from a Shopify store and indexes it to Pinecone with 
 metadata enrichment and more optimal embedding techniques.
 
-### 3.1 Key Components
+### 4.1 Key Components
 - **API Integration**: Connects to Shopify Admin API to fetch blogs, articles, and products
 - **Content Processors**: Converts HTML to markdown and processes content with specialized handling
 - **Metadata Enrichment**: Enhances records with:
@@ -73,11 +115,11 @@ metadata enrichment and more optimal embedding techniques.
   - Technical term identification and definitions
   - Keyword extraction and categorization
   - Q&A pair processing
-- **Optimized Embedding Generation**: Creates custom embedding prompts that highlight technical marketing terms
-- **Vector Indexing**: Creates embeddings and uploads to Pinecone with appropriate metadata
-- **Chunking Strategies**: Adaptive text chunking based on content type and technical terminology
+- **Optimized Embedding Generation**: Uses the EnhancementService to create custom embedding prompts that highlight technical marketing terms
+- **Vector Indexing**: Uses the ContentProcessor for embedding generation and Pinecone uploads
+- **Chunking Strategies**: Leverages adaptive text chunking from ContentProcessor based on content type and technical terminology
 
-### 3.2 Key Methods
+### 4.2 Key Methods
 
 #### `run_full_process() -> Dict`
 Runs the complete Shopify indexing process.
@@ -227,16 +269,17 @@ ShopifyIndexer requires the following configuration:
 - `OPENAI_API_KEY`: OpenAI API key
 - `OPENAI_EMBEDDING_MODEL`: OpenAI embedding model name
 
-## 4. GoogleDriveIndexer
+## 5. GoogleDriveIndexer
 The `GoogleDriveIndexer` class fetches content from Google Drive and indexes it to Pinecone.
 
-### 4.1 Key Components
+### 5.1 Key Components
 - **Google Drive API**: Connects to Google Drive
 - **Document Processors**: Extracts text from various file formats
 - **Content Conversion**: Converts documents to markdown
-- **Vector Indexing**: Creates embeddings and uploads to Pinecone
+- **Vector Indexing**: Uses the ContentProcessor for embedding generation and Pinecone uploads
+- **Content Enhancement**: Leverages the EnhancementService for content enrichment
 
-### 4.2 Key Methods
+### 5.2 Key Methods
 #### `run_full_process() -> Dict`
 
 Runs the complete Google Drive indexing process.
@@ -303,9 +346,9 @@ GoogleDriveIndexer requires the following configuration:
 - `OPENAI_EMBEDDING_MODEL`: OpenAI embedding model name
 - `OPENAI_SUMMARY_MODEL`: Model to use for summarization
 
-## 5. Usage Examples
+## 6. Usage Examples
 
-### 5.1 Creating a Shopify Index
+### 6.1 Creating a Shopify Index
 
 ```python
 from app.services.index_service import IndexService
@@ -326,7 +369,7 @@ else:
     print(f"Indexing failed: {result['message']}")
 ```
 
-### 5.2 Creating a Google Drive Index
+### 6.2 Creating a Google Drive Index
 
 ```python
 from app.services.index_service import IndexService
@@ -348,7 +391,7 @@ else:
   print(f"Indexing failed: {result['message']}")
 ```
 
-### 5.3 Getting Index Information
+### 6.3 Getting Index Information
 
 ```python
 from app.services.index_service import IndexService
@@ -370,7 +413,7 @@ else:
     print(f"Index '{info['name']}' does not exist")
 ```
 
-### 5.4 Deleting an Index
+### 6.4 Deleting an Index
 
 ```python
 from app.services.index_service import IndexService
@@ -388,7 +431,7 @@ else:
     print(f"Deletion failed: {result['message']}")
 ```
 
-## 6. Dependencies
+## 7. Dependencies
 The Indexing Service components depend on:
 
 - **Pinecone**: For vector database storage
@@ -402,15 +445,15 @@ The Indexing Service components depend on:
   - `PyPDF2`: For PDF processing
   - `pptx`: For PowerPoint processing
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
-### 7.1 Common Issues
+### 8.1 Common Issues
 - **API Authentication Errors**: Verify API keys and permissions
 - **Rate Limiting**: Implement retries and backoff for API requests
 - **Large File Handling**: Monitor memory usage when processing large files
 - **Embedding Errors**: Check compatibility between embedding dimension and Pinecone index
 
-### 7.2 Logging
+### 8.2 Logging
 
 The Indexing Service uses standard logging to track progress:
 - `INFO`: Records general progress and statistics
@@ -418,7 +461,7 @@ The Indexing Service uses standard logging to track progress:
 - `ERROR`: Records failures in indexing process
 - `DEBUG`: Provides detailed information for troubleshooting
 
-## 8. Best Practices
+## 9. Best Practices
 - **Incremental Indexing**: Consider implementing delta updates rather than full reindexing
 - **Content Pre-processing**: Optimize content before embedding (clean HTML, remove boilerplate)
 - **Index Monitoring**: Regularly check vector counts and dimensions
