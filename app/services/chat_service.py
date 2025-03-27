@@ -61,8 +61,8 @@ class ChatService:
         chat_history = self.chat_histories[session_id]
 
         # Check for special testing flags in the query
-        force_refresh = "test_routing:" in user_input.lower()
-        
+        force_refresh = user_input.strip().lower().startswith("test_routing:")
+
         # Extract the actual query if in test mode
         actual_query = user_input
         if force_refresh:

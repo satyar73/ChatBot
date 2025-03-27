@@ -24,12 +24,17 @@ Do platforms typically under credit or over credit themselves in self attributio
 
 ### 2. Query Classification
 
-The system first determines if this should be handled by the database agent or RAG agent using the `_is_database_query` method in `ChatService`. Since this question is about attribution concepts rather than metrics or reports, it's classified as a RAG query.
+The system first determines .which system should handle this query. Since this question is about attribution concepts rather than metrics or reports, it's classified as a RAG query.
 
 ```python
 # Simplified code from chat_service.py
-is_database_query = self._is_database_query(actual_query)
-if not is_database_query:
+strategy = ResponseStrategy.get_strategy(actual_query, mode, self)
+rag_response, no_rag_response, queries_tried = await strategy.execute(
+            actual_query,
+            chat_history,
+            custom_system_prompt,
+            prompt_style
+        )
     # Route to RAG processing path
 ```
 
