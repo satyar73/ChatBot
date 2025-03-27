@@ -86,7 +86,7 @@ class ChatConfig:
 
         # Vector Store Configuration
         self.VECTOR_STORE_CONFIG = {
-            "index_name": "attributiongpt-23082024",
+            "index_name": self.PINECONE_INDEX_NAME,
             "embedding_model": self.OPENAI_EMBEDDING_MODEL,
             "dimensions": 1536
         }
