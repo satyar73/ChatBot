@@ -12,7 +12,7 @@ from pinecone import Pinecone, ServerlessSpec
 from langchain_pinecone import PineconeVectorStore
 
 from app.config.chat_config import ChatConfig
-from app.services.qa_service import qa_service
+from app.services.enhancement_service import enhancement_service
 from app.utils.logging_utils import get_logger
 
 
@@ -32,7 +32,7 @@ class ContentProcessor:
         self.config = config or ChatConfig()
         self.logger = get_logger(__name__, "DEBUG")
         self.logger.debug("ContentProcessor initialized")
-        self.qa_service = qa_service
+        self.enhancement_service = enhancement_service
         
         # Create output directory if needed
         os.makedirs(self.config.OUTPUT_DIR, exist_ok=True)
@@ -48,10 +48,10 @@ class ContentProcessor:
             Enhanced records with additional metadata
         """
         # Extract keywords from QA content
-        keyword_map = self.qa_service.extract_keywords_from_qa()
+        keyword_map = self.enhancement_service.extract_keywords_from_qa()
         
         # Enhance records with keywords
-        enhanced_records = self.qa_service.enhance_records_with_keywords(records, keyword_map)
+        enhanced_records = self.enhancement_service.enhance_records_with_keywords(records, keyword_map)
         
         return enhanced_records
 
@@ -142,7 +142,7 @@ class ContentProcessor:
                 # Create documents with metadata
                 for j, chunk in enumerate(chunks):
                     # Get attribution metadata
-                    attribution_metadata = self.qa_service.enrich_attribution_metadata(chunk)
+                    attribution_metadata = self.enhancement_service.enrich_attribution_metadata(chunk)
 
                     # Merge with standard metadata
                     metadata = {
@@ -158,7 +158,7 @@ class ContentProcessor:
                         metadata["keywords"] = record['keywords']
 
                     # Create embedding prompt
-                    optimized_text = self.qa_service.create_embedding_prompt(chunk, metadata)
+                    optimized_text = self.enhancement_service.create_embedding_prompt(chunk, metadata)
 
                     doc = Document(
                         page_content=optimized_text,
