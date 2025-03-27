@@ -16,11 +16,22 @@ class ChatBotClient:
         """
         self.api_url = api_url
         self.session = None
+        
+    async def __aenter__(self):
+        """Support for async context manager."""
+        return self
+        
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Cleanup when used as async context manager."""
+        await self.cleanup()
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create an HTTP session."""
         if self.session is None or self.session.closed:
-            self.session = aiohttp.ClientSession()
+            self.session = aiohttp.ClientSession(
+                # Add timeout to prevent session from hanging indefinitely
+                timeout=aiohttp.ClientTimeout(total=30)
+            )
         return self.session
 
     async def get_response(self, prompt: str, session_id: str = "test") -> Tuple[str, str]:
@@ -40,7 +51,7 @@ class ChatBotClient:
         payload = {
             "message": prompt,
             "session_id": session_id,
-            "mode" : "compare"
+            "mode" : "both"  # Use "both" to get both RAG and non-RAG responses
         }
 
         try:
@@ -52,8 +63,16 @@ class ChatBotClient:
                 data = await response.json()
 
                 # Extract responses from the response data
-                rag_response = data.get("response", {}).get("output", "No RAG response received")
-                no_rag_response = data.get("response", {}).get("no_rag_output", "No non-RAG response received")
+                response_obj = data.get("response", {})
+                if not response_obj:
+                    return "No response data received", "No response data received"
+                    
+                rag_response = response_obj.get("output")
+                no_rag_response = response_obj.get("no_rag_output")
+                
+                # Ensure neither response is None
+                rag_response = rag_response or "No RAG response received"
+                no_rag_response = no_rag_response or "No non-RAG response received"
 
                 return rag_response, no_rag_response
         except aiohttp.ClientError as e:
@@ -83,5 +102,9 @@ class ChatBotClient:
     async def cleanup(self):
         """Close the HTTP session."""
         if self.session and not self.session.closed:
-            await self.session.close()
-            self.session = None
+            try:
+                await self.session.close()
+            except Exception as e:
+                print(f"Error closing session: {str(e)}")
+            finally:
+                self.session = None

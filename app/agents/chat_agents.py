@@ -10,7 +10,7 @@ from typing_extensions import Optional
 
 from app.tools.gpt_tools import ToolManager
 from app.config.chat_config import ChatConfig
-from app.services.qa_service import qa_service
+from app.services.enhancement_service import enhancement_service
 from app.utils.llm_client import LLMClientManager
 from app.utils.logging_utils import get_logger
 from app.utils.other_utlis import write_data_logfile
@@ -373,7 +373,8 @@ class AgentFactory:
         )
 
         # Log the created prompt template
-        cls.prompt_capture.logger.debug(f"Created prompt template with system content: {system_content[:100]}...")
+        cls.prompt_capture.logger.debug(f"Created prompt template with "
+                                        f"system content: {system_content[:100]}...")
 
         return prompt
 
@@ -414,16 +415,21 @@ class AgentManager:
         """
         # If we have an expected answer, incorporate it into the system prompt
         if expected_answer:
-            self.logger.debug("Adding expected answer to RAG agent system prompt with strong anti-verbatim guidance")
+            self.logger.debug("Adding expected answer to RAG agent system "
+                              "prompt with strong anti-verbatim guidance")
 
             # Start with either the custom prompt or the default
             base_prompt = custom_system_prompt or self.config.RAG_SYSTEM_PROMPT
 
-            # Extract key concepts from the expected answer without including the full text
-            # This helps prevent verbatim copying while still providing guidance
+            # Extract key concepts from the expected answer without including
+            # the full text This helps prevent verbatim copying while still
+            # providing guidance
 
-            # Use the QA service to enhance the prompt with expected answer
-            enhanced_prompt = qa_service.enhance_prompt_with_expected_answer(base_prompt, expected_answer)
+            # Use the enhancement service to enhance the prompt with expected answer
+            enhanced_prompt = (
+                enhancement_service.enhance_prompt_with_expected_answer(
+                                                    base_prompt,
+                                                    expected_answer))
 
             custom_system_prompt = enhanced_prompt
             self.logger.info("Enhanced system prompt with expected answer")
