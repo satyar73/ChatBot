@@ -23,7 +23,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
 from app.config.chat_config import ChatConfig
-from app.services.qa_service import qa_service
+from app.services.enhancement_service import enhancement_service
 
 class CustomJsonLoader(BaseLoader):
     """Custom loader for JSON data"""
@@ -405,13 +405,13 @@ class GoogleDriveIndexer:
             Markdown string with the analysis result
         """
         prompt = self.config.GOOGLE_SLIDE_IMAGE_TO_TEXT_PROMPT
-        # Use the QA service to analyze the image
-        return qa_service.analyze_image_with_llm(image_content, prompt, getattr(self.config, 'OPENAI_VISION_MODEL', 'gpt-4o'))
+        # Use the enhancement service to analyze the image
+        return enhancement_service.analyze_image_with_llm(image_content, prompt, getattr(self.config, 'OPENAI_VISION_MODEL', 'gpt-4o'))
 
     def condense_content_using_llm(self, content):
         """Summarize content using OpenAI's API"""
-        # Use the QA service to condense content
-        return qa_service.condense_content_using_llm(content)
+        # Use the enhancement service to condense content
+        return enhancement_service.condense_content_using_llm(content)
 
     def html_to_markdown(self, html_text):
         """Convert HTML to Markdown format"""

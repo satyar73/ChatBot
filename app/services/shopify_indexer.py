@@ -19,7 +19,7 @@ from pinecone import Pinecone, ServerlessSpec
 import markdownify as md
 
 from app.config.chat_config import ChatConfig
-from app.services.qa_service import qa_service
+from app.services.enhancement_service import enhancement_service
 from app.utils.logging_utils import get_logger
 
 class ShopifyIndexer:
@@ -43,8 +43,8 @@ class ShopifyIndexer:
         self.shopify_admin_api_base = (f"https://{self.config.SHOPIFY_SHOP_DOMAIN}"
                                        f"/admin/api/{self.config.SHOPIFY_API_VERSION}")
 
-        # Use the QA service
-        self.qa_service = qa_service
+        # Use the enhancement service
+        self.enhancement_service = enhancement_service
 
         # logging
         self.logger.info(f"ShopifyIndexer initialized with shop domain: {self.config.SHOPIFY_SHOP_DOMAIN}")
@@ -210,8 +210,8 @@ class ShopifyIndexer:
         Returns:
             Dictionary mapping keywords to related terms
         """
-        # Use the QA service to extract keywords
-        return self.qa_service.extract_keywords_from_qa()
+        # Use the enhancement service to extract keywords
+        return self.enhancement_service.extract_keywords_from_qa()
 
     def enhance_records_with_keywords(self, records: List[Dict[str, Any]],
                                       keyword_map: Dict[str, List[str]]) -> List[Dict[str, Any]]:
@@ -225,8 +225,8 @@ class ShopifyIndexer:
         Returns:
             Enhanced records with keywords
         """
-        # Use the QA service to enhance records with keywords
-        return self.qa_service.enhance_records_with_keywords(records, keyword_map)
+        # Use the enhancement service to enhance records with keywords
+        return self.enhancement_service.enhance_records_with_keywords(records, keyword_map)
 
     def get_all_content(self) -> List[Dict[str, Any]]:
         """
@@ -367,8 +367,8 @@ class ShopifyIndexer:
         Returns:
             Enhanced prompt for embedding
         """
-        # Use the QA service to create an optimized embedding prompt
-        return self.qa_service.create_embedding_prompt(text, metadata)
+        # Use the enhancement service to create an optimized embedding prompt
+        return self.enhancement_service.create_embedding_prompt(text, metadata)
 
     def index_to_pinecone(self, records: List[Dict[str, Any]]) -> bool:
         """
@@ -541,8 +541,8 @@ class ShopifyIndexer:
         Returns:
             Dictionary of attribution-related metadata
         """
-        # Use the QA service to enrich attribution metadata
-        return self.qa_service.enrich_attribution_metadata(content)
+        # Use the enhancement service to enrich attribution metadata
+        return self.enhancement_service.enrich_attribution_metadata(content)
 
     def setup_shopify_indexer(self) -> dict:
         """
@@ -614,5 +614,5 @@ class ShopifyIndexer:
         Returns:
             List of processed Q&A records
         """
-        # Use the QA service to prepare Q&A pairs
-        return self.qa_service.prepare_qa_pairs()
+        # Use the enhancement service to prepare Q&A pairs
+        return self.enhancement_service.prepare_qa_pairs()
