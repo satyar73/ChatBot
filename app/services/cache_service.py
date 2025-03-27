@@ -44,6 +44,7 @@ class ChatCacheService:
                 sources TEXT,
                 system_prompt TEXT,
                 prompt_style TEXT DEFAULT 'default',
+                mode TEXT DEFAULT 'rag',
                 timestamp REAL,
                 hit_count INTEGER DEFAULT 1
             )
@@ -75,19 +76,43 @@ class ChatCacheService:
             conn = sqlite3.connect(str(cache_config.CACHE_DB_PATH))
             cursor = conn.cursor()
             
-            # Check if prompt_style column exists
+            # Define all required columns for the chat_cache table
+            required_columns = [
+                "query_hash", "user_input", "rag_response", 
+                "no_rag_response", "sources", "system_prompt", 
+                "prompt_style", "timestamp", "hit_count", "mode"
+            ]
+            
+            # Check which columns exist in the current schema
             cursor.execute("PRAGMA table_info(chat_cache)")
-            columns = [column[1] for column in cursor.fetchall()]
+            existing_columns = [column[1] for column in cursor.fetchall()]
+            
+            # Also check cache_logs table exists and has the right schema
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='cache_logs'")
+            cache_logs_exists = cursor.fetchone() is not None
+            
+            # Check if any required column is missing
+            missing_columns = [col for col in required_columns if col not in existing_columns]
             
             conn.close()
-            return "prompt_style" not in columns
+            
+            if missing_columns:
+                self.logger.warning(f"Database schema missing columns: {', '.join(missing_columns)}")
+                return True
+                
+            if not cache_logs_exists:
+                self.logger.warning("Database missing cache_logs table")
+                return True
+                
+            return False
         except Exception as e:
             self.logger.error(f"Error checking database schema: {e}")
-            return False
+            return True  # If we can't check the schema, rebuild to be safe
     
     @staticmethod
     def generate_query_hash(query: str, history: List = None, session_id: str = None, 
-                           system_prompt: str = None, prompt_style: str = "default") -> str:
+                           system_prompt: str = None, prompt_style: str = "default",
+                           mode: str = "rag") -> str:
         """
         Generate a hash to uniquely identify a query with its context.
         
@@ -97,6 +122,7 @@ class ChatCacheService:
             session_id: Optional session ID
             system_prompt: Optional custom system prompt
             prompt_style: The prompt style (default, detailed, concise)
+            mode: The response mode (rag, no_rag, both)
             
         Returns:
             String hash that uniquely identifies this query in its context
@@ -122,6 +148,9 @@ class ChatCacheService:
             
         # Always include prompt style in hash (critical for proper caching with different styles)
         hash_content += "prompt_style:" + (prompt_style or "default").strip().lower()
+        
+        # Always include mode in hash (critical for proper caching with different modes)
+        hash_content += "mode:" + (mode or "rag").strip().lower()
             
         # Generate hash
         query_hash = hashlib.md5(hash_content.encode('utf-8')).hexdigest()
@@ -148,7 +177,7 @@ class ChatCacheService:
             # Get cached response
             cursor.execute(
                 "SELECT rag_response, no_rag_response, sources, timestamp,"
-                            " hit_count, system_prompt, prompt_style"
+                            " hit_count, system_prompt, prompt_style, mode"
                             " FROM chat_cache"
                             " WHERE query_hash = ?",
                 (query_hash,)
@@ -156,12 +185,14 @@ class ChatCacheService:
             result = cursor.fetchone()
             
             if result:
-                rag_response, no_rag_response, sources_json, timestamp, hit_count, system_prompt, prompt_style = result
+                (rag_response, no_rag_response, sources_json, timestamp,
+                 hit_count, system_prompt, prompt_style, mode) = result
                 
                 # Check if cache entry has expired
                 age_in_seconds = time.time() - timestamp
                 if age_in_seconds > cache_config.CACHE_TTL:
-                    self.logger.info(f"Cache hit but expired for {query_hash} (age: {age_in_seconds/3600:.1f} hours)")
+                    self.logger.info(f"Cache hit but expired for {query_hash} "
+                                     f"(age: {age_in_seconds/3600:.1f} hours)")
                     cursor.execute("DELETE FROM chat_cache "
                                    "WHERE query_hash = ?", (query_hash,))
                     conn.commit()
@@ -183,7 +214,8 @@ class ChatCacheService:
                     "no_rag_response": no_rag_response,
                     "sources": sources,
                     "system_prompt": system_prompt,
-                    "prompt_style": prompt_style
+                    "prompt_style": prompt_style,
+                    "mode": mode
                 }
                 
                 self.logger.info(f"Cache hit for {query_hash}, hit count: {hit_count + 1}")
@@ -205,7 +237,8 @@ class ChatCacheService:
                       no_rag_response: str, 
                       sources: List = None,
                       system_prompt: str = None,
-                      prompt_style: str = "default") -> bool:
+                      prompt_style: str = "default",
+                      mode: str = "rag") -> bool:
         """
         Cache a response for future retrieval.
         
@@ -217,6 +250,7 @@ class ChatCacheService:
             sources: Optional list of sources
             system_prompt: Optional custom system prompt
             prompt_style: Optional prompt style (default, detailed, concise)
+            mode: Optional response mode (rag, no_rag, both)
             
         Returns:
             Boolean indicating success/failure
@@ -238,11 +272,11 @@ class ChatCacheService:
                     INTO
                 chat_cache 
                 (query_hash, user_input, rag_response, no_rag_response, sources,
-                system_prompt, prompt_style, timestamp, hit_count) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+                system_prompt, prompt_style, mode, timestamp, hit_count) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 """, 
                 (query_hash, user_input, rag_response, no_rag_response,
-                 sources_json, system_prompt, prompt_style, time.time())
+                 sources_json, system_prompt, prompt_style, mode, time.time())
             )
             
             # Ensure cache size doesn't exceed limit
@@ -263,7 +297,7 @@ class ChatCacheService:
                         DELETE FROM chat_cache 
                         WHERE query_hash IN (
                             SELECT query_hash FROM chat_cache 
-                            ORDER BY timestamp ASC 
+                            ORDER BY timestamp
                             LIMIT ?
                         )
                         """,

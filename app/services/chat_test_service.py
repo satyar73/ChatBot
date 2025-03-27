@@ -83,6 +83,11 @@ class ChatTestService:
             # Get both RAG and non-RAG responses in a single API call
             logger.debug("Calling Chatbot API for responses")
             rag_response, no_rag_response = await self.chatbot_client.get_response(prompt)
+            
+            # Ensure responses are not None
+            rag_response = rag_response or "No RAG response received"
+            no_rag_response = no_rag_response or "No non-RAG response received"
+            
             logger.debug(f"Received responses - RAG: {len(rag_response)} chars, non-RAG: {len(no_rag_response)} chars")
 
             # Return updated state with both responses
@@ -818,17 +823,17 @@ class ChatTestService:
             "rag_test_results": None,
             "rag_llm_results": None,
             "rag_passed": None,
-            "rag_enhanced_results": None,  # Add this line
+            "rag_enhanced_results": None,
             "no_rag_response": None,
             "no_rag_test_results": None,
             "no_rag_llm_results": None,
-            "no_rag_enhanced_results": None,  # Add this line
+            "no_rag_enhanced_results": None,
             "no_rag_passed": None,
             "reasoning": None,
             "comparison": None,
             "next": None
         }
-
+        
         try:
             # Run the graph
             final_state = await graph.ainvoke(initial_state)
@@ -901,6 +906,12 @@ class ChatTestService:
                 similarity_score=0,
                 detailed_analysis={"error": str(e)}
             )
+        finally:
+            # Always ensure we clean up resources
+            try:
+                await self.chatbot_client.cleanup()
+            except Exception as e:
+                self.logger.error(f"Error cleaning up chatbot client: {str(e)}")
 
     # noinspection PyTypeChecker
     async def run_batch_test(self, csv_file: str, similarity_threshold: float = 0.7):
@@ -1115,15 +1126,23 @@ class ChatTestService:
 
 
         # Create response with both file paths
-        return ChatBatchTestResponse(
-            total_tests=total,
-            passed=passed,
-            failed=failed,
-            pass_rate=(passed / total) * 100 if total > 0 else 0,
-            output_file=output_file,
-            rag_report_file=rag_report_file,  # Added rag_report_file attribute
-            results=results
-        )
+        try:
+            return ChatBatchTestResponse(
+                total_tests=total,
+                passed=passed,
+                failed=failed,
+                pass_rate=(passed / total) * 100 if total > 0 else 0,
+                output_file=output_file,
+                rag_report_file=rag_report_file,  # Added rag_report_file attribute
+                results=results
+            )
+        finally:
+            # Ensure client is cleaned up at the end of the batch test
+            try:
+                await self.chatbot_client.cleanup()
+                logger.info("Successfully cleaned up chatbot client")
+            except Exception as e:
+                logger.error(f"Error cleaning up chatbot client: {str(e)}")
 
     async def cleanup(self):
         """Cleanup resources"""

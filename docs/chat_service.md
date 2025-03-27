@@ -18,11 +18,12 @@ The `ChatService` class manages chat interactions between users and the underlyi
 ### 2.1 Key Components
 - **Session Management**: Maintains chat histories for different user sessions
 - **Query Routing**: Routes queries to appropriate agents (RAG, non-RAG, or database) using pattern matching
-- **Query Rewriting**: Uses an `QueryRewriter` with the following strategies to enhance RAG retrieval:
+- **Query Enhancement**: Uses the `EnhancementService` with the following strategies to enhance RAG retrieval:
   - Abbreviation expansion for marketing terms
   - Synonym addition for improved matching
   - Technical term handling with definitions
   - Query broadening techniques
+  - Contextual analysis from conversation history
 - **Response Quality Assessment**: Evaluates RAG responses for adequacy and tries alternative query formulations when needed
 - **Detailed Logging**: Provides logs of routing decisions and query transformations
 - **Response Processing**: Handles both RAG and non-RAG responses and combines them with sources
@@ -73,10 +74,10 @@ Executes RAG agent with enhanced retry logic, query reformulation, and special h
 - `custom_system_prompt`: Optional custom system prompt
 
 **Flow**:
-1. Generates alternative query formulations using the QueryRewriter
-2. Special handling for technical marketing terms by trying exact term queries first
-3. Tries the original query for normal queries
-4. Evaluates response quality using `_is_empty_or_inadequate_response`
+1. Uses the EnhancementService's try_alternative_queries method to manage query reformulation
+2. Generates alternative query formulations with context awareness
+3. Special handling for technical marketing terms by trying exact term queries first
+4. Evaluates response quality using the EnhancementService's _is_empty_or_inadequate_response
 5. If the response appears to lack information or contains "not found" phrases, tries alternative formulations
 6. Returns the best response and list of all queries tried
 
@@ -84,6 +85,7 @@ Executes RAG agent with enhanced retry logic, query reformulation, and special h
 - Identifies technical marketing terms (e.g., "advanced attribution multiplier")
 - Tries exact term queries first for precise matching
 - Adds technical definitions to improve retrieval accuracy
+- Extracts context topics from recent conversation history
 
 **Returns**:
 - Tuple containing (best_response, queries_tried)
@@ -113,31 +115,46 @@ The ChatService relies on configuration from:
 - `app.config.chat_config.ChatConfig`: Contains system prompts, API settings
 - `app.config.cache_config`: Contains cache configuration
 
-## 3. Query Rewriter
-The `QueryRewriter` class enhances user queries to improve RAG retrieval quality through various transformation techniques.
+## 3. Enhancement Service
+The `EnhancementService` class enhances user queries, prompts, and content processing to improve RAG retrieval quality and response generation.
 
 ### 3.1 Features
-- **Abbreviation Expansion**: Expands common marketing abbreviations (e.g., "mmm" → "marketing mix modeling")
-- **Synonym Addition**: Enriches queries with relevant synonyms to improve matching
-- **Technical Term Enhancement**: Special handling for technical marketing terms with definitions
-- **Query Broadening**: Creates more general versions of queries by removing specific constraints
-- **Marketing-Specific Terminology**: Extensive mappings for marketing and attribution terminology
+- **Query Enhancement**:
+  - Abbreviation expansion for marketing terms (e.g., "mmm" → "marketing mix modeling")
+  - Addition of relevant synonyms to improve matching
+  - Special handling for technical marketing terms with definitions
+  - Query broadening by removing specific constraints
+  - Extraction of context topics from conversation history
+  - Semantic similarity filtering for diverse query alternatives
+- **Content Enhancement**:
+  - Attribution metadata enrichment for indexed content
+  - Keyword extraction and categorization
+  - Technical term identification and definitions
+  - Enhanced embedding prompts for technical content
+  - Q&A pair processing that preserves question-answer relationships
+- **Prompt Enhancement**:
+  - Extraction of key concepts from expected answers
+  - Enhanced system prompts with concept guidance
+  - Image content analysis with vision models
 
-### 3.2 Key Methods
+### 3.2 Key Methods for Query Enhancement
 
-#### `generate_alt_queries(original_query) -> List[str]`
-Generates alternative formulations of a query to improve retrieval by applying multiple transformation techniques.
+#### `enhance_query(original_query, conversation_context) -> Dict[str, Any]`
+Generates enhanced query and alternative formulations to improve retrieval, with context awareness.
 
 **Parameters**:
 - `original_query`: The original user query
+- `conversation_context`: Optional conversation history
 
 **Returns**:
-- List of alternative query formulations, including:
-  - The original query (always included)
-  - Queries with expanded abbreviations
-  - Queries with added synonyms
-  - Technical term definitions when applicable
-  - Broader versions of the query
+- Dictionary with:
+  - `original_query`: The original query
+  - `enhanced_query`: The enhanced query with technical definitions and expansions
+  - `alt_queries`: List of alternative query formulations
+  - `intent`: Detected query intent
+  - `qa_match`: Information about matching Q&A pairs
+  - `context_topics`: Topics extracted from conversation history
+  - `related_questions`: Related questions from the knowledge base
 
 #### `expand_abbreviations(query) -> str`
 Expands common marketing abbreviations in the query using a comprehensive dictionary of terms.
@@ -164,7 +181,57 @@ Creates a more general version of the query by removing specific constraints and
 - `query`: User query text
 
 **Returns**:
-- Broader version of the query or a tuple containing (broader_query, core_concepts_query)
+- Broader version of the query
+
+#### `try_alternative_queries(original_query, process_function, is_adequate_function, history, max_attempts) -> tuple`
+Tries multiple query formulations, evaluating responses for adequacy.
+
+**Parameters**:
+- `original_query`: The original user query
+- `process_function`: Async function that processes each query (e.g., sends to an agent)
+- `is_adequate_function`: Function that determines if a response is adequate
+- `history`: Optional conversation history
+- `max_attempts`: Maximum number of queries to try (default: 3)
+
+**Returns**:
+- Tuple of (best_response, queries_tried)
+
+### 3.3 Key Methods for Content Enhancement
+
+#### `extract_keywords_from_qa() -> Dict[str, List[str]]`
+Extracts keywords from Q&A pairs to use for tagging content.
+
+**Returns**:
+- Dictionary mapping keyword categories to related terms
+
+#### `create_embedding_prompt(text, metadata) -> str`
+Creates an optimized prompt for embedding that highlights attribution terms and technical concepts.
+
+**Parameters**:
+- `text`: Original text to embed
+- `metadata`: Metadata associated with the text
+
+**Returns**:
+- Enhanced prompt for embedding with additional context
+
+#### `enrich_attribution_metadata(content) -> Dict[str, Any]`
+Analyzes content for attribution terminology and creates enhanced metadata.
+
+**Parameters**:
+- `content`: Markdown or text content to analyze
+
+**Returns**:
+- Dictionary of attribution-related metadata
+
+#### `enhance_records_with_keywords(records, keyword_map) -> List[Dict[str, Any]]`
+Enhances content records with keywords based on content analysis.
+
+**Parameters**:
+- `records`: List of content records
+- `keyword_map`: Dictionary of keywords and related terms
+
+**Returns**:
+- Enhanced records with keywords added
 
 ## 4. ChatCacheService
 The `ChatCacheService` provides caching functionality to avoid redundant API calls.
@@ -269,6 +336,7 @@ Processes a user query through the appropriate agent(s).
 
 ```python
 from app.services.chat_service import ChatService
+from app.services.enhancement_service import enhancement_service
 from app.models.chat_models import Message
 
 # Initialize the chat service
@@ -281,7 +349,7 @@ message = Message(
     mode="rag"  # Use RAG mode
 )
 
-# Get response
+# Get response with enhanced query processing
 response = await chat_service.chat(message)
 
 # Access the response text
@@ -289,6 +357,9 @@ rag_response = response.rag_response
 
 # Access sources
 sources = response.sources
+
+# Get alternative queries that were tried
+alt_queries = response.metadata.get("queries_tried", [])
 ```
 
 ### 6.2 Using Custom System Prompt

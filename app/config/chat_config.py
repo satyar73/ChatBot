@@ -170,6 +170,27 @@ class ChatConfig:
         might be valuable.
         """
 
+        self.GOOGLE_SLIDE_IMAGE_TO_TEXT_PROMPT= """
+        Please provide a complete and detailed transcription of ALL content in this slide image, formatted as clean markdown:
+
+        1. Use "## Title" for the slide title (exactly as it appears, without mentioning it's the slide title)
+        2. Use "### Subtitle" for any subtitles (exactly as they appear)
+        3. Format ALL bullet points as proper markdown lists (using - or * for each item) with proper indentation for nested lists
+        4. If it's a table: render the ENTIRE table in markdown table format (|---|---|) with ALL rows, columns, and cell contents
+        5. If it contains a chart/graph: create a detailed section describing the chart including:
+           - Chart type and title (as a heading)
+           - All axis labels and ranges
+           - Each data series and its values
+           - Legend information
+           - Key trends or data points
+        6. If it contains images: create a section describing each image in detail
+        7. Include all footnotes, citations, or small text using appropriate markdown (e.g., > for quotes, *italics* for emphasis)
+
+        Do NOT add any meta-commentary (like "This slide contains") - just transcribe the content directly using proper markdown formatting.
+        Do NOT summarize or paraphrase - transcribe EVERYTHING exactly as it appears.
+        Format your response as a clean, properly structured markdown document that could be used as-is. 
+        """
+
         # Retriever Tool Configuration
         self.RETRIEVER_TOOL_CONFIG = {
             "name": "search_rag_docs",

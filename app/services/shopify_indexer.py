@@ -19,7 +19,7 @@ from pinecone import Pinecone, ServerlessSpec
 import markdownify as md
 
 from app.config.chat_config import ChatConfig
-from app.services.qa_service import qa_service
+from app.services.enhancement_service import enhancement_service
 from app.utils.logging_utils import get_logger
 
 class ShopifyIndexer:
@@ -43,8 +43,8 @@ class ShopifyIndexer:
         self.shopify_admin_api_base = (f"https://{self.config.SHOPIFY_SHOP_DOMAIN}"
                                        f"/admin/api/{self.config.SHOPIFY_API_VERSION}")
 
-        # Use the QA service
-        self.qa_service = qa_service
+        # Use the enhancement service
+        self.enhancement_service = enhancement_service
 
         # logging
         self.logger.info(f"ShopifyIndexer initialized with shop domain: {self.config.SHOPIFY_SHOP_DOMAIN}")
@@ -210,8 +210,8 @@ class ShopifyIndexer:
         Returns:
             Dictionary mapping keywords to related terms
         """
-        # Use the QA service to extract keywords
-        return self.qa_service.extract_keywords_from_qa()
+        # Use the enhancement service to extract keywords
+        return self.enhancement_service.extract_keywords_from_qa()
 
     def enhance_records_with_keywords(self, records: List[Dict[str, Any]],
                                       keyword_map: Dict[str, List[str]]) -> List[Dict[str, Any]]:
@@ -225,18 +225,18 @@ class ShopifyIndexer:
         Returns:
             Enhanced records with keywords
         """
-        # Use the QA service to enhance records with keywords
-        return self.qa_service.enhance_records_with_keywords(records, keyword_map)
+        # Use the enhancement service to enhance records with keywords
+        return self.enhancement_service.enhance_records_with_keywords(records, keyword_map)
 
-    def index_all_content(self) -> bool:
+    def get_all_content(self) -> List[Dict[str, Any]]:
         """
-        Index all Shopify content (blogs, articles, products) to Pinecone.
+        Get all Shopify content (blogs, articles, products).
 
         Returns:
-            True if indexing was successful, False otherwise
+            List of all content records
         """
         try:
-            self.logger.info("Starting full content indexing...")
+            self.logger.info("Fetching all Shopify content...")
 
             # Prepare blog articles
             self.logger.info("Fetching blog articles...")
@@ -246,55 +246,31 @@ class ShopifyIndexer:
             self.logger.info("Fetching products...")
             product_records, variant_records = self.prepare_products()
 
-            keyword_map = self.extract_keywords_from_qa()
-
-            # Enhance records with keywords
-            if keyword_map:
-                enhanced_article_records = self.enhance_records_with_keywords(
-                                                            article_records,
-                                                            keyword_map)
-                enhanced_product_records = self.enhance_records_with_keywords(
-                                                            product_records,
-                                                            keyword_map)
-                enhanced_blog_records = self.enhance_records_with_keywords(
-                                                            blog_records,
-                                                            keyword_map)
-            else:
-                enhanced_article_records = article_records
-                enhanced_product_records = product_records
-                enhanced_blog_records = blog_records
-
-            # Combine all records. Blog records not included as there is not
-            # much to be included in them
-            all_records = enhanced_article_records + enhanced_product_records
-
+            # Combine all records
+            all_records = blog_records + article_records + product_records + variant_records
+            self.logger.info(f"Fetched {len(all_records)} total records")
+            
             # Save intermediate files if configured
             if self.config.SAVE_INTERMEDIATE_FILES:
                 os.makedirs(self.config.OUTPUT_DIR, exist_ok=True)
-
+                
                 with open(os.path.join(self.config.OUTPUT_DIR, "blogs.json"), "w") as f:
-                    json.dump(enhanced_blog_records, f, indent=2)
-
+                    blog_data = [r for r in all_records if r.get('type') == 'blog']
+                    json.dump(blog_data, f, indent=2)
+                
                 with open(os.path.join(self.config.OUTPUT_DIR, "articles.json"), "w") as f:
-                    json.dump(enhanced_article_records, f, indent=2)
-
+                    article_data = [r for r in all_records if r.get('type') == 'article']
+                    json.dump(article_data, f, indent=2)
+                
                 with open(os.path.join(self.config.OUTPUT_DIR, "products.json"), "w") as f:
-                    json.dump(enhanced_product_records, f, indent=2)
-
-            # Index to Pinecone
-            self.logger.info(f"Indexing {len(all_records)} total records...")
-            result = self.index_to_pinecone(all_records)
-
-            if result:
-                self.logger.info("Full content indexing completed successfully")
-            else:
-                self.logger.error("Full content indexing failed")
-
-            return result
+                    product_data = [r for r in all_records if r.get('type') == 'product']
+                    json.dump(product_data, f, indent=2)
+            
+            return all_records
 
         except Exception as e:
-            self.logger.error(f"Error during full content indexing: {str(e)}")
-            return False
+            self.logger.error(f"Error fetching Shopify content: {str(e)}")
+            return []
 
     def prepare_blog_articles(self) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
@@ -391,8 +367,8 @@ class ShopifyIndexer:
         Returns:
             Enhanced prompt for embedding
         """
-        # Use the QA service to create an optimized embedding prompt
-        return self.qa_service.create_embedding_prompt(text, metadata)
+        # Use the enhancement service to create an optimized embedding prompt
+        return self.enhancement_service.create_embedding_prompt(text, metadata)
 
     def index_to_pinecone(self, records: List[Dict[str, Any]]) -> bool:
         """
@@ -565,13 +541,13 @@ class ShopifyIndexer:
         Returns:
             Dictionary of attribution-related metadata
         """
-        # Use the QA service to enrich attribution metadata
-        return self.qa_service.enrich_attribution_metadata(content)
+        # Use the enhancement service to enrich attribution metadata
+        return self.enhancement_service.enrich_attribution_metadata(content)
 
-    def run_full_process(self) -> dict:
+    def setup_shopify_indexer(self) -> dict:
         """
-        Run the complete Shopify indexing process.
-        This is the main entry point called by IndexService.
+        Initialize the Shopify client and validate settings.
+        This is a helper method for setup.
         
         Returns:
             A dictionary with status and message
@@ -587,7 +563,7 @@ class ShopifyIndexer:
             # Update SHOPIFY_SHOP_DOMAIN with the value from either attribute
             self.config.SHOPIFY_SHOP_DOMAIN = shop_domain
 
-            self.logger.info(f"Starting Shopify indexing process for store: {shop_domain}")
+            self.logger.info(f"Initializing Shopify client for store: {shop_domain}")
 
             # Check if we have a valid Shopify domain
             if not shop_domain:
@@ -614,23 +590,14 @@ class ShopifyIndexer:
                 self.config.SHOPIFY_SITE_BASE_URL = f"https://{shop_domain}"
                 self.logger.info(f"Updated site base URL: {self.config.SHOPIFY_SITE_BASE_URL}")
 
-            # Run the indexing process
-            success = self.index_all_content()
+            # Get content count for verification
+            content = self.get_all_content()
 
-            # Get blog and product counts for better messaging
-            blog_records, article_records = self.prepare_blog_articles()
-            product_records, _ = self.prepare_products()
-
-            if success:
-                return {
-                    "status": "success",
-                    "message": f"Successfully indexed {len(product_records)} products and {len(article_records)} articles from {shop_domain}"
-                }
-            else:
-                return {
-                    "status": "error",
-                    "message": f"Failed to index content from {shop_domain}"
-                }
+            return {
+                "status": "success",
+                "message": f"Successfully initialized Shopify client with {len(content)} content items from {shop_domain}",
+                "content_count": len(content)
+            }
 
         except Exception as e:
             self.logger.error(f"Error in run_full_process: {str(e)}")
@@ -647,5 +614,5 @@ class ShopifyIndexer:
         Returns:
             List of processed Q&A records
         """
-        # Use the QA service to prepare Q&A pairs
-        return self.qa_service.prepare_qa_pairs()
+        # Use the enhancement service to prepare Q&A pairs
+        return self.enhancement_service.prepare_qa_pairs()

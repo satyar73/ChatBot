@@ -327,9 +327,9 @@ class TestShopifyIndexer(unittest.TestCase):
         mock_pinecone_instance.list_indexes.assert_called_once()
 
         # Verify that a new index was created with correct parameters
-        mock_pinecone_instance.create_index.assert_called_once()
-        create_index_call = mock_pinecone_instance.create_index.call_args
-        create_index_call = mock_pinecone_instance.create_index.call_args
+        mock_pinecone_instance.create_index_from_shopify_store.assert_called_once()
+        create_index_call = mock_pinecone_instance.create_index_from_shopify_store.call_args
+        create_index_call = mock_pinecone_instance.create_index_from_shopify_store.call_args
         self.assertEqual(create_index_call[1]["name"], "test-index")
         self.assertEqual(create_index_call[1]["dimension"], 1536)
         self.assertEqual(create_index_call[1]["metric"], "cosine")
