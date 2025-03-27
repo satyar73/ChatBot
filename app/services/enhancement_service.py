@@ -1,8 +1,6 @@
 """
 Service layer for query enhancement and content enrichment.
 
-This service extends the capabilities of the former QA service with more
-sophisticated content enhancement for both chat prompts and content processing.
 """
 import json
 import re
