@@ -8,7 +8,7 @@ from langchain_core.prompts import MessagesPlaceholder
 from langchain.callbacks.base import BaseCallbackHandler
 from typing_extensions import Optional
 
-from app.config.chat_model_config import ChatModelConfig
+from app.config.chat_model_config import ChatModelConfig, CloudProvider
 from app.tools.gpt_tools import ToolManager
 from app.config.chat_config import ChatConfig
 from app.services.enhancement_service import enhancement_service
@@ -18,7 +18,6 @@ from app.utils.other_utlis import write_data_logfile
 import json
 import os
 from datetime import datetime
-from app.config.cloud_provider import CloudProvider
 
 
 class PromptCaptureCallback(BaseCallbackHandler):
