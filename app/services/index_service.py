@@ -1,8 +1,7 @@
 import asyncio
 import os
 import json
-from typing import Dict, Optional, Any, List
-import logging
+from typing import Dict, Optional, Any
 from pinecone import Pinecone
 
 from app.config.chat_config import ChatConfig
@@ -42,13 +41,9 @@ class IndexService:
             all_records = indexer.get_all_content()
             self.logger.info(f"Fetched {len(all_records)} records from Shopify")
             
-            # Process and enhance records
-            self.logger.debug("Processing and enhancing records")
-            enhanced_records = self.content_processor.process_records(all_records)
-            
             # Prepare documents for indexing
             self.logger.debug("Preparing documents for indexing")
-            docs = self.content_processor.prepare_documents_for_indexing(enhanced_records)
+            docs = self.content_processor.prepare_documents_for_indexing(all_records)
             self.logger.info(f"Prepared {len(docs)} documents for indexing")
             
             # Index the documents to Pinecone
@@ -59,7 +54,6 @@ class IndexService:
                 return {
                     "status": "success",
                     "message": f"Successfully indexed {len(docs)} document chunks",
-                    "record_count": len(enhanced_records),
                     "chunk_count": len(docs)
                 }
             else:
@@ -109,13 +103,9 @@ class IndexService:
                     "message": "No records found in Google Drive"
                 }
             
-            # Process and enhance records
-            self.logger.debug("Processing and enhancing records")
-            enhanced_records = self.content_processor.process_records(records)
-            
             # Prepare documents for indexing
             self.logger.debug("Preparing documents for indexing")
-            docs = self.content_processor.prepare_documents_for_indexing(enhanced_records)
+            docs = self.content_processor.prepare_documents_for_indexing(records)
             self.logger.info(f"Prepared {len(docs)} documents for indexing")
             
             # Index the documents to Pinecone
@@ -126,7 +116,6 @@ class IndexService:
                 return {
                     "status": "success",
                     "message": f"Successfully indexed {len(docs)} document chunks",
-                    "record_count": len(enhanced_records),
                     "chunk_count": len(docs)
                 }
             else:
