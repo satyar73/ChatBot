@@ -4,9 +4,9 @@ Content processor service for document processing and vector store indexing.
 import os
 from typing import List, Dict, Any, Optional
 
+from app.utils.logging_utils import get_logger
 from app.config.chat_config import ChatConfig, chat_config
 from app.services.enhancement_service import enhancement_service
-from app.utils.logging_utils import get_logger
 from app.utils.text_splitters import TokenTextSplitter
 from app.utils.vectorstore_client import VectorStoreClient
 

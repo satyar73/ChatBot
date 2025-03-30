@@ -5,6 +5,7 @@ import sys
 import time
 from typing import List, Any
 
+from app.agents.chat_agents import AgentManager
 from app.agents.response_strategies import ResponseStrategy
 from app.config.chat_config import chat_config
 from app.models.chat_models import ChatHistory, ResponseContent, ResponseMessage, Message
@@ -25,6 +26,7 @@ class ChatService:
         print("ChatService initialized", file=sys.stderr)
 
         self.config = chat_config
+        self.agent_manager = AgentManager()
 
         # Use the enhancement service for query enhancement and QA
         self.enhancement_service = enhancement_service
@@ -77,13 +79,13 @@ class ChatService:
 
         # Generate query hash for cache lookup
         query_hash = chat_cache.generate_query_hash(
-            query=user_input,
-            history=chat_history.get_messages(),
-            session_id=session_id,
-            system_prompt=custom_system_prompt,
-            prompt_style=prompt_style,
-            mode=mode  # Include mode in hash to differentiate between different mode requests
-        )
+                                        query=user_input,
+                                        history=chat_history.get_messages(),
+                                        session_id=session_id,
+                                        system_prompt=custom_system_prompt,
+                                        prompt_style=prompt_style,
+                                        mode=mode  # Include mode in hash to differentiate between different mode requests
+                                    )
 
         # Check cache if not in force refresh mode
         if not force_refresh:
@@ -110,22 +112,22 @@ class ChatService:
                 
                 # Create response content with cached data
                 response_content = ResponseContent(
-                    input=user_input,
-                    history=formatted_history,
-                    output=rag_output if mode != "no_rag" else no_rag_output,
-                    no_rag_output=no_rag_output if mode != "rag" else None,
-                    intermediate_steps=[]  # No intermediate steps for cached responses
-                )
+                                        input=user_input,
+                                        history=formatted_history,
+                                        output=rag_output if mode != "no_rag" else no_rag_output,
+                                        no_rag_output=no_rag_output if mode != "rag" else None,
+                                        intermediate_steps=[]  # No intermediate steps for cached responses
+                                    )
                 
                 # Log cache hit stats
                 response_time = time.time() - start_time
                 chat_cache.log_cache_access(
-                    session_id=session_id,
-                    user_input=user_input,
-                    query_hash=query_hash,
-                    cache_hit=True,
-                    response_time=response_time
-                )
+                                    session_id=session_id,
+                                    user_input=user_input,
+                                    query_hash=query_hash,
+                                    cache_hit=True,
+                                    response_time=response_time
+                                )
                 
                 return ResponseMessage(
                     response=response_content,
@@ -139,17 +141,17 @@ class ChatService:
         chat_history.add_user_message(user_input)
         
         # Get and execute the appropriate response strategy
-        strategy = ResponseStrategy.get_strategy(actual_query, mode, self)
+        strategy = ResponseStrategy.get_strategy(actual_query, mode, self, self.agent_manager)
         rag_response, no_rag_response, queries_tried = await strategy.execute(
-            chat_model_config,
-            actual_query,
-            chat_history,
-            custom_system_prompt,
-            prompt_style
-        )
+                                                                    chat_model_config=chat_model_config,
+                                                                    query=actual_query,
+                                                                    history=chat_history.get_messages(),
+                                                                    custom_system_prompt=custom_system_prompt,
+                                                                    prompt_style=prompt_style
+                                                                )
         
         # Create a temporary strategy just to format sources
-        temp_strategy = ResponseStrategy(self)
+        temp_strategy = ResponseStrategy(self, self.agent_manager)
         # Extract sources from the RAG response if available
         sources = temp_strategy.format_sources(rag_response)
         
@@ -215,12 +217,12 @@ class ChatService:
         self.logger.debug(f"secondary_output type: {type(secondary_output)}, content: {secondary_output[:50] if secondary_output else 'None'}")
         
         response_content = ResponseContent(
-            input=user_input,
-            history=formatted_history,
-            output=primary_output,
-            no_rag_output=secondary_output,
-            intermediate_steps=intermediate_steps
-        )
+                                    input=user_input,
+                                    history=formatted_history,
+                                    output=primary_output,
+                                    no_rag_output=secondary_output,
+                                    intermediate_steps=intermediate_steps
+                                )
         
         # Add the queries tried to the intermediate steps for transparency/debugging
         if ('intermediate_steps' in response_content.dict() and
@@ -245,25 +247,25 @@ class ChatService:
         
         # Cache the generated response
         chat_cache.cache_response(
-            query_hash=query_hash,
-            user_input=user_input,
-            rag_response=rag_output,
-            no_rag_response=no_rag_output,
-            sources=sources,
-            system_prompt=custom_system_prompt,
-            prompt_style=prompt_style,
-            mode=mode
-        )
+                            query_hash=query_hash,
+                            user_input=user_input,
+                            rag_response=rag_output,
+                            no_rag_response=no_rag_output,
+                            sources=sources,
+                            system_prompt=custom_system_prompt,
+                            prompt_style=prompt_style,
+                            mode=mode
+                        )
         
         # Log cache miss stats
         response_time = time.time() - start_time
         chat_cache.log_cache_access(
-            session_id=session_id,
-            user_input=user_input,
-            query_hash=query_hash,
-            cache_hit=False,
-            response_time=response_time
-        )
+                                session_id=session_id,
+                                user_input=user_input,
+                                query_hash=query_hash,
+                                cache_hit=False,
+                                response_time=response_time
+                            )
         
         self.logger.info(f"Response generated and cached in {response_time:.2f}s")
         
