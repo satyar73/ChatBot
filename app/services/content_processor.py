@@ -152,6 +152,9 @@ class ContentProcessor:
                         "source": f"{record.get('type', 'content')}"
                     }
                     metadata.update(attribution_metadata)
+                    if record.get('source') == 'Google Drive':
+                        metadata["type"] = record.get('type')
+                        metadata["client"] = record.get('client')
 
                     # Add keywords if available
                     if 'keywords' in record:

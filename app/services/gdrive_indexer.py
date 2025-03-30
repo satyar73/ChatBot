@@ -2,7 +2,7 @@ import os
 import json
 from tqdm import tqdm
 from markdownify import markdownify as md
-from typing import Callable, Dict, List, Union, Optional, Any
+from typing import Callable, Dict, List, Union, Optional, TypedDict, Any
 from pathlib import Path
 import logging
 import io
@@ -24,6 +24,24 @@ from googleapiclient.discovery import build
 
 from app.config.chat_config import ChatConfig
 from app.services.enhancement_service import enhancement_service
+
+# Define a type for the file/folder item
+class DriveItem(TypedDict):
+    id: str
+    name: str
+    mimeType: str
+    webViewLink: str
+    path: str
+    full_path: str
+    potential_client: Optional[str]
+    folder_type: Optional[str]  # one of "client", "General Resources:Case Studies", "Domain Knowledge"
+    folder_name: Optional[str]  # name of the folder
+
+# Define a type for the function return value
+class FolderContents(TypedDict):
+    items: List[DriveItem]
+    folder_path: str
+
 
 class CustomJsonLoader(BaseLoader):
     """Custom loader for JSON data"""
@@ -85,15 +103,93 @@ class GoogleDriveIndexer:
             self.logger.error(f"Failed to initialize Google Drive API client: {str(e)}")
             raise
 
-    def list_folder_contents(self, folder_id=None):
-        """List files and folders accessible to the service account"""
-        self.logger.info(f"Listing files and folders accessible to service account")
+    def get_file_info(self, file_id):
+        """Get the full path and name of a file or folder"""
+        try:
+            # First get the file/folder info
+            file_info = self.drive_service.files().get(
+                fileId=file_id,
+                fields='id,name,parents,mimeType'
+            ).execute()
+
+            file_name = file_info.get('name', '')
+            file_type = file_info.get('mimeType', '')
+            parents = file_info.get('parents', [])
+
+            # Build the path
+            if not parents:
+                # At root level
+                path = "My Drive"
+            else:
+                # Get parent path
+                parent_path = self.get_parent_path(parents[0])
+                path = parent_path
+
+            return {
+                "id": file_id,
+                "name": file_name,
+                "path": path,
+                "full_path": f"{path}/{file_name}",
+                "type": file_type
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error getting file info: {str(e)}")
+            return {
+                "id": file_id,
+                "name": "Unknown",
+                "path": "Unknown",
+                "full_path": f"Unknown/{file_id}",
+                "type": "unknown"
+            }
+
+    def get_parent_path(self, parent_id):
+        """Recursively build the path for a parent folder"""
+        try:
+            parent_info = self.drive_service.files().get(
+                fileId=parent_id,
+                fields='name,parents'
+            ).execute()
+
+            parent_name = parent_info.get('name', '')
+            grandparents = parent_info.get('parents', [])
+
+            if not grandparents:
+                return f"My Drive/{parent_name}"
+
+            # Recursively get the grandparent's path
+            grandparent_path = self.get_parent_path(grandparents[0])
+            return f"{grandparent_path}/{parent_name}"
+
+        except Exception as e:
+            self.logger.error(f"Error getting parent path: {str(e)}")
+            return "Unknown"
+
+    def list_folder_contents(self, folder_id=None) -> FolderContents :
+        """List files and folders accessible to the service account with full paths"""
+        self.logger.info(f"Listing files and folders with paths")
 
         # If no specific folder is requested, get all accessible files
+
+        potential_client = "msquared"
         if folder_id is None:
             query = "trashed = false"
+            folder_path = "My Drive"
+            folder_name = "My Drive"
+            folder_type = "Root"
         else:
             query = f"'{folder_id}' in parents and trashed = false"
+            folder_info = self.get_file_info(folder_id)
+            folder_name = folder_info["name"]
+            folder_path = folder_info["full_path"]
+            if (folder_name == "Domain Knowledge"
+                or folder_name == "MSquared - Curriculum - v3.0"):
+                folder_type = "Domain Knowledge"
+            elif folder_name == "Case Studies":
+                folder_type = "General Resources.Case Studies"
+            else:
+                folder_type = "client"
+                potential_client = folder_name
 
         try:
             results = []
@@ -109,22 +205,40 @@ class GoogleDriveIndexer:
                 ).execute()
 
                 items = response.get('files', [])
+
+                # Add path information to each item
+                for item in items:
+                    item_info = self.get_file_info(item['id'])
+                    item.update({
+                        'path': item_info['path'],
+                        'full_path': item_info['full_path'],
+                        'potential_client' : potential_client,
+                        'folder_type': folder_type,
+                        'folder_name': folder_name
+                    })
+
                 results.extend(items)
 
                 page_token = response.get('nextPageToken')
                 if not page_token:
                     break
 
-            self.logger.info(f"Found {len(results)} items")
-            return results
+            self.logger.info(f"Found {len(results)} items in {folder_path}")
+            return {
+                "items": results,
+                "folder_path": folder_path
+            }
         except Exception as e:
             self.logger.error(f"Error listing files: {str(e)}")
-            return []
+            return {
+                "items": [],
+                "folder_path": folder_path if 'folder_path' in locals() else "Unknown"
+            }
 
     def get_supported_files(self, folder_id=None, recursive=True):
         """Get all supported files, optionally from a specific folder"""
         all_files = []
-        items = self.list_folder_contents(folder_id)
+        folder_contents = self.list_folder_contents(folder_id)
 
         # Define supported MIME types
         supported_mime_types = [
@@ -139,14 +253,17 @@ class GoogleDriveIndexer:
             'text/html'  # HTML files
         ]
 
-        for item in items:
+        for item in folder_contents["items"]:
             if item['mimeType'] in supported_mime_types:
                 # It's a supported file
                 all_files.append(item)
-            elif item['mimeType'] == 'application/vnd.google-apps.folder' and recursive and folder_id is not None:
+            elif (item['mimeType'] == 'application/vnd.google-apps.folder'
+                  and recursive and folder_id is not None):
                 # It's a folder, and we want to process recursively
                 # Only process subfolders if we're starting from a specific folder
                 folder_files = self.get_supported_files(item['id'], recursive=True)
+                self.logger.info(f"Found {len(folder_files)} files"
+                                 f"in folder {item['name']}")
                 all_files.extend(folder_files)
 
         return all_files
@@ -350,10 +467,40 @@ class GoogleDriveIndexer:
                     # Analyze with GPT-4 Vision
                     slide_markdown = self._analyze_slide_with_llm(image_content, slide_number)
                     if slide_markdown:
+                        # Try to extract title from the markdown if it exists
+                        slide_title = None
+                        if slide_markdown.startswith('## '):
+                            title_line = slide_markdown.split('\n')[0]
+                            slide_title = title_line.replace('## ', '').strip()
+                        
+                        # If no title found, try to derive one from the content
+                        if not slide_title:
+                            # Look for text elements that might be titles
+                            for element in slide.get('pageElements', []):
+                                if 'shape' in element and 'text' in element['shape']:
+                                    text_content = ""
+                                    for textElement in element['shape']['text'].get('textElements', []):
+                                        if 'textRun' in textElement and 'content' in textElement['textRun']:
+                                            text_content += textElement['textRun']['content']
+                                    
+                                    # Check if this might be a title based on position or formatting
+                                    if ('title' in element.get('objectId', '').lower() or
+                                        ('transform' in element and element['transform'].get('scaleY', 0) > 1) or
+                                        (len(text_content.strip()) < 100 and text_content.strip())):  # Short text is likely a title
+                                        slide_title = text_content.strip()
+                                        break
+                        
+                        # If still no title, use a generic one
+                        if not slide_title:
+                            slide_title = "Untitled Slide"
+                        
+                        # Format the content with separate slide number and title
+                        full_content += f"## Slide {slide_number}\n\n"
+                        full_content += f"### {slide_title}\n\n"
                         full_content += f"{slide_markdown}\n\n---\n\n"
                     else:
                         # Fallback to basic extraction if vision analysis fails
-                        slide_title = f"Slide {slide_number}"
+                        slide_title = None
                         slide_content = []
                         
                         # Extract text elements
@@ -365,20 +512,26 @@ class GoogleDriveIndexer:
                                         text_content += textElement['textRun']['content']
                                 
                                 # Check if this might be a title
-                                if 'title' in element.get('objectId', '').lower() or (
-                                        'transform' in element and element['transform'].get('scaleY', 0) > 1):
+                                if ('title' in element.get('objectId', '').lower() or
+                                    ('transform' in element and element['transform'].get('scaleY', 0) > 1) or
+                                    (len(text_content.strip()) < 100 and text_content.strip())):  # Short text is likely a title
                                     slide_title = text_content.strip()
                                 else:
                                     # Add to content if not empty
                                     if text_content.strip():
                                         slide_content.append(text_content.strip())
                         
-                        # Format as markdown
-                        slide_md = f"## {slide_title}\n\n"
+                        # If no title found, use a generic one
+                        if not slide_title:
+                            slide_title = "Untitled Slide"
+                        
+                        # Format as markdown with separate slide number and title
+                        full_content += f"## Slide {slide_number}\n\n"
+                        full_content += f"### {slide_title}\n\n"
                         for item in slide_content:
-                            slide_md += f"{item}\n\n"
+                            full_content += f"{item}\n\n"
                             
-                        full_content += f"{slide_md}\n\n---\n\n"
+                        full_content += "---\n\n"
                 
                 except Exception as e:
                     self.logger.error(f"Error processing slide {slide_number}: {str(e)}")
@@ -459,6 +612,9 @@ class GoogleDriveIndexer:
                 record = {
                     'title': file['name'],
                     'url': file.get('webViewLink', ''),
+                    'source': 'Google Drive',
+                    'type': file['folder_type'],
+                    'client': file['potential_client'],
                     'markdown': content
                 }
                 records.append(record)
@@ -537,19 +693,20 @@ class GoogleDriveIndexer:
                 dimensions=embedding_dim
             )
 
-        # Load and split documents
+        # Load documents
         documents = loader.load()
         self.logger.info(f"Loaded {len(documents)} documents.")
 
-        # Split text into smaller chunks for better embedding
-        text_splitter = RecursiveCharacterTextSplitter(
-            separators=["\n\n"],
-            chunk_size=self.config.CHUNK_SIZE,
-            chunk_overlap=self.config.CHUNK_OVERLAP
+        # Split text into smaller chunks based on tokens
+        from app.utils.text_splitters import TokenTextSplitter
+        text_splitter = TokenTextSplitter(
+            chunk_size=self.config.CHUNK_SIZE,  # This should now be in tokens
+            chunk_overlap=self.config.CHUNK_OVERLAP,  # This should now be in tokens
+            model_name=self.config.OPENAI_EMBEDDING_MODEL
         )
         docs = text_splitter.split_documents(documents)
         self.last_chunks = docs  # Store for reporting
-        self.logger.info(f"Split into {len(docs)} chunks.")
+        self.logger.info(f"Split into {len(docs)} chunks based on tokens.")
 
         # Store in Pinecone
         try:

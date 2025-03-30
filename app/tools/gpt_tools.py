@@ -68,7 +68,7 @@ class ToolManager:
             return "I don't have specific data for that query. Please try a more specific question about products, revenue, customers, or order values."
 
     @classmethod
-    def configure_retriever(cls):
+    def configure_retriever(cls, query=None):
         """Configure and return a vector store retriever."""
         embeddings = OpenAIEmbeddings(
             model=cls.config.VECTOR_STORE_CONFIG["embedding_model"],
@@ -79,21 +79,37 @@ class ToolManager:
             index_name=cls.config.VECTOR_STORE_CONFIG["index_name"],
             embedding=embeddings
         )
+        
+        # Set up metadata filters based on query content
+        search_kwargs = {
+            "k": cls.config.RETRIEVER_CONFIG["k"],
+            "fetch_k": cls.config.RETRIEVER_CONFIG["fetch_k"],
+            "lambda_mult": cls.config.RETRIEVER_CONFIG["lambda_mult"]
+        }
+        
+        # Apply filter based on query content
+        if query and "LaserAway" in query:
+            # Filter for client-specific content when LaserAway is mentioned
+            search_kwargs["filter"] = {
+                "type": "client",
+                "client": "LaserAway"
+            }
+        else:
+            # Default filter for domain knowledge
+            search_kwargs["filter"] = {
+                "type": "Domain Knowledge"
+            }
 
         retriever = vectorstore.as_retriever(
             search_type=cls.config.RETRIEVER_CONFIG["search_type"],
-            search_kwargs={
-                "k": cls.config.RETRIEVER_CONFIG["k"],
-                "fetch_k": cls.config.RETRIEVER_CONFIG["fetch_k"],
-                "lambda_mult": cls.config.RETRIEVER_CONFIG["lambda_mult"]
-            }
+            search_kwargs=search_kwargs
         )
         return retriever
 
     @classmethod
-    def get_retriever_tool(cls):
+    def get_retriever_tool(cls, query=None):
         """Create and return a retriever tool."""
-        retriever = cls.configure_retriever()
+        retriever = cls.configure_retriever(query)
 
         return create_retriever_tool(
             retriever,

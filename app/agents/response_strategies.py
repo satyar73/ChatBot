@@ -98,7 +98,11 @@ class ResponseStrategy:
         # Get the appropriate RAG agent
         if rag_agent is None:
             # Use the system prompt to get a RAG agent if no agent provided
-            rag_agent = agent_manager.get_rag_agent(custom_system_prompt)
+            # Configure the agent with the original query to ensure proper filter selection
+            rag_agent = agent_manager.get_rag_agent(
+                custom_system_prompt=custom_system_prompt,
+                query=query  # Always use original query for filtering
+            )
             self.logger.debug(
                 f"QUERY REWRITING: Using RAG agent with custom system prompt: {custom_system_prompt is not None}")
         else:
@@ -106,6 +110,8 @@ class ResponseStrategy:
             self.logger.debug(f"QUERY REWRITING: Using pre-configured RAG agent")
 
         # Create a processing function for the agent
+        # Note: We use the agent configured with the original query's filter,
+        # but send the rewritten queries to the LLM
         async def process_query(q):
             return await rag_agent.ainvoke(
                 {"input": q, "history": history},
@@ -374,7 +380,10 @@ class RAGResponseStrategy(ResponseStrategy):
         if custom_system_prompt:
             self.logger.info(f"Using custom system prompt - skipping query rewriting and expected answer handling")
             # Use the original query directly with the custom system prompt
-            rag_agent = agent_manager.get_rag_agent(custom_system_prompt=custom_system_prompt)
+            rag_agent = agent_manager.get_rag_agent(
+                custom_system_prompt=custom_system_prompt,
+                query=query  # Pass query for metadata filtering
+            )
             rag_response = await rag_agent.ainvoke(
                 {"input": query, "history": chat_history.get_messages()},
                 include_run_info=True

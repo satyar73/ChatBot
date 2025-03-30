@@ -402,13 +402,15 @@ class AgentManager:
         self.logger = get_logger(f"{__name__}.AgentManager", "DEBUG")
         self.logger.info("AgentManager initialized")
 
-    def get_rag_agent(self, custom_system_prompt=None, expected_answer=None) -> AgentExecutor:
+    def get_rag_agent(self, custom_system_prompt=None,
+                      expected_answer=None, query=None) -> AgentExecutor:
         """
         Get or create a RAG-enabled agent with optional custom system prompt.
         
         Args:
             custom_system_prompt: Optional custom system prompt to override default
             expected_answer: Optional expected answer to include as a hint
+            query: Optional user query to configure retriever filters
             
         Returns:
             Agent executor configured for RAG
@@ -434,13 +436,14 @@ class AgentManager:
             custom_system_prompt = enhanced_prompt
             self.logger.info("Enhanced system prompt with expected answer")
 
-        if custom_system_prompt:
-            self.logger.debug("Creating RAG agent with custom system prompt")
-            return self._configure_rag_agent(custom_system_prompt)
+        if custom_system_prompt or query:
+            self.logger.debug(f"Creating RAG agent with custom system"
+                              f"prompt or query-specific retriever")
+            return self._configure_rag_agent(custom_system_prompt, query)
         
         if self._rag_agent is None:
             self.logger.debug("Initializing RAG agent with default system prompt")
-            self._rag_agent = self._configure_rag_agent()
+            self._rag_agent = self._configure_rag_agent(query=None)
         return self._rag_agent
         
     @property
@@ -448,7 +451,7 @@ class AgentManager:
         """Get or lazy-initialize the default RAG-enabled agent."""
         if self._rag_agent is None:
             self.logger.debug("Initializing RAG agent")
-            self._rag_agent = self._configure_rag_agent()
+            self._rag_agent = self._configure_rag_agent(query=None)
         return self._rag_agent
 
     @property
@@ -467,19 +470,30 @@ class AgentManager:
             self._database_agent = self._configure_database_agent()
         return self._database_agent
 
-    def _configure_rag_agent(self, custom_system_prompt=None) -> AgentExecutor:
+    def _configure_rag_agent(self, custom_system_prompt=None,
+                              query=None) -> AgentExecutor:
         """
         Configure and return a RAG-enabled agent.
         
         Args:
             custom_system_prompt: Optional custom system prompt to override default
+            query: Optional user query to configure retriever filters
             
         Returns:
             Agent executor configured for RAG
         """
         self.logger.debug("Configuring RAG agent with prompt")
         llm = AgentFactory.create_llm()
-        tools = ToolManager.get_rag_tools()
+        
+        # If we have a query, configure retriever with query-specific filters
+        if query:
+            self.logger.info(f"Configuring retriever with query-specific"
+                              f"filters for: {query}")
+            retriever_tool = ToolManager.get_retriever_tool(query)
+            tools = [retriever_tool, ToolManager.get_current_time]
+        else:
+            tools = ToolManager.get_rag_tools()
+            
         for tool in tools:
             if not hasattr(tool, "callbacks") or tool.callbacks is None:
                 tool.callbacks = []

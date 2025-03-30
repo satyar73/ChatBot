@@ -59,8 +59,8 @@ class ChatConfig:
         self.SUMMARIZE_CONTENT = False  # Set to True if you want to summarize content
         self.SUMMARIZE_THRESHOLD = 8192  # Set to True if you want to summarize content
         self.SAVE_INTERMEDIATE_FILES = True  # Save JSON files during processing
-        self.CHUNK_SIZE = 800          # Reduced from 1024 for more granular retrieval
-        self.CHUNK_OVERLAP = 200       # Increased from 128 for better context continuity
+        self.CHUNK_SIZE = 256  # Reduced from 600 for more precise retrieval
+        self.CHUNK_OVERLAP = 40  # Adjusted to maintain ~15% overlap with new chunk size
         self.QA_SOURCE_FILE = "app/services/qagold.txt"
         self.QA_SOURCE_FILE_JSON = "app/services/qagold.json"
 
@@ -121,7 +121,7 @@ class ChatConfig:
                     - Avoid repeating the same information.
                 - Source Linking
                     - Always provide a relevant source link: Learn more: Title.
-                    - Do not generate links that aren’t in the source material.
+                    - Do not generate links that aren't in the source material.
                 - Content Boundaries
                     - Share only MSquared-specific data.
                     - Do not explain or generate code.
