@@ -8,6 +8,7 @@ import re
 
 from app.agents.chat_agents import agent_manager
 from app.config import prompt_config
+from app.config.chat_model_config import ChatModelConfig
 from app.models.chat_models import ChatHistory, Source
 
 
@@ -56,10 +57,8 @@ class ResponseStrategy:
             chat_service.logger.debug(f"Using RAGResponseStrategy for query: {query[:50]}...")
             return RAGResponseStrategy(chat_service)
     
-    async def execute(self, query: str, chat_history: ChatHistory, 
-                     custom_system_prompt: str = None,
-                      prompt_style: str = "default")\
-                -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], List[str]]:
+    async def execute(self, chat_model_config: ChatModelConfig, query: str, chat_history: ChatHistory, 
+                     custom_system_prompt: str = None, prompt_style: str = "default") -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], List[str]]:
         """
         Execute the strategy to generate a response.
         
@@ -75,7 +74,8 @@ class ResponseStrategy:
         """
         raise NotImplementedError("Subclasses must implement this method")
         
-    async def execute_rag_with_retry(self, query: str, history: List, 
+    async def execute_rag_with_retry(self, chat_model_config: ChatModelConfig, 
+                                query: str, history: List, 
                                 max_attempts: int = 3,
                                 custom_system_prompt: str = None,
                                 rag_agent=None) -> Tuple[Dict[str, Any], List[str]]:
@@ -98,7 +98,7 @@ class ResponseStrategy:
         # Get the appropriate RAG agent
         if rag_agent is None:
             # Use the system prompt to get a RAG agent if no agent provided
-            rag_agent = agent_manager.get_rag_agent(custom_system_prompt)
+            rag_agent = agent_manager.get_rag_agent(chat_model_config=chat_model_config, custom_system_prompt=custom_system_prompt)
             self.logger.debug(
                 f"QUERY REWRITING: Using RAG agent with custom system prompt: {custom_system_prompt is not None}")
         else:
@@ -122,7 +122,7 @@ class ResponseStrategy:
 
         return response, queries_tried
     
-    async def invoke_agent_with_fallback(self, query: str,
+    async def invoke_agent_with_fallback(self, chat_model_config: ChatModelConfig, query: str,
                                         agent_name: str,
                                         chat_history: Any,
                                         prompt_style: str = "default") \
@@ -162,7 +162,7 @@ class ResponseStrategy:
             system_prompt = prompt_config.get_prompt(config_name, "default")
 
         # Get the agent with the selected prompt
-        agent = agent_manager.get_agent(agent_name, system_prompt)
+        agent = agent_manager.get_agent(chat_model_config, agent_name, system_prompt)
 
         response = await agent.ainvoke(
             {"input": query, "history": chat_history.get_messages()},
@@ -291,7 +291,7 @@ class ResponseStrategy:
 class RAGResponseStrategy(ResponseStrategy):
     """Strategy for generating RAG responses."""
     
-    async def execute(self, query: str, chat_history: ChatHistory, 
+    async def execute(self, chat_model_config: ChatModelConfig, query: str, chat_history: ChatHistory, 
                      custom_system_prompt: str = None, prompt_style: str = "default") -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], List[str]]:
         """
         Generate a RAG response.
@@ -309,6 +309,7 @@ class RAGResponseStrategy(ResponseStrategy):
         self.logger.debug(f"RAGResponseStrategy.execute - Starting with query: {query[:50]}...")
         
         rag_response, queries_tried = await self._generate_rag_response(
+            chat_model_config,
             query, 
             chat_history,
             custom_system_prompt, 
@@ -331,7 +332,8 @@ class RAGResponseStrategy(ResponseStrategy):
         
         return rag_response, None, queries_tried
     
-    async def _generate_rag_response(self, query: str, chat_history: ChatHistory, 
+    async def _generate_rag_response(self, chat_model_config: ChatModelConfig, 
+                                   query: str, chat_history: ChatHistory, 
                                    custom_system_prompt: str = None, prompt_style: str = "default") -> Tuple[Dict[str, Any], List[str]]:
         """
         Generate a RAG response with retry logic.
@@ -374,7 +376,7 @@ class RAGResponseStrategy(ResponseStrategy):
         if custom_system_prompt:
             self.logger.info(f"Using custom system prompt - skipping query rewriting and expected answer handling")
             # Use the original query directly with the custom system prompt
-            rag_agent = agent_manager.get_rag_agent(custom_system_prompt=custom_system_prompt)
+            rag_agent = agent_manager.get_rag_agent(chat_model_config=chat_model_config, custom_system_prompt=custom_system_prompt)
             rag_response = await rag_agent.ainvoke(
                 {"input": query, "history": chat_history.get_messages()},
                 include_run_info=True
@@ -387,6 +389,7 @@ class RAGResponseStrategy(ResponseStrategy):
                 self.logger.info(f"Did not find expected answer and feature flag disabled: '{query[:50]}...'")
             
             rag_response, queries_tried = await self.execute_rag_with_retry(
+                chat_model_config,
                 query,
                 chat_history.get_messages(),
                 custom_system_prompt=system_prompt
@@ -395,12 +398,14 @@ class RAGResponseStrategy(ResponseStrategy):
             self.logger.info(f"Found expected answer for query and feature flag enabled: '{query[:50]}...'")
             # Get RAG agent with both system prompt and expected answer
             rag_agent = agent_manager.get_rag_agent(
+                chat_model_config=chat_model_config, 
                 custom_system_prompt=system_prompt,
                 expected_answer=expected_answer
             )
             
             # Use the method that tries multiple query formulations
             rag_response, queries_tried = await self.execute_rag_with_retry(
+                chat_model_config,
                 query,
                 chat_history.get_messages(),
                 rag_agent=rag_agent  # Pass the custom agent with expected answer
@@ -408,6 +413,7 @@ class RAGResponseStrategy(ResponseStrategy):
         else:
             self.logger.info(f"Did not find expected answer for query and feature flag is not enabled: '{query[:50]}...'")
             rag_response, queries_tried = await self.execute_rag_with_retry(
+                chat_model_config,
                 query,
                 chat_history.get_messages(),
                 custom_system_prompt=system_prompt
@@ -424,7 +430,7 @@ class RAGResponseStrategy(ResponseStrategy):
 class NonRAGResponseStrategy(ResponseStrategy):
     """Strategy for generating non-RAG responses."""
     
-    async def execute(self, query: str, chat_history: ChatHistory, 
+    async def execute(self, chat_model_config: ChatModelConfig, query: str, chat_history: ChatHistory, 
                      custom_system_prompt: str = None, prompt_style: str = "default") -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], List[str]]:
         """
         Generate a non-RAG response.
@@ -442,6 +448,7 @@ class NonRAGResponseStrategy(ResponseStrategy):
         self.logger.debug(f"NonRAGResponseStrategy.execute - Starting with query: {query[:50]}...")
         
         no_rag_response, queries_tried = await self.invoke_agent_with_fallback(
+            chat_model_config,
             query,
             "standard",
             chat_history,
@@ -468,7 +475,7 @@ class NonRAGResponseStrategy(ResponseStrategy):
 class DualResponseStrategy(ResponseStrategy):
     """Strategy for generating both RAG and non-RAG responses."""
     
-    async def execute(self, query: str, chat_history: ChatHistory, 
+    async def execute(self, chat_model_config: ChatModelConfig, query: str, chat_history: ChatHistory, 
                      custom_system_prompt: str = None, prompt_style: str = "default") -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], List[str]]:
         """
         Generate both RAG and non-RAG responses.
@@ -488,6 +495,7 @@ class DualResponseStrategy(ResponseStrategy):
         # Generate the RAG response
         rag_strategy = RAGResponseStrategy(self.chat_service)
         rag_response, _, rag_queries = await rag_strategy.execute(
+            chat_model_config,
             query, 
             chat_history,
             custom_system_prompt, 
@@ -496,6 +504,7 @@ class DualResponseStrategy(ResponseStrategy):
         
         # Generate the non-RAG response
         no_rag_response, queries_tried_std = await self.invoke_agent_with_fallback(
+            chat_model_config,
             query,
             "standard",
             chat_history,
@@ -527,7 +536,7 @@ class DualResponseStrategy(ResponseStrategy):
 class DatabaseResponseStrategy(ResponseStrategy):
     """Strategy for handling database queries."""
     
-    async def execute(self, query: str, chat_history: ChatHistory, 
+    async def execute(self, chat_model_config: ChatModelConfig, query: str, chat_history: ChatHistory, 
                      custom_system_prompt: str = None, prompt_style: str = "default") -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], List[str]]:
         """
         Generate responses for database queries.
@@ -547,6 +556,7 @@ class DatabaseResponseStrategy(ResponseStrategy):
         
         # Generate database agent response (primary)
         rag_response, queries_tried_db = await self.invoke_agent_with_fallback(
+            chat_model_config,
             query,
             "database",
             chat_history,
@@ -555,6 +565,7 @@ class DatabaseResponseStrategy(ResponseStrategy):
         
         # Also generate standard agent response (secondary)
         no_rag_response, queries_tried_std = await self.invoke_agent_with_fallback(
+            chat_model_config,
             query,
             "standard",
             chat_history,

@@ -8,6 +8,7 @@ from langchain_core.prompts import MessagesPlaceholder
 from langchain.callbacks.base import BaseCallbackHandler
 from typing_extensions import Optional
 
+from app.config.chat_model_config import ChatModelConfig
 from app.tools.gpt_tools import ToolManager
 from app.config.chat_config import ChatConfig
 from app.services.enhancement_service import enhancement_service
@@ -402,7 +403,7 @@ class AgentManager:
         self.logger = get_logger(f"{__name__}.AgentManager", "DEBUG")
         self.logger.info("AgentManager initialized")
 
-    def get_rag_agent(self, custom_system_prompt=None, expected_answer=None) -> AgentExecutor:
+    def get_rag_agent(self, chat_model_config: ChatModelConfig, custom_system_prompt=None, expected_answer=None) -> AgentExecutor:
         """
         Get or create a RAG-enabled agent with optional custom system prompt.
         
@@ -436,19 +437,19 @@ class AgentManager:
 
         if custom_system_prompt:
             self.logger.debug("Creating RAG agent with custom system prompt")
-            return self._configure_rag_agent(custom_system_prompt)
+            return self._configure_rag_agent(chat_model_config, custom_system_prompt)
         
         if self._rag_agent is None:
             self.logger.debug("Initializing RAG agent with default system prompt")
-            self._rag_agent = self._configure_rag_agent()
+            self._rag_agent = self._configure_rag_agent(chat_model_config)
         return self._rag_agent
         
     @property
-    def rag_agent(self):
+    def rag_agent(self, chat_model_config: ChatModelConfig):
         """Get or lazy-initialize the default RAG-enabled agent."""
         if self._rag_agent is None:
             self.logger.debug("Initializing RAG agent")
-            self._rag_agent = self._configure_rag_agent()
+            self._rag_agent = self._configure_rag_agent(chat_model_config)
         return self._rag_agent
 
     @property
@@ -467,7 +468,7 @@ class AgentManager:
             self._database_agent = self._configure_database_agent()
         return self._database_agent
 
-    def _configure_rag_agent(self, custom_system_prompt=None) -> AgentExecutor:
+    def _configure_rag_agent(self, chat_model_config: ChatModelConfig, custom_system_prompt=None) -> AgentExecutor:
         """
         Configure and return a RAG-enabled agent.
         
@@ -479,7 +480,7 @@ class AgentManager:
         """
         self.logger.debug("Configuring RAG agent with prompt")
         llm = AgentFactory.create_llm()
-        tools = ToolManager.get_rag_tools()
+        tools = ToolManager.get_rag_tools(chat_model_config)
         for tool in tools:
             if not hasattr(tool, "callbacks") or tool.callbacks is None:
                 tool.callbacks = []
@@ -566,7 +567,8 @@ class AgentManager:
         self.logger.debug("Creating database agent executor")
         return AgentFactory.create_agent_executor(agent, tools)
 
-    def get_agent(self, agent_type: str, custom_system_prompt: str = None) -> Optional[AgentExecutor]:
+    def get_agent(self, chat_model_config: ChatModelConfig, agent_type: str, 
+                  custom_system_prompt: str = None) -> Optional[AgentExecutor]:
         """
         Get an agent by type, with optional custom system prompt.
         
@@ -579,7 +581,7 @@ class AgentManager:
         """
         # For RAG agent, we need special handling because of the get_rag_agent method
         if agent_type == "rag":
-            return self.get_rag_agent(custom_system_prompt=custom_system_prompt)
+            return self.get_rag_agent(chat_model_config, custom_system_prompt=custom_system_prompt)
         
         # For other agents, configure with custom prompt if provided
         if custom_system_prompt:

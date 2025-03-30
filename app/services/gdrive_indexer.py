@@ -12,18 +12,15 @@ import PyPDF2
 import pptx
 from langchain.docstore.document import Document
 from langchain.document_loaders.base import BaseLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from pinecone import Pinecone, ServerlessSpec
-from langchain_pinecone import PineconeVectorStore
-from langchain_openai import OpenAIEmbeddings
 
 # Import from your existing project structure
 import requests
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
-from app.config.chat_config import ChatConfig
+from app.config.chat_config import ChatConfig, chat_config
 from app.services.enhancement_service import enhancement_service
+from app.utils.vectorstore_client import VectorStoreClient, get_vector_store_client
 
 class CustomJsonLoader(BaseLoader):
     """Custom loader for JSON data"""
@@ -48,7 +45,7 @@ class GoogleDriveIndexer:
 
     def __init__(self, config: Optional[ChatConfig] = None):
         """Initialize the indexer with configuration"""
-        self.config = config or ChatConfig()
+        self.config = config or chat_config
         self.last_chunks = []  # Store chunks for reporting
 
         # Validate configuration
@@ -487,86 +484,6 @@ class GoogleDriveIndexer:
         }
         return model_dimensions.get(model_name, 1536)  # Default to 1536 if unknown
 
-    def index_to_pinecone(self, records):
-        """Index processed records to Pinecone"""
-        self.logger.info(f"Indexing {len(records)} records to Pinecone...")
-
-        # Then in your initialize_pinecone method or before creating the index:
-        embedding_dim = self.get_embedding_dimensions(self.config.OPENAI_EMBEDDING_MODEL)
-
-        # Initialize Pinecone
-        pc = Pinecone(api_key=self.config.PINECONE_API_KEY)
-
-        # Check if index exists, create if not
-        available_indexes = pc.list_indexes().names()
-        if self.config.PINECONE_INDEX_NAME not in available_indexes:
-            self.logger.info(f"Index '{self.config.PINECONE_INDEX_NAME}' not found. Creating a new index...")
-
-            pc.create_index(
-                name=self.config.PINECONE_INDEX_NAME,
-                dimension=embedding_dim,
-                metric='cosine',
-                spec=ServerlessSpec(
-                    cloud=self.config.PINECONE_CLOUD,
-                    region=self.config.PINECONE_REGION
-                )
-            )
-            self.logger.info(f"Index '{self.config.PINECONE_INDEX_NAME}' created successfully.")
-
-        # Create loader for the records
-        loader = CustomJsonLoader(
-            records,
-            dataset_mapping_function=lambda item: Document(
-                page_content=item["markdown"] or "",
-                metadata={'url': item["url"], "title": item["title"]}
-            )
-        )
-
-        # Initialize embeddings with model-appropriate parameters
-        # Newer models don't support explicit dimensions parameter
-        if self.config.OPENAI_EMBEDDING_MODEL in ["text-embedding-3-small", "text-embedding-3-large"]:
-            embeddings = OpenAIEmbeddings(
-                api_key=self.config.OPENAI_API_KEY,
-                model=self.config.OPENAI_EMBEDDING_MODEL
-            )
-        else:
-            # Older models like text-embedding-ada-002 support dimensions
-            embeddings = OpenAIEmbeddings(
-                api_key=self.config.OPENAI_API_KEY,
-                model=self.config.OPENAI_EMBEDDING_MODEL,
-                dimensions=embedding_dim
-            )
-
-        # Load and split documents
-        documents = loader.load()
-        self.logger.info(f"Loaded {len(documents)} documents.")
-
-        # Split text into smaller chunks for better embedding
-        text_splitter = RecursiveCharacterTextSplitter(
-            separators=["\n\n"],
-            chunk_size=self.config.CHUNK_SIZE,
-            chunk_overlap=self.config.CHUNK_OVERLAP
-        )
-        docs = text_splitter.split_documents(documents)
-        self.last_chunks = docs  # Store for reporting
-        self.logger.info(f"Split into {len(docs)} chunks.")
-
-        # Store in Pinecone
-        try:
-            self.logger.info("Uploading documents to Pinecone...")
-            vectorstore = PineconeVectorStore.from_documents(
-                docs,
-                index_name=self.config.PINECONE_INDEX_NAME,
-                pinecone_api_key=self.config.PINECONE_API_KEY,
-                embedding=embeddings
-            )
-            self.logger.info(
-                f"Successfully indexed {len(docs)} document chunks to Pinecone index '{self.config.PINECONE_INDEX_NAME}'.")
-            return True
-        except Exception as e:
-            self.logger.error(f"Error indexing to Pinecone: {str(e)}")
-            return False
-
     def run_full_process(self):
         """Initialize the Google Drive API and validate settings"""
         try:
@@ -613,17 +530,19 @@ class GoogleDriveIndexer:
             else:
                 # Check if we can query the vector store directly
                 try:
-                    pc = Pinecone(api_key=self.config.PINECONE_API_KEY)
+                    total_vector_count = 0
+                    for chat_model_config in chat_config.chat_model_configs.values():
+                        vector_store_config = chat_model_config.vector_store_config
+                        vector_store_client: VectorStoreClient = get_vector_store_client(vector_store_config)
+                        total_vector_count += vector_store_client.get_vector_count()
                     
-                    if self.config.PINECONE_INDEX_NAME in pc.list_indexes().names():
-                        index = pc.Index(self.config.PINECONE_INDEX_NAME)
-                        stats = index.describe_index_stats()
-                        
+                    #TODO we should not sum the vector count across two different indexes; UI need to pass the index_name
+                    if total_vector_count > 0:
                         return {
                             "status": "success",
                             "files": [],
                             "count": 0,
-                            "vector_count": stats.total_vector_count,
+                            "vector_count": total_vector_count,
                             "message": "Drive file list not available, but vectors are in the index"
                         }
                 except Exception as e:

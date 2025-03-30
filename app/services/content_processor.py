@@ -1,19 +1,13 @@
 """
 Content processor service for document processing and Pinecone indexing.
 """
-import time
 import os
 from typing import List, Dict, Any, Optional
 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.docstore.document import Document
-from langchain_openai import OpenAIEmbeddings
-from pinecone import Pinecone, ServerlessSpec
-from langchain_pinecone import PineconeVectorStore
-
-from app.config.chat_config import ChatConfig
+from app.config.chat_config import ChatConfig, chat_config
 from app.services.enhancement_service import enhancement_service
 from app.utils.logging_utils import get_logger
+from app.utils.vectorstore_client import VectorStoreClient, get_vector_store_client
 
 
 class ContentProcessor:
@@ -29,7 +23,7 @@ class ContentProcessor:
         Args:
             config: Configuration object with Pinecone parameters
         """
-        self.config = config or ChatConfig()
+        self.config = config or chat_config
         self.logger = get_logger(__name__, "DEBUG")
         self.logger.debug("ContentProcessor initialized")
         self.enhancement_service = enhancement_service
@@ -55,141 +49,14 @@ class ContentProcessor:
         
         return enhanced_records
 
-    def index_to_pinecone(self, records: List[Dict[str, Any]]) -> bool:
+    def index_to_vector_store(self, records: List[Dict[str, Any]]) -> bool:
         """
-        Index content records to Pinecone vector database.
-        
-        Args:
-            records: List of enhanced content records with title, url, and markdown
-            
-        Returns:
-            True if indexing was successful, False otherwise
+        Go thru each configured vector store (e.g. Pinecone, Neon, etc) and index the documents
         """
-        try:
-            # If no records, return success
-            if not records:
-                self.logger.warning("No records to index")
-                return True
+        success = True
+        for chat_model_config in chat_config.chat_model_configs.values():
+            vector_store_config = chat_model_config.vector_store_config
+            vector_store_client: VectorStoreClient = get_vector_store_client(vector_store_config)
+            success &= vector_store_client.index_to_vector_store(chat_model_config, records)
 
-            self.logger.info(f"Indexing {len(records)} records to Pinecone index "
-                             f"'{self.config.PINECONE_INDEX_NAME}'")
-
-            # Initialize Pinecone
-            pc = Pinecone(api_key=self.config.PINECONE_API_KEY)
-
-            # Check if index exists
-            existing_indexes = pc.list_indexes().names()
-
-            # Create index if it doesn't exist
-            if self.config.PINECONE_INDEX_NAME not in existing_indexes:
-                self.logger.info(f"Creating new Pinecone index: {self.config.PINECONE_INDEX_NAME}")
-
-                pc.create_index(
-                    name=self.config.PINECONE_INDEX_NAME,
-                    dimension=self.config.PINECONE_DIMENSION,
-                    metric="cosine",
-                    spec=ServerlessSpec(
-                        cloud=self.config.PINECONE_CLOUD,
-                        region=self.config.PINECONE_REGION
-                    )
-                )
-
-                # Wait for index to initialize
-                self.logger.info("Waiting for index to initialize...")
-                time.sleep(10)
-            else:
-                self.logger.info(f"Using existing Pinecone index: {self.config.PINECONE_INDEX_NAME}")
-
-            # Prepare documents
-            docs = []
-            for i, record in enumerate(records):
-                # Check if record has markdown content
-                if 'markdown' not in record:
-                    self.logger.warning(f"Record {i} missing 'markdown' field: {record}")
-                    continue  # Skip records without markdown
-
-                # Split content into chunks
-                if record.get('type') == 'qa_pair':
-                    # For Q&A content, don't split questions from answers
-                    chunks = [record['markdown']]
-                else:
-                    # Define special technical terms to preserve
-                    special_terms = [
-                        "advanced attribution multiplier",
-                        "attribution multiplier",
-                        "marketing mix modeling",
-                        # Add other multi-word technical terms
-                    ]
-
-                    # Create a custom separator pattern that preserves these terms
-                    separators = ["\n\n", "\n", ". ", " ", ""]
-
-                    # For technical content, use smaller chunks with more overlap
-                    if any(term in record['markdown'].lower() for term in special_terms):
-                        text_splitter = RecursiveCharacterTextSplitter(
-                            chunk_size=self.config.CHUNK_SIZE // 2,  # Smaller chunks for technical content
-                            chunk_overlap=self.config.CHUNK_OVERLAP * 2,  # More overlap
-                            separators=separators
-                        )
-                    else:
-                        text_splitter = RecursiveCharacterTextSplitter(
-                            chunk_size=self.config.CHUNK_SIZE,
-                            chunk_overlap=self.config.CHUNK_OVERLAP,
-                            separators=separators
-                        )
-                    chunks = text_splitter.split_text(record['markdown'])
-
-                # Create documents with metadata
-                for j, chunk in enumerate(chunks):
-                    # Get attribution metadata
-                    attribution_metadata = self.enhancement_service.enrich_attribution_metadata(chunk)
-
-                    # Merge with standard metadata
-                    metadata = {
-                        "title": record['title'],
-                        "url": record['url'],
-                        "chunk": j,
-                        "source": f"{record.get('type', 'content')}"
-                    }
-                    metadata.update(attribution_metadata)
-
-                    # Add keywords if available
-                    if 'keywords' in record:
-                        metadata["keywords"] = record['keywords']
-
-                    # Create embedding prompt
-                    optimized_text = self.enhancement_service.create_embedding_prompt(chunk, metadata)
-
-                    doc = Document(
-                        page_content=optimized_text,
-                        metadata=metadata
-                    )
-                    docs.append(doc)
-
-            # Initialize embeddings
-            embeddings = OpenAIEmbeddings(
-                api_key=self.config.OPENAI_API_KEY,
-                model=self.config.OPENAI_EMBEDDING_MODEL,
-                embedding_ctx_length=self.config.EMBEDDING_CONTEXT_LENGTH,
-                show_progress_bar=True
-            )
-
-            # Index documents
-            self.logger.info(f"Indexing {len(docs)} document chunks to Pinecone...")
-
-            # Store in Pinecone
-            vectorstore = PineconeVectorStore.from_documents(
-                docs,
-                index_name=self.config.PINECONE_INDEX_NAME,
-                pinecone_api_key=self.config.PINECONE_API_KEY,
-                embedding=embeddings
-            )
-
-            self.logger.info(
-                f"Successfully indexed {len(docs)} document chunks to "
-                f"Pinecone index '{self.config.PINECONE_INDEX_NAME}'.")
-            return True
-
-        except Exception as e:
-            self.logger.error(f"Error indexing to Pinecone: {str(e)}")
-            return False
+        return success

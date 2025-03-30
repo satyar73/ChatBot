@@ -1,19 +1,17 @@
 import asyncio
 import os
-import json
-from typing import Dict, Optional, Any, List
-import logging
-from pinecone import Pinecone
+from typing import Dict, Optional, Any
 
-from app.config.chat_config import ChatConfig
+from app.config.chat_config import chat_config
 from app.services.shopify_indexer import ShopifyIndexer
 from app.services.gdrive_indexer import GoogleDriveIndexer
 from app.services.content_processor import ContentProcessor
 from app.utils.logging_utils import get_logger
+from app.utils.vectorstore_client import VectorStoreClient, get_vector_store_client
 
 class IndexService:
     def __init__(self):
-        self.config = ChatConfig()
+        self.config = chat_config
         self.logger = get_logger(__name__, "DEBUG")
         self.content_processor = ContentProcessor(self.config)
 
@@ -48,9 +46,9 @@ class IndexService:
             
             # File saving is handled in the Shopify indexer
             
-            # Index the enhanced records to Pinecone
-            self.logger.debug("Indexing records to Pinecone")
-            success = self.content_processor.index_to_pinecone(enhanced_records)
+            # Index the enhanced records in vector store
+            self.logger.debug("Indexing records in vector store")
+            success = self.content_processor.index_to_vector_store(enhanced_records)
             
             if success:
                 return {
@@ -106,9 +104,9 @@ class IndexService:
             self.logger.debug("Processing and enhancing records")
             enhanced_records = self.content_processor.process_records(records)
             
-            # Index the enhanced records to Pinecone
-            self.logger.debug("Indexing records to Pinecone")
-            success = self.content_processor.index_to_pinecone(enhanced_records)
+            # Index the enhanced records in vector store
+            self.logger.debug("Indexing records to vector store")
+            success = self.content_processor.index_to_vector_store(enhanced_records)
             
             if success:
                 return {
@@ -123,68 +121,21 @@ class IndexService:
                 }
 
         except Exception as e:
-            self.logger.error(f"Error creating index from Google Drive: {str(e)}")
+            self.logger.error(f"Error creating index from Google Drive: {str(e)}", e, exc_info=True)
             return {"status": "error", "message": f"Failed to create index from Google Drive: {str(e)}"}
 
     async def get_index_info(self) -> Dict:
         """Get information about the current vector index"""
         try:
-            pc = Pinecone(api_key=self.config.PINECONE_API_KEY)
-
-            # Check if index exists
-            available_indexes = pc.list_indexes().names()
-
-            if self.config.PINECONE_INDEX_NAME in available_indexes:
-                # Get index stats
-                index = pc.Index(self.config.PINECONE_INDEX_NAME)
-                stats_raw = index.describe_index_stats()
-
-                # Convert any non-serializable objects to strings or simple types
-                stats = {
-                    "dimension": stats_raw.dimension,
-                    "index_fullness": stats_raw.index_fullness,
-                    "namespaces": {k: {"vector_count": v.vector_count} for k, v in stats_raw.namespaces.items()},
-                    "total_vector_count": stats_raw.total_vector_count
-                }
-                
-                # Try to load the Shopify content from saved files
-                content = []
-                try:
-                    # Check if product and article files exist
-                    product_path = os.path.join(self.config.OUTPUT_DIR, "products.json")
-                    article_path = os.path.join(self.config.OUTPUT_DIR, "articles.json")
-                    
-                    if os.path.exists(product_path):
-                        with open(product_path, "r") as f:
-                            products = json.load(f)
-                            content.extend(products)
-                    
-                    if os.path.exists(article_path):
-                        with open(article_path, "r") as f:
-                            articles = json.load(f)
-                            content.extend(articles)
-                except Exception as e:
-                    self.logger.warning(f"Could not load content files: {str(e)}")
-                
-                return {
-                    "status": "success",
-                    "exists": True,
-                    "name": self.config.PINECONE_INDEX_NAME,
-                    "stats": stats,
-                    "content": content
-                }
-            else:
-                return {
-                    "status": "success",
-                    "exists": False,
-                    "name": self.config.PINECONE_INDEX_NAME,
-                    "content": []
-                }
-
+            ret_val = []
+            for chat_model_config in chat_config.chat_model_configs.values():
+                vector_store_config = chat_model_config.vector_store_config
+                vector_store_client: VectorStoreClient = get_vector_store_client(vector_store_config)
+                ret_val.append(vector_store_client.get_index_info())
         except Exception as e:
             print(f"Error in get_index_info: {str(e)}")
             return {"status": "error", "message": str(e)}
-            
+
     async def get_google_drive_files(self) -> Dict[str, Any]:
         """Get list of indexed Google Drive files"""
         try:
@@ -201,17 +152,15 @@ class IndexService:
     async def delete_index(self) -> Dict:
         """Delete the current vector index"""
         try:
-            pc = Pinecone(api_key=self.config.PINECONE_API_KEY)
+            ret_val = []
 
-            # Check if index exists
-            available_indexes = pc.list_indexes().names()
+            for chat_model_config in chat_config.chat_model_configs.values():
+                vector_store_config = chat_model_config.vector_store_config
+                vector_store_client: VectorStoreClient = get_vector_store_client(vector_store_config)
+                ret_val.append(vector_store_client.delete_index())
 
-            if self.config.PINECONE_INDEX_NAME in available_indexes:
-                # Delete the index
-                pc.delete_index(self.config.PINECONE_INDEX_NAME)
-                return {"status": "success", "message": f"Index '{self.config.PINECONE_INDEX_NAME}' deleted successfully"}
-            else:
-                return {"status": "success", "message": f"Index '{self.config.PINECONE_INDEX_NAME}' does not exist"}
-
+            return ret_val
         except Exception as e:
+            print(f"Error in delete_index: {str(e)}")
             return {"status": "error", "message": str(e)}
+        

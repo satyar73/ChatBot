@@ -3,11 +3,11 @@ Service layer for handling agent queries and responses with enhanced RAG query r
 """
 import sys
 import time
-from typing import Dict, List, Any, Union
+from typing import List, Any
 
 from app.agents.response_strategies import ResponseStrategy
-from app.config.chat_config import ChatConfig
-from app.models.chat_models import ChatHistory, ResponseContent, ResponseMessage, Source, Message
+from app.config.chat_config import chat_config
+from app.models.chat_models import ChatHistory, ResponseContent, ResponseMessage, Message
 from app.services.cache_service import chat_cache
 from app.services.enhancement_service import enhancement_service
 from app.utils.logging_utils import get_logger
@@ -24,7 +24,7 @@ class ChatService:
         # Explicit print to check if output is working at all
         print("ChatService initialized", file=sys.stderr)
 
-        self.config = ChatConfig()
+        self.config = chat_config
 
         # Use the enhancement service for query enhancement and QA
         self.enhancement_service = enhancement_service
@@ -51,6 +51,10 @@ class ChatService:
         mode = data.mode
         custom_system_prompt = data.system_prompt
         prompt_style = data.prompt_style or "default"
+
+        # TODO for now just work on only one model; Future support runnning against more than one LLMs
+        first_key = next(iter(self.config.chat_model_configs))
+        chat_model_config = self.config.chat_model_configs[first_key]
 
         # Log the incoming request
         self.logger.info(f"Chat request: session={session_id}, input_length={len(user_input)}")
@@ -137,6 +141,7 @@ class ChatService:
         # Get and execute the appropriate response strategy
         strategy = ResponseStrategy.get_strategy(actual_query, mode, self)
         rag_response, no_rag_response, queries_tried = await strategy.execute(
+            chat_model_config,
             actual_query,
             chat_history,
             custom_system_prompt,
@@ -349,6 +354,10 @@ class AgentService:
         Returns:
             A ResponseMessage object containing the response(s) and sources
         """
+        # TODO for now just work on only one model; Future support runnning against more than one LLMs
+        first_key = next(iter(chat_config.config.chat_model_configs))
+        chat_model_config = chat_config.config.chat_model_configs[first_key]
+
         # Create a minimal chat history
         from app.models.chat_models import ChatHistory
         chat_history = ChatHistory()
@@ -370,6 +379,7 @@ class AgentService:
         
         # Execute the strategy
         rag_response, no_rag_response, queries_tried = await strategy.execute(
+            chat_model_config,
             query, 
             chat_history,
             prompt_style="default"
