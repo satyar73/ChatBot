@@ -18,6 +18,7 @@ from app.utils.other_utlis import write_data_logfile
 import json
 import os
 from datetime import datetime
+from app.config.cloud_provider import CloudProvider
 
 
 class PromptCaptureCallback(BaseCallbackHandler):
@@ -444,13 +445,19 @@ class AgentManager:
         if custom_system_prompt or query:
             self.logger.debug(f"Creating RAG agent with custom system"
                               f"prompt or query-specific retriever")
-            return self._configure_rag_agent(chat_model_config=chat_model_config,
-                                            custom_system_prompt=custom_system_prompt,
-                                            query=query)
+            return self._configure_rag_agent(
+                chat_model_config=chat_model_config,
+                custom_system_prompt=custom_system_prompt,
+                query=query
+            )
         
         if self._rag_agent is None:
             self.logger.debug("Initializing RAG agent with default system prompt")
-            self._rag_agent = self._configure_rag_agent(chat_model_config, query=None)
+            self._rag_agent = self._configure_rag_agent(
+                chat_model_config=chat_model_config,
+                custom_system_prompt=None,
+                query=None
+            )
         return self._rag_agent
 
     @property
@@ -458,8 +465,17 @@ class AgentManager:
         """Get or lazy-initialize the default RAG-enabled agent."""
         if self._rag_agent is None:
             self.logger.debug("Initializing RAG agent")
-            default_config = ChatModelConfig()  # Create default config
-            self._rag_agent = self._configure_rag_agent(chat_model_config=default_config, query=None)
+            # Create default config with required arguments
+            default_config = ChatModelConfig(
+                cloud_provider=CloudProvider.OpenAI,
+                model=self.config.LLM_CONFIG_4o["model"],
+                vector_store_config=self.config.VECTOR_STORE_CONFIG
+            )
+            self._rag_agent = self._configure_rag_agent(
+                chat_model_config=default_config,
+                custom_system_prompt=None,
+                query=None
+            )
         return self._rag_agent
 
     @property
