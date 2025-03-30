@@ -32,6 +32,36 @@ class ContentProcessor:
         # Create output directory if needed
         os.makedirs(self.config.OUTPUT_DIR, exist_ok=True)
 
+    def get_index_info(self) -> Dict[str, Any]:
+        """
+        Get information about the current vector index.
+        
+        Returns:
+            Dictionary containing index information
+        """
+        try:
+            # Get index info from vector store
+            vector_store = VectorStoreClient()
+            index_info = vector_store.get_index_info()
+            
+            return {
+                "total_documents": index_info.get("total_documents", 0),
+                "total_chunks": index_info.get("total_chunks", 0),
+                "index_name": index_info.get("index_name", ""),
+                "last_updated": index_info.get("last_updated", ""),
+                "dimension": index_info.get("dimension", 0)
+            }
+        except Exception as e:
+            self.logger.error(f"Error getting index info: {str(e)}")
+            return {
+                "total_documents": 0,
+                "total_chunks": 0,
+                "index_name": "",
+                "last_updated": "",
+                "dimension": 0,
+                "error": str(e)
+            }
+
     def prepare_documents_for_indexing(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Prepare documents for indexing by splitting content into chunks and adding metadata.
@@ -117,7 +147,7 @@ class ContentProcessor:
 
     def index_to_vector_store(self, records: List[Dict[str, Any]]) -> bool:
         """
-        Go thru each configured vector store (e.g. Pinecone, Neon, etc) and index the documents
+        Go through each configured vector store (e.g. Pinecone, Neon, etc.) and index the documents
         """
         success = True
         for chat_model_config in chat_config.chat_model_configs.values():

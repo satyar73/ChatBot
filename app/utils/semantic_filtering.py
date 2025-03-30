@@ -1,7 +1,7 @@
 """
 Semantic filtering functionality for query rewriting and retrieval
 """
-from typing import List, Dict
+from typing import List
 from app.utils.similarity_engines import SimilarityEngines
 
 class SemanticFilter:

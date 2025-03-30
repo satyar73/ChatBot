@@ -2,9 +2,8 @@
 Service layer for query enhancement and content enrichment.
 
 """
-import json
 import re
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional
 
 from app.config.chat_config import ChatConfig
 from app.utils.llm_client import LLMClientManager
@@ -266,15 +265,15 @@ class EnhancementService:
             alt_queries.append(with_synonyms)
 
         # Create an enhanced query that combines expansions, technical definitions and context
-        enhanced_parts = []
-        # Add the original query
-        enhanced_parts.append(original_query)
-        
         # Add any technical term definitions that match
-        for term, definition in self.technical_definitions.items():
-            if term.lower() in original_query.lower():
-                enhanced_parts.append(f"{term} {definition}")
-                break  # Just add the first one to avoid making the query too long
+        technical_terms = [
+            f"{term} {definition}"
+            for term, definition in self.technical_definitions.items()
+            if term.lower() in original_query.lower()
+        ]
+        
+        # Create enhanced parts list with all components
+        enhanced_parts = [original_query] + technical_terms
                 
         # Add alternate formulation if we expanded abbreviations
         if expanded != original_query:
@@ -612,7 +611,8 @@ class EnhancementService:
                 enhanced_records.append(record)
                 continue
 
-            content = record['markdown'].lower()
+            # Ensure content is a string
+            content = str(record['markdown']).lower()
             record_keywords = set()
 
             # Check for each keyword category in the content
@@ -762,45 +762,43 @@ class EnhancementService:
         max_attempts: int = 3
     ) -> tuple:
         """
-        Try alternative query formulations using a processing function.
+        Try alternative queries to get a better response.
         
         Args:
-            original_query: The original user query
-            process_function: Async function that processes each query (e.g., sends to an agent)
-            is_adequate_function: Function that determines if a response is adequate
+            original_query: The original query to try
+            process_function: Function to process the query
+            is_adequate_function: Optional function to check if response is adequate
             history: Optional conversation history
-            max_attempts: Maximum number of queries to try
+            max_attempts: Maximum number of attempts to try
             
         Returns:
             Tuple of (best_response, queries_tried)
         """
-        self.logger.debug(f"Trying alternative queries for: {original_query}")
-        
-        # Get alternative queries
-        enhanced_query_data = self.enhance_query(original_query, history)
-        alt_queries = enhanced_query_data.get("alt_queries", [original_query])
-        
-        all_responses = []
+        # Initialize variables
         queries_tried = []
+        all_responses = []
         
-        # Special handling for technical terms
-        for term in self.technical_definitions:
-            if term.lower() in original_query.lower():
-                # For technical terms, try the exact term query first
-                technical_query = term
-                self.logger.debug(f"Technical term detected, trying exact term: {technical_query}")
-                
-                technical_response = await process_function(technical_query)
-                
-                # Use the provided function or default to our own method
-                adequacy_check = is_adequate_function or self._is_empty_or_inadequate_response
-                
-                # If this gives a good result, use it
-                if not adequacy_check(technical_response):
-                    self.logger.debug(f"Exact technical term query produced good results")
-                    return technical_response, [original_query, technical_query]
-                else:
-                    self.logger.debug(f"Technical term query produced inadequate results, will try alternatives")
+        # Generate alternative queries
+        alt_queries = self.enhance_query(original_query, history)['alt_queries']
+        
+        # If we have a technical term, try it first
+        technical_query = self._extract_technical_term(original_query)
+        if technical_query:
+            self.logger.debug(f"Technical term detected, trying exact term: {technical_query}")
+            
+            technical_response = await process_function(technical_query)
+            
+            # Use the provided function or default to our own method
+            adequacy_check = is_adequate_function
+            if not is_adequate_function:
+                adequacy_check = self._is_empty_or_inadequate_response
+            
+            # If this gives a good result, use it
+            if not adequacy_check(technical_response):
+                self.logger.debug(f"Exact technical term query produced good results")
+                return technical_response, [original_query, technical_query]
+            else:
+                self.logger.debug(f"Technical term query produced inadequate results, will try alternatives")
         
         # Try the original query first
         original_query = alt_queries[0]
@@ -811,15 +809,19 @@ class EnhancementService:
         all_responses.append((original_response, original_query))
         
         # Use the provided function or default to our own method
-        adequacy_check = is_adequate_function or self._is_empty_or_inadequate_response
+        adequacy_check = is_adequate_function 
+        if not is_adequate_function:
+            adequacy_check = self._is_empty_or_inadequate_response
         
         # If the first response seems good, return it
         if not adequacy_check(original_response):
-            self.logger.debug(f"Original query produced good results, no need for alternatives")
+            self.logger.debug(f"Original query produced good results, " +
+                              "no need for alternatives")
             return original_response, queries_tried
         
         # Otherwise, try alternative queries
-        self.logger.debug(f"Original query produced inadequate results, trying alternatives")
+        self.logger.debug(f"Original query produced inadequate results, " +
+                          "trying alternatives")
         
         # Remove the original query as we've already tried it
         alt_queries = alt_queries[1:]
@@ -839,7 +841,8 @@ class EnhancementService:
                 self.logger.debug(f"Alternative query {i + 1} produced good results")
                 return alt_response, queries_tried
             else:
-                self.logger.debug(f"Alternative query {i + 1} produced inadequate results")
+                self.logger.debug(f"Alternative query {i + 1} " +
+                                  "produced inadequate results")
         
         # If we get here, none of the queries produced good results
         # Return the original response as a fallback
@@ -872,6 +875,22 @@ class EnhancementService:
         except Exception as e:
             self.logger.error(f"Error condensing content: {str(e)}")
             return content[:max_chars] + "..." if len(content) > max_chars else content
+
+    def _extract_technical_term(self, query: str) -> Optional[str]:
+        """
+        Extract technical terms from the query.
+        
+        Args:
+            query: The query to analyze
+            
+        Returns:
+            Optional[str]: The technical term if found, None otherwise
+        """
+        # Check for technical terms in the query
+        for term in self.technical_definitions:
+            if term.lower() in query.lower():
+                return term
+        return None
 
 
 # Create a singleton instance

@@ -3,7 +3,7 @@ from typing import Any, List, Optional, Mapping
 from langchain.llms.base import LLM
 import requests
 from pydantic import Field
-from config.cache_config import ChatConfig
+from app.config.chat_config import ChatConfig
 from dotenv import load_dotenv
 
 # Set up logging
@@ -17,7 +17,8 @@ class OllamaLLM(LLM):
     endpoint: str = Field(default="http://localhost:11434/api/generate")
 
     def __init__(self, model: Optional[str] = None, **kwargs):
-        model = model or ChatConfig.OLLAMA_MODEL
+        config = ChatConfig()
+        model = model or config.OLLAMA_MODEL
         super().__init__(model=model, **kwargs)
         logger.info(f"Initialized OllamaLLM with model: {self.model}")
 

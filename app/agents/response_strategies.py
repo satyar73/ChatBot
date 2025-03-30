@@ -4,12 +4,10 @@ Response strategies for handling different types of chat queries.
 from typing import Dict, List, Tuple, Any, Optional, Union, TYPE_CHECKING
 import re
 
-from app.config import prompt_config
 from app.config.chat_model_config import ChatModelConfig
 from app.models.chat_models import ChatHistory, Source
 from langchain.agents import AgentExecutor
 from app.utils.logging_utils import get_logger
-from app.services.enhancement_service import enhancement_service
 
 if TYPE_CHECKING:
     from app.agents.chat_agents import AgentManager
@@ -128,6 +126,7 @@ class ResponseStrategy:
         response, queries_tried = await self.chat_service.enhancement_service.try_alternative_queries(
             original_query=query,
             process_function=process_query,
+            is_adequate_function=None,  # Use default adequacy check
             history=history,
             max_attempts=max_attempts
         )
@@ -139,26 +138,32 @@ class ResponseStrategy:
                                   query: str,
                                   agent_name: str,
                                   chat_history: List,
-                                  system_prompt: str = None) -> Tuple[Dict[str, Any], List[str]]:
+                                  system_prompt: str = None,
+                                  prompt_style: str = "default") -> Tuple[Dict[str, Any], List[str]]:
         """
         Invoke an agent with fallback to standard agent if needed.
         
         Args:
             chat_model_config: Configuration for the chat model
             query: The query to process
-            agent_name: The name of the agent to use
+            agent_name: The name of the agent to use ("rag", "standard", or "database")
             chat_history: The chat history
             system_prompt: Optional system prompt
+            prompt_style: The prompt style to use
             
         Returns:
             Tuple of (agent_response, queries_tried)
         """
+        # Map agent_name to the correct agent_type string
+        agent_type = agent_name.lower()  # Convert to lowercase to match the expected values
+        
         # Get the appropriate agent
         agent = self.agent_manager.get_agent(
-                                    chat_model_config=chat_model_config,
-                                    agent_name=agent_name,
-                                    system_prompt=system_prompt
-                                )
+            chat_model_config=chat_model_config,
+            agent_type=agent_type,
+            custom_system_prompt=system_prompt,
+            prompt_style=prompt_style
+        )
         
         # Execute the agent
         response = await agent.ainvoke(
@@ -295,32 +300,28 @@ class ResponseStrategy:
         Args:
             expected_answer: Optional expected answer to enhance the system prompt
             custom_system_prompt: Optional custom system prompt
-            query: Optional query to configure the retriever
+            query: Optional query to use for agent configuration
             chat_model_config: Optional chat model configuration
             prompt_style: The prompt style to use
             
         Returns:
-            A configured RAG agent
+            An AgentExecutor instance configured for RAG
         """
-        # Get the appropriate system prompt based on the requested style
-        try:
-            # If no custom prompt is provided, use the prompt from the prompt cache
-            if not custom_system_prompt:
-                system_prompt = prompt_config.get_prompt("rag", prompt_style)
-                self.logger.info(f"Using '{prompt_style}' style prompt from prompt cache")
+        # If we have an expected answer, enhance the system prompt
+        if expected_answer:
+            if custom_system_prompt:
+                custom_system_prompt = f"{custom_system_prompt}\n\nExpected answer: {expected_answer}"
             else:
-                system_prompt = custom_system_prompt
-                self.logger.info(f"Using custom system prompt, ignoring prompt style: '{prompt_style}'")
-        except ValueError as e:
-            self.logger.warning(f"Error retrieving prompt style '{prompt_style}': {e}. Using default.")
-            system_prompt = prompt_config.get_prompt("rag", "default")
-
-        return self.agent_manager.get_rag_agent(
-                                        chat_model_config=chat_model_config,
-                                        custom_system_prompt=system_prompt,
-                                        expected_answer=expected_answer,
-                                        query=query
-                                    )
+                custom_system_prompt = f"Expected answer: {expected_answer}"
+                
+        # Get the RAG agent with the appropriate configuration
+        return self.agent_manager.get_agent(
+            chat_model_config=chat_model_config,
+            agent_type="rag",
+            custom_system_prompt=custom_system_prompt,
+            prompt_style=prompt_style,
+            query=query
+        )
 
     async def _get_rag_response(self,
                              query: str,
@@ -358,7 +359,7 @@ class RAGResponseStrategy(ResponseStrategy):
                     query: str, 
                     chat_history: ChatHistory, 
                     custom_system_prompt: str = None,
-                    prompt_style: str = "default") -> Tuple[Dict[str, Any], Dict[str, Any], List[str]]:
+                    prompt_style: str = "default") -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], List[str]]:
         """
         Execute the RAG response strategy.
         
@@ -371,6 +372,7 @@ class RAGResponseStrategy(ResponseStrategy):
             
         Returns:
             Tuple of (rag_response, no_rag_response, queries_tried)
+            Either rag_response or no_rag_response may be None depending on strategy
         """
         rag_response, queries_tried = await self.execute_rag_with_retry(
                                                         chat_model_config=chat_model_config,
@@ -389,7 +391,7 @@ class NonRAGResponseStrategy(ResponseStrategy):
                     query: str, 
                     chat_history: ChatHistory, 
                     custom_system_prompt: str = None,
-                    prompt_style: str = "default") -> Tuple[Dict[str, Any], Dict[str, Any], List[str]]:
+                    prompt_style: str = "default") -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], List[str]]:
         """
         Execute the non-RAG response strategy.
         
@@ -402,10 +404,12 @@ class NonRAGResponseStrategy(ResponseStrategy):
             
         Returns:
             Tuple of (rag_response, no_rag_response, queries_tried)
+            Either rag_response or no_rag_response may be None depending on strategy
         """
         # Get non-RAG agent
-        non_rag_agent = self.agent_manager.get_non_rag_agent(
+        non_rag_agent = self.agent_manager.get_agent(
             chat_model_config=chat_model_config,
+            agent_type="standard",
             custom_system_prompt=custom_system_prompt
         )
         
@@ -454,8 +458,9 @@ class DualResponseStrategy(ResponseStrategy):
         sources = temp_strategy.format_sources(rag_response)
 
         # Get non-RAG response
-        non_rag_agent = self.agent_manager.get_non_rag_agent(
-            chat_model_config,
+        non_rag_agent = self.agent_manager.get_agent(
+            chat_model_config=chat_model_config,
+            agent_type="standard",
             custom_system_prompt=custom_system_prompt
         )
         non_rag_response = await non_rag_agent.ainvoke(
@@ -473,7 +478,7 @@ class DatabaseResponseStrategy(ResponseStrategy):
                     query: str, 
                     chat_history: ChatHistory, 
                     custom_system_prompt: str = None,
-                    prompt_style: str = "default") -> Tuple[Dict[str, Any], Dict[str, Any], List[str]]:
+                    prompt_style: str = "default") -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], List[str]]:
         """
         Execute the database response strategy.
         
@@ -486,10 +491,12 @@ class DatabaseResponseStrategy(ResponseStrategy):
             
         Returns:
             Tuple of (rag_response, no_rag_response, queries_tried)
+            Either rag_response or no_rag_response may be None depending on strategy
         """
         # Get database agent
-        db_agent = self.agent_manager.get_database_agent(
-            chat_model_config,
+        db_agent = self.agent_manager.get_agent(
+            chat_model_config=chat_model_config,
+            agent_type="database",
             custom_system_prompt=custom_system_prompt
         )
         
@@ -499,4 +506,6 @@ class DatabaseResponseStrategy(ResponseStrategy):
             include_run_info=True
         )
         
+        # Return the database response as the RAG response (since it's the primary response)
+        # and None as the non-RAG response
         return db_response, None, [query]

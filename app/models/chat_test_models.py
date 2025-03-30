@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Dict, List, TypedDict, Literal, Union, Optional, Any
+from typing import Dict, List, TypedDict, Literal, Union, Optional
 
 class ChatTestRequest(BaseModel):
     prompt: str

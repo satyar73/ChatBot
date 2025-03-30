@@ -54,7 +54,7 @@ class ChatService:
         custom_system_prompt = data.system_prompt
         prompt_style = data.prompt_style or "default"
 
-        # TODO for now just work on only one model; Future support runnning against more than one LLMs
+        # TODO for now just work on only one model; Future support running against more than one LLMs
         first_key = next(iter(self.config.chat_model_configs))
         chat_model_config = self.config.chat_model_configs[first_key]
 
@@ -140,15 +140,23 @@ class ChatService:
         # Add user message to history
         chat_history.add_user_message(user_input)
         
-        # Get and execute the appropriate response strategy
-        strategy = ResponseStrategy.get_strategy(actual_query, mode, self, self.agent_manager)
+        # Get a temporary chat service instance to pass to the strategy
+        chat_service = ChatService()
+        
+        # Determine which mode/strategy to use
+        mode = "both" if mode == "both" else ("rag" if mode == "rag" else "no_rag")
+        
+        # Get the appropriate strategy
+        strategy = ResponseStrategy.get_strategy(actual_query, mode, chat_service, chat_service.agent_manager)
+        
+        # Execute the strategy
         rag_response, no_rag_response, queries_tried = await strategy.execute(
-                                                                    chat_model_config=chat_model_config,
-                                                                    query=actual_query,
-                                                                    history=chat_history.get_messages(),
-                                                                    custom_system_prompt=custom_system_prompt,
-                                                                    prompt_style=prompt_style
-                                                                )
+            chat_model_config,
+            actual_query, 
+            chat_history,
+            custom_system_prompt=None,  # Pass None as the default system prompt
+            prompt_style=prompt_style
+        )
         
         # Create a temporary strategy just to format sources
         temp_strategy = ResponseStrategy(self, self.agent_manager)
@@ -356,7 +364,7 @@ class AgentService:
         Returns:
             A ResponseMessage object containing the response(s) and sources
         """
-        # TODO for now just work on only one model; Future support runnning against more than one LLMs
+        # TODO for now just work on only one model; Future support running against more than one LLMs
         first_key = next(iter(chat_config.config.chat_model_configs))
         chat_model_config = chat_config.config.chat_model_configs[first_key]
 
@@ -377,13 +385,14 @@ class AgentService:
         mode = "both" if use_dual_response else ("rag" if use_rag else "no_rag")
         
         # Get the appropriate strategy
-        strategy = ResponseStrategy.get_strategy(query, mode, chat_service)
+        strategy = ResponseStrategy.get_strategy(query, mode, chat_service, chat_service.agent_manager)
         
         # Execute the strategy
         rag_response, no_rag_response, queries_tried = await strategy.execute(
             chat_model_config,
             query, 
             chat_history,
+            custom_system_prompt=None,  # Pass None as the default system prompt
             prompt_style="default"
         )
         

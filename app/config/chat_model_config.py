@@ -1,4 +1,3 @@
-import os
 from enum import Enum
 
 from app.config.llm_proxy_config import LlmProxyConfig

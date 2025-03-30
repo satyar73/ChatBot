@@ -55,6 +55,8 @@ class ChatTestService:
     def __init__(self, chatbot_api_url: str = "http://localhost:8005"):
         self.config = ChatTestConfig()
         self.chatbot_client = ChatBotClient(chatbot_api_url)
+        self.logger = get_logger(f"{__name__}.ChatTestService", "DEBUG")
+        self.logger.info("ChatTestService initialized")
 
         # Define weights for enhanced evaluation
         self.evaluation_weights = {
@@ -76,22 +78,22 @@ class ChatTestService:
 
     async def start_get_chat_response_node(self, state: DualState) -> DualState:
         """Node that calls Chatbot API to get both RAG and non-RAG responses"""
-        logger.debug(f"Starting start_node with prompt: {state['prompt'][:50]}...")
+        self.logger.debug(f"Starting start_node with prompt: {state['prompt'][:50]}...")
         prompt = state["prompt"]
 
         try:
             # Get both RAG and non-RAG responses in a single API call
-            logger.debug("Calling Chatbot API for responses")
+            self.logger.debug("Calling Chatbot API for responses")
             rag_response, no_rag_response = await self.chatbot_client.get_response(prompt)
             
             # Ensure responses are not None
             rag_response = rag_response or "No RAG response received"
             no_rag_response = no_rag_response or "No non-RAG response received"
             
-            logger.debug(f"Received responses - RAG: {len(rag_response)} chars, non-RAG: {len(no_rag_response)} chars")
+            self.logger.debug(f"Received responses - RAG: {len(rag_response)} chars, non-RAG: {len(no_rag_response)} chars")
 
             # Return updated state with both responses
-            logger.debug(f"start_node completed successfully, next step: {self.config.EVALUATE_RAG}")
+            self.logger.debug(f"start_node completed successfully, next step: {self.config.EVALUATE_RAG}")
             return {
                 **state,
                 "rag_response": rag_response,
@@ -99,7 +101,7 @@ class ChatTestService:
                 self.config.NEXT: self.config.EVALUATE_RAG
             }
         except Exception as e:
-            logger.error(f"Error getting ChatBot responses: {str(e)}")
+            self.logger.error(f"Error getting ChatBot responses: {str(e)}")
             # Return error state
             return {
                 **state,
@@ -111,36 +113,36 @@ class ChatTestService:
 
     def evaluate_rag_node(self, state: DualState) -> DualState:
         """Evaluate RAG response with quick similarity test"""
-        logger.debug("Starting evaluate_rag_node")
+        self.logger.debug("Starting evaluate_rag_node")
         actual = state["rag_response"]
         expected = state["expected_result"]
         threshold = state["similarity_threshold"]
-        logger.debug(f"Evaluating RAG response against threshold: {threshold}")
+        self.logger.debug(f"Evaluating RAG response against threshold: {threshold}")
 
         # Run quick similarity tests
         try:
-            logger.debug("Running similarity tests")
+            self.logger.debug("Running similarity tests")
             results = SimilarityEngines.quick_test(actual, expected)
-            logger.debug(f"Similarity test results: weighted_similarity={results['weighted_similarity']:.4f}")
+            self.logger.debug(f"Similarity test results: weighted_similarity={results['weighted_similarity']:.4f}")
 
             # Determine if passed based on weighted similarity
             passed = results["weighted_similarity"] >= threshold
 
             # Generate basic reasoning
             if passed:
-                logger.debug(f"RAG response PASSED with score: {results['weighted_similarity']:.4f}")
+                self.logger.debug(f"RAG response PASSED with score: {results['weighted_similarity']:.4f}")
                 reasoning = f"RAG response: Quick test PASSED with similarity score of {results['weighted_similarity']:.4f}"
                 next_step = self.config.EVALUATE_NO_RAG  # Move to evaluate non-RAG response
             else:
-                logger.debug(f"RAG response FAILED with score: {results['weighted_similarity']:.4f}")
+                self.logger.debug(f"RAG response FAILED with score: {results['weighted_similarity']:.4f}")
                 reasoning = f"RAG response: Quick test FAILED with similarity score of {results['weighted_similarity']:.4f}"
                 if results.get("concepts_missing"):
                     concepts_str = ", ".join(results["concepts_missing"][:5])
-                    logger.debug(f"Missing key concepts: {concepts_str}")
+                    self.logger.debug(f"Missing key concepts: {concepts_str}")
                     reasoning += f"\nMissing key concepts: {concepts_str}"
                 next_step = self.config.EVALUATE_LLM_RAG  # Try LLM evaluation for RAG
 
-            logger.debug(f"evaluate_rag_node completed, next step: {next_step}")
+            self.logger.debug(f"evaluate_rag_node completed, next step: {next_step}")
             # Return updated state with results
             return {
                 **state,
@@ -152,7 +154,7 @@ class ChatTestService:
         except Exception as e:
             # Handle any errors in the similarity engine
             error_msg = f"Error in RAG evaluation: {str(e)}"
-            logger.error(error_msg)
+            self.logger.error(error_msg)
             return {
                 **state,
                 "rag_test_results": {"error": str(e)},
@@ -163,36 +165,36 @@ class ChatTestService:
 
     def evaluate_no_rag_node(self, state: DualState) -> DualState:
         """Evaluate non-RAG response with quick similarity test"""
-        logger.debug("Starting evaluate_no_rag_node")
+        self.logger.debug("Starting evaluate_no_rag_node")
         actual = state["no_rag_response"]
         expected = state["expected_result"]
         threshold = state["similarity_threshold"]
-        logger.debug(f"Evaluating non-RAG response against threshold: {threshold}")
+        self.logger.debug(f"Evaluating non-RAG response against threshold: {threshold}")
 
         # Run quick similarity tests
         try:
-            logger.debug("Running similarity tests")
+            self.logger.debug("Running similarity tests")
             results = SimilarityEngines.quick_test(actual, expected)
-            logger.debug(f"Similarity test results: weighted_similarity={results['weighted_similarity']:.4f}")
+            self.logger.debug(f"Similarity test results: weighted_similarity={results['weighted_similarity']:.4f}")
 
             # Determine if passed based on weighted similarity
             passed = results["weighted_similarity"] >= threshold
 
             # Generate basic reasoning
             if passed:
-                logger.debug(f"Non-RAG response PASSED with score: {results['weighted_similarity']:.4f}")
+                self.logger.debug(f"Non-RAG response PASSED with score: {results['weighted_similarity']:.4f}")
                 reasoning = f"\n\nNon-RAG response: Quick test PASSED with similarity score of {results['weighted_similarity']:.4f}"
                 next_step = self.config.ENHANCED_EVALUATION  # Move to comparison step
             else:
-                logger.debug(f"Non-RAG response FAILED with score: {results['weighted_similarity']:.4f}")
+                self.logger.debug(f"Non-RAG response FAILED with score: {results['weighted_similarity']:.4f}")
                 reasoning = f"\n\nNon-RAG response: Quick test FAILED with similarity score of {results['weighted_similarity']:.4f}"
                 if results.get("concepts_missing"):
                     concepts_str = ", ".join(results["concepts_missing"][:5])
-                    logger.debug(f"Missing key concepts: {concepts_str}")
+                    self.logger.debug(f"Missing key concepts: {concepts_str}")
                     reasoning += f"\nMissing key concepts: {concepts_str}"
                 next_step = self.config.EVALUATE_LLM_NO_RAG  # Try LLM evaluation for non-RAG
 
-            logger.debug(f"evaluate_no_rag_node completed, next step: {next_step}")
+            self.logger.debug(f"evaluate_no_rag_node completed, next step: {next_step}")
             # Return updated state with results
             return {
                 **state,
@@ -204,7 +206,7 @@ class ChatTestService:
         except Exception as e:
             # Handle any errors in the similarity engine
             error_msg = f"\n\nError in non-RAG evaluation: {str(e)}"
-            logger.error(error_msg)
+            self.logger.error(error_msg)
             return {
                 **state,
                 "no_rag_test_results": {"error": str(e)},
@@ -215,10 +217,10 @@ class ChatTestService:
 
     def llm_evaluate_rag_node(self, state: DualState) -> DualState:
         """Use LLM to evaluate RAG response that failed the quick check"""
-        logger.debug("Starting llm_evaluate_rag_node")
+        self.logger.debug("Starting llm_evaluate_rag_node")
         # Use LLMClientManager instead of direct LLM creation
         llm = LLMClientManager.with_structured_output(ChatLLMTestOutput)
-        logger.debug("Created LLM client with structured output")
+        self.logger.debug("Created LLM client with structured output")
 
         test_prompt = self.config.RAG_PROMPT_TEMPLATE
 
@@ -230,44 +232,44 @@ class ChatTestService:
             filled_prompt = filled_prompt.replace("{{actual_result}}", state["rag_response"])
             filled_prompt = filled_prompt.replace("{{threshold}}",
                                                   str(state["similarity_threshold"] * 10))  # Convert 0.7 to 7
-            logger.debug("Prepared LLM prompt for RAG evaluation")
+            self.logger.debug("Prepared LLM prompt for RAG evaluation")
 
             messages = [
                 SystemMessage(content=filled_prompt)
             ]
 
             # Get LLM evaluation
-            logger.debug("Invoking LLM for RAG evaluation")
+            self.logger.debug("Invoking LLM for RAG evaluation")
             results = llm.invoke(messages)
-            logger.debug(
+            self.logger.debug(
                 f"LLM evaluation result: pass_fail={results['pass_fail']}, semantic_score={results['semantic_score']}/10")
 
             # Determine if passed based on LLM judgment
             passed = results["pass_fail"] == "PASS"
             normalized_score = (results["semantic_score"] + results["marketing_accuracy"]) / 20  # Convert to 0-1 scale
-            logger.debug(f"Normalized score: {normalized_score:.4f}")
+            self.logger.debug(f"Normalized score: {normalized_score:.4f}")
 
             # Generate reasoning
             if passed:
-                logger.debug("LLM evaluation PASSED")
+                self.logger.debug("LLM evaluation PASSED")
                 reasoning = f"\n\nRAG response - LLM test: PASSED with semantic score {results['semantic_score']}/10 and marketing accuracy {results['marketing_accuracy']}/10"
             else:
-                logger.debug("LLM evaluation FAILED")
+                self.logger.debug("LLM evaluation FAILED")
                 reasoning = f"\n\nRAG response - LLM test: FAILED with semantic score {results['semantic_score']}/10 and marketing accuracy {results['marketing_accuracy']}/10"
                 if results["key_differences"]:
                     differences_str = "\n- " + "\n- ".join(results["key_differences"][:3])
-                    logger.debug(f"Key differences identified: {len(results['key_differences'])}")
+                    self.logger.debug(f"Key differences identified: {len(results['key_differences'])}")
                     reasoning += f"\nKey differences: {differences_str}"
 
             # If quick test failed but LLM test passed, consider it passed
             if passed:
                 final_passed = True
-                logger.debug("Final RAG evaluation: PASSED")
+                self.logger.debug("Final RAG evaluation: PASSED")
             else:
                 final_passed = state.get("rag_passed", False)
-                logger.debug(f"Final RAG evaluation: {final_passed}")
+                self.logger.debug(f"Final RAG evaluation: {final_passed}")
 
-            logger.debug(f"llm_evaluate_rag_node completed, next step: {self.config.EVALUATE_NO_RAG}")
+            self.logger.debug(f"llm_evaluate_rag_node completed, next step: {self.config.EVALUATE_NO_RAG}")
             # Store everything in state
             return {
                 **state,
@@ -278,7 +280,7 @@ class ChatTestService:
             }
         except Exception as e:
             error_msg = f"\n\nError in RAG LLM evaluation: {str(e)}"
-            logger.error(error_msg)
+            self.logger.error(error_msg)
             # Return state with error information, keeping previous test results
             return {
                 **state,
@@ -289,10 +291,10 @@ class ChatTestService:
 
     def llm_evaluate_no_rag_node(self, state: DualState) -> DualState:
         """Use LLM to evaluate non-RAG response that failed the quick check"""
-        logger.debug("Starting llm_evaluate_no_rag_node")
+        self.logger.debug("Starting llm_evaluate_no_rag_node")
         # Use LLMClientManager instead of direct LLM creation
         llm = LLMClientManager.with_structured_output(ChatLLMTestOutput)
-        logger.debug("Created LLM client with structured output")
+        self.logger.debug("Created LLM client with structured output")
 
         test_prompt = self.config.NON_RAG_PROMPT_TEMPLATE
 
@@ -304,44 +306,44 @@ class ChatTestService:
             filled_prompt = filled_prompt.replace("{{actual_result}}", state["no_rag_response"])
             filled_prompt = filled_prompt.replace("{{threshold}}",
                                                   str(state["similarity_threshold"] * 10))  # Convert 0.7 to 7
-            logger.debug("Prepared LLM prompt for non-RAG evaluation")
+            self.logger.debug("Prepared LLM prompt for non-RAG evaluation")
 
             messages = [
                 SystemMessage(content=filled_prompt)
             ]
 
             # Get LLM evaluation
-            logger.debug("Invoking LLM for non-RAG evaluation")
+            self.logger.debug("Invoking LLM for non-RAG evaluation")
             results = llm.invoke(messages)
-            logger.debug(
+            self.logger.debug(
                 f"LLM evaluation result: pass_fail={results['pass_fail']}, semantic_score={results['semantic_score']}/10")
 
             # Determine if passed based on LLM judgment
             passed = results["pass_fail"] == "PASS"
             normalized_score = (results["semantic_score"] + results["marketing_accuracy"]) / 20  # Convert to 0-1 scale
-            logger.debug(f"Normalized score: {normalized_score:.4f}")
+            self.logger.debug(f"Normalized score: {normalized_score:.4f}")
 
             # Generate reasoning
             if passed:
-                logger.debug("LLM evaluation PASSED")
+                self.logger.debug("LLM evaluation PASSED")
                 reasoning = f"\n\nNon-RAG response - LLM test: PASSED with semantic score {results['semantic_score']}/10 and marketing accuracy {results['marketing_accuracy']}/10"
             else:
-                logger.debug("LLM evaluation FAILED")
+                self.logger.debug("LLM evaluation FAILED")
                 reasoning = f"\n\nNon-RAG response - LLM test: FAILED with semantic score {results['semantic_score']}/10 and marketing accuracy {results['marketing_accuracy']}/10"
                 if results["key_differences"]:
                     differences_str = "\n- " + "\n- ".join(results["key_differences"][:3])
-                    logger.debug(f"Key differences identified: {len(results['key_differences'])}")
+                    self.logger.debug(f"Key differences identified: {len(results['key_differences'])}")
                     reasoning += f"\nKey differences: {differences_str}"
 
             # If quick test failed but LLM test passed, consider it passed
             if passed:
                 final_passed = True
-                logger.debug("Final non-RAG evaluation: PASSED")
+                self.logger.debug("Final non-RAG evaluation: PASSED")
             else:
                 final_passed = state.get("no_rag_passed", False)
-                logger.debug(f"Final non-RAG evaluation: {final_passed}")
+                self.logger.debug(f"Final non-RAG evaluation: {final_passed}")
 
-            logger.debug(f"llm_evaluate_no_rag_node completed, next step: {self.config.COMPARE}")
+            self.logger.debug(f"llm_evaluate_no_rag_node completed, next step: {self.config.COMPARE}")
             # Store everything in state
             return {
                 **state,
@@ -352,7 +354,7 @@ class ChatTestService:
             }
         except Exception as e:
             error_msg = f"\n\nError in non-RAG LLM evaluation: {str(e)}"
-            logger.error(error_msg)
+            self.logger.error(error_msg)
             # Return state with error information, keeping previous test results
             return {
                 **state,
@@ -471,7 +473,7 @@ class ChatTestService:
 
     def enhance_evaluation_node(self, state: DualState) -> DualState:
         """Apply enhanced evaluation metrics to both RAG and non-RAG responses"""
-        logger.debug("Starting enhance_evaluation_node")
+        self.logger.debug("Starting enhance_evaluation_node")
 
         expected = state["expected_result"]
 
@@ -492,7 +494,7 @@ class ChatTestService:
             expected, rag_response, rag_base_score,
             rag_concept_coverage, rag_test_details
         )
-        logger.debug(f"RAG refined score: {rag_refined_score:.4f}")
+        self.logger.debug(f"RAG refined score: {rag_refined_score:.4f}")
 
         # Process non-RAG response
         no_rag_response = state["no_rag_response"]
@@ -511,7 +513,7 @@ class ChatTestService:
             expected, no_rag_response, no_rag_base_score,
             no_rag_concept_coverage, no_rag_test_details
         )
-        logger.debug(f"Non-RAG refined score: {no_rag_refined_score:.4f}")
+        self.logger.debug(f"Non-RAG refined score: {no_rag_refined_score:.4f}")
 
         # Determine pass/fail based on refined scores
         rag_passed = rag_refined_score >= state["similarity_threshold"] or rag_refined_score > no_rag_refined_score
@@ -549,12 +551,12 @@ class ChatTestService:
 
         enhanced_state["reasoning"] = state.get("reasoning", "") + reasoning if state.get("reasoning") else reasoning
 
-        logger.debug(f"enhance_evaluation_node completed, next step: {self.config.COMPARE}")
+        self.logger.debug(f"enhance_evaluation_node completed, next step: {self.config.COMPARE}")
         return enhanced_state
 
     def compare_node(self, state: DualState) -> DualState:
         """Compare RAG and non-RAG responses to determine RAG value"""
-        logger.debug("Starting compare_node")
+        self.logger.debug("Starting compare_node")
 
         # Check if we have enhanced evaluation results
         if state.get("rag_enhanced_results") and state.get("no_rag_enhanced_results"):
@@ -568,10 +570,10 @@ class ChatTestService:
             value_rating, value_assessment, score_diff = self._evaluate_rag_value(
                 rag_score, no_rag_score, rag_evaluation, no_rag_evaluation
             )
-            logger.debug(f"Enhanced evaluation - RAG value rating: {value_rating}")
+            self.logger.debug(f"Enhanced evaluation - RAG value rating: {value_rating}")
         else:
             # Fall back to original approach
-            logger.debug("No enhanced evaluation results found, using original comparison method")
+            self.logger.debug("No enhanced evaluation results found, using original comparison method")
 
         # Define the output structure
         class ComparisonOutput(TypedDict):
@@ -584,7 +586,7 @@ class ChatTestService:
 
         # Use LLMClientManager instead of direct LLM creation
         llm = LLMClientManager.with_structured_output(ComparisonOutput)
-        logger.debug("Created LLM client with structured output for comparison")
+        self.logger.debug("Created LLM client with structured output for comparison")
 
         # Get the best scores for each approach
         # Safely calculate rag_score
@@ -607,35 +609,35 @@ class ChatTestService:
             # If no_rag_llm_results does not exist, fall back to no_rag_test_results only
             no_rag_score = state.get("no_rag_test_results", {}).get("weighted_similarity", 0)
 
-        logger.debug(f"Best scores - RAG: {rag_score:.4f}, non-RAG: {no_rag_score:.4f}")
+        self.logger.debug(f"Best scores - RAG: {rag_score:.4f}, non-RAG: {no_rag_score:.4f}")
 
         # Simple score-based comparison
         score_diff = rag_score - no_rag_score
-        logger.debug(f"Score difference (RAG - non-RAG): {score_diff:.4f}")
+        self.logger.debug(f"Score difference (RAG - non-RAG): {score_diff:.4f}")
 
         # Generate comparison text
         if score_diff > 0.2:
-            logger.debug("RAG significantly outperforms non-RAG")
+            self.logger.debug("RAG significantly outperforms non-RAG")
             comparison_text = f"RAG significantly outperforms non-RAG (score difference: +{score_diff:.4f})"
             value_rating = "High"
         elif score_diff > 0.05:
-            logger.debug("RAG moderately outperforms non-RAG")
+            self.logger.debug("RAG moderately outperforms non-RAG")
             comparison_text = f"RAG moderately outperforms non-RAG (score difference: +{score_diff:.4f})"
             value_rating = "Medium"
         elif score_diff > 0.001:  # Use a small threshold to avoid rounding errors
-            logger.debug("RAG slightly outperforms non-RAG")
+            self.logger.debug("RAG slightly outperforms non-RAG")
             comparison_text = f"RAG slightly outperforms non-RAG (score difference: +{score_diff:.4f})"
             value_rating = "Low"
         elif abs(score_diff) <= 0.001:  # If difference is essentially zero
-            logger.debug("RAG and non-RAG perform similarly")
+            self.logger.debug("RAG and non-RAG perform similarly")
             comparison_text = f"RAG and non-RAG perform similarly (score difference: {score_diff:.4f})"
             value_rating = "None"
         else:
-            logger.debug("Non-RAG outperforms RAG")
+            self.logger.debug("Non-RAG outperforms RAG")
             comparison_text = f"Non-RAG outperforms RAG (score difference: {score_diff:.4f})"
             value_rating = "Negative"
 
-        logger.debug(f"RAG value rating: {value_rating}")
+        self.logger.debug(f"RAG value rating: {value_rating}")
 
         # Create detailed comparison
         comparison = {
@@ -661,7 +663,7 @@ class ChatTestService:
         # Also run an LLM comparison for more detailed analysis
         try:
             compare_prompt = self.config.COMPARISON_PROMPT_TEMPLATE
-            logger.debug("Preparing LLM comparison prompt")
+            self.logger.debug("Preparing LLM comparison prompt")
 
             # Fill in the values
             compare_prompt = compare_prompt.replace("{{prompt}}", state["prompt"])
@@ -674,9 +676,9 @@ class ChatTestService:
             ]
 
             # Get LLM evaluation
-            logger.debug("Invoking LLM for detailed comparison")
+            self.logger.debug("Invoking LLM for detailed comparison")
             llm_comparison = llm.invoke(messages)
-            logger.debug(f"LLM comparison value rating: {llm_comparison['value_rating']}")
+            self.logger.debug(f"LLM comparison value rating: {llm_comparison['value_rating']}")
 
             # Add LLM comparison to our comparison object
             comparison.update({
@@ -704,14 +706,14 @@ class ChatTestService:
             for weakness in llm_comparison["no_rag_weaknesses"]:
                 detailed_comparison += f"- {weakness}\n"
 
-            logger.debug("Generated detailed comparison from LLM results")
+            self.logger.debug("Generated detailed comparison from LLM results")
 
         except Exception as e:
-            logger.error(f"Error in LLM comparison: {str(e)}")
+            self.logger.error(f"Error in LLM comparison: {str(e)}")
             detailed_comparison = f"\n\nError in detailed LLM comparison: {str(e)}"
             # Keep the basic comparison without LLM input
 
-        logger.debug(f"compare_node completed, next step: {self.config.END}")
+        self.logger.debug(f"compare_node completed, next step: {self.config.END}")
         # Update state with comparison and detailed reasoning
         return {
             **state,
@@ -729,7 +731,7 @@ class ChatTestService:
 
         # noinspection PyTypedDict
         next_step = state.get(self.config.NEXT, self.config.END)
-        logger.debug(f"Router determining next step: {next_step}")
+        self.logger.debug(f"Router determining next step: {next_step}")
         return next_step
 
     def build_test_graph(self):
@@ -1016,8 +1018,8 @@ class ChatTestService:
         print(f"Saving RAG comparison report to: {rag_report_file}")
         
         # Also log to the Python logger
-        logger.info(f"Saving test results to: {output_file}")
-        logger.info(f"Saving RAG comparison report to: {rag_report_file}")
+        self.logger.info(f"Saving test results to: {output_file}")
+        self.logger.info(f"Saving RAG comparison report to: {rag_report_file}")
 
         # Convert results to DataFrame and save
         try:
@@ -1140,9 +1142,9 @@ class ChatTestService:
             # Ensure client is cleaned up at the end of the batch test
             try:
                 await self.chatbot_client.cleanup()
-                logger.info("Successfully cleaned up chatbot client")
+                self.logger.info("Successfully cleaned up chatbot client")
             except Exception as e:
-                logger.error(f"Error cleaning up chatbot client: {str(e)}")
+                self.logger.error(f"Error cleaning up chatbot client: {str(e)}")
 
     async def cleanup(self):
         """Cleanup resources"""

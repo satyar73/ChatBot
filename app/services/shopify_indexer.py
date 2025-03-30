@@ -9,13 +9,8 @@ and index it to a vector database (Pinecone) for RAG applications.
 import os
 import json
 import requests
-import time
 from typing import List, Dict, Any, Tuple
 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings
-from langchain.docstore.document import Document
-from pinecone import Pinecone, ServerlessSpec
 import markdownify as md
 
 from app.config.chat_config import ChatConfig

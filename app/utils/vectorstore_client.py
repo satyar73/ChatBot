@@ -1,8 +1,7 @@
-
 import json
 import os
 import time
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.docstore.document import Document
@@ -12,12 +11,12 @@ from langchain_pinecone import PineconeVectorStore
 
 from app.config.chat_config import chat_config
 from app.config.chat_model_config import ChatModelConfig
-from app.config.vector_store_config import NeonConfig, PineconeConfig, VectorStoreConfig, VectorStoreType
+from app.config.vector_store_config import NeonConfig, PineconeConfig, VectorStoreConfig
 from app.services.enhancement_service import enhancement_service
 from app.utils.logging_utils import get_logger
 
 
-class VectorStoreClient():
+class VectorStoreClient:
     """
     VectorStoreClient is an interface class for performing CURL operations on various vector stores such as Pinecone, Neon, etc
     """
@@ -39,16 +38,22 @@ class VectorStoreClient():
         pass
 
     @staticmethod
-    def get_vector_store_client(vector_store_config: VectorStoreConfig):
+    def get_vector_store_client(vector_store_config: VectorStoreConfig) \
+                                         -> Optional['VectorStoreClient']:
         """
         Factory method to get the appropriate vector store client.
+        
+        Args:
+            vector_store_config: Configuration for the vector store
+            
+        Returns:
+            Appropriate vector store client instance or None if type is not supported
         """
-        vector_store_client = None
-        if vector_store_config.vector_store_type == VectorStoreType.PINECONE:
-            vector_store_client = PineconeClient(vector_store_config)
-        elif vector_store_config.vector_store_type == VectorStoreType.NEON:
-            vector_store_client = NeonClient(vector_store_config)
-        return vector_store_client
+        if isinstance(vector_store_config, PineconeConfig):
+            return PineconeClient(vector_store_config)
+        elif isinstance(vector_store_config, NeonConfig):
+            return NeonClient(vector_store_config)
+        return None
 
 
 class PineconeClient(VectorStoreClient):
@@ -56,43 +61,51 @@ class PineconeClient(VectorStoreClient):
         super().__init__()
         self._pinecone_config: PineconeConfig = pinecone_config
 
-    def index_to_vector_store(self, chat_model_config: ChatModelConfig, records: List[Dict[str, Any]]) -> bool:
+    def index_to_vector_store(self, 
+                              chat_model_config: ChatModelConfig, 
+                              records: List[Dict[str, Any]]) -> bool:
         """
         Index content records to Pinecone vector database.
         
         Args:
+            chat_model_config: Configuration for the chat model to use for indexing, including embedding model and dimensionality
             records: List of enhanced content records with title, url, and markdown
             
         Returns:
             True if indexing was successful, False otherwise
         """
         try:
-            pinecone_config: PineconeConfig = chat_model_config.vector_store_config
             # If no records, return success
             if not records:
                 self.logger.warning("No records to index")
                 return True
 
             self.logger.info(f"Indexing {len(records)} records to Pinecone index "
-                             f"'{pinecone_config.index_name}'")
+                             f"'{self._pinecone_config.index_name}'")
 
             # Initialize Pinecone
-            pc = Pinecone(api_key=pinecone_config.api_key)
+            pc = Pinecone(api_key=self._pinecone_config.api_key)
+            
+            # Initialize embeddings
+            embeddings = OpenAIEmbeddings(
+                model=chat_model_config.model,
+                dimensions=self._pinecone_config.get_embedding_dimensions(chat_model_config.model)
+            )
 
             # Check if index exists
             existing_indexes = pc.list_indexes().names()
 
             # Create index if it doesn't exist
-            if pinecone_config.index_name not in existing_indexes:
-                self.logger.info(f"Creating new Pinecone index: {pinecone_config.index_name}")
+            if self._pinecone_config.index_name not in existing_indexes:
+                self.logger.info(f"Creating new Pinecone index: {self._pinecone_config.index_name}")
 
                 pc.create_index(
-                    name=pinecone_config.index_name,
-                    dimension=pinecone_config.get_embedding_dimensions(chat_model_config.model),
+                    name=self._pinecone_config.index_name,
+                    dimension=self._pinecone_config.get_embedding_dimensions(chat_model_config.model),
                     metric="cosine",
                     spec=ServerlessSpec(
-                        cloud=pinecone_config.cloud,
-                        region=pinecone_config.region
+                        cloud=self._pinecone_config.cloud,
+                        region=self._pinecone_config.region
                     )
                 )
 
@@ -100,7 +113,7 @@ class PineconeClient(VectorStoreClient):
                 self.logger.info("Waiting for index to initialize...")
                 time.sleep(10)
             else:
-                self.logger.info(f"Using existing Pinecone index: {pinecone_config.index_name}")
+                self.logger.info(f"Using existing Pinecone index: {self._pinecone_config.index_name}")
 
             # Prepare documents
             docs = []
@@ -168,28 +181,20 @@ class PineconeClient(VectorStoreClient):
                     )
                     docs.append(doc)
 
-            # Initialize embeddings
-            embeddings = OpenAIEmbeddings(
-                api_key=chat_model_config.cloud_api_key,
-                model=chat_model_config.model,
-                embedding_ctx_length=chat_model_config.embedding_context_length,
-                show_progress_bar=True
-            )
-
             # Index documents
             self.logger.info(f"Indexing {len(docs)} document chunks to Pinecone...")
 
             # Store in Pinecone
             vectorstore = PineconeVectorStore.from_documents(
                 docs,
-                index_name=pinecone_config.index_name,
-                pinecone_api_key=pinecone_config.api_key,
+                index_name=self._pinecone_config.index_name,
+                pinecone_api_key=self._pinecone_config.api_key,
                 embedding=embeddings
             )
 
             self.logger.info(
                 f"Successfully indexed {len(docs)} document chunks to "
-                f"Pinecone index '{pinecone_config.index_name}'.")
+                f"Pinecone index '{self._pinecone_config.index_name}'.")
             return True
 
         except Exception as e:

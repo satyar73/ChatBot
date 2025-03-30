@@ -10,7 +10,7 @@ async def create_index(
     store: Optional[str] = Query(None, description="Shopify store name (optional)"),
     summarize: Optional[bool] = Query(None, description="Whether to summarize content using LLM")
 ):
-    result = await index_service.create_index_from_shopify_store(store, summarize)
+    result = await index_service.create_shopify_index(store=store, summarize=summarize)
     return JSONResponse(
         content=result,
         status_code=200 if result.get("status") == "success" else 500
@@ -22,7 +22,12 @@ async def create_index_from_drive(
     summarize: Optional[bool] = Query(None, description="Whether to summarize content using LLM"),
     enhanced_slides: Optional[bool] = Query(None, description="Whether to use enhanced slide processing with GPT-4 Vision")
 ):
-    result = await index_service.create_index_from_google_drive(folder_id, recursive, summarize, enhanced_slides)
+    result = await index_service.create_gdrive_index(
+        folder_id=folder_id,
+        recursive=recursive,
+        summarize=summarize,
+        enhanced_slides=enhanced_slides
+    )
     return JSONResponse(
         content=result,
         status_code=200 if result.get("status") == "success" else 500

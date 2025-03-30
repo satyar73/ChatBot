@@ -10,6 +10,7 @@ from langchain_openai import OpenAIEmbeddings
 from app.config.chat_config import chat_config
 from app.config.chat_model_config import ChatModelConfig
 from app.config.llm_proxy_config import LlmProxyType
+from typing import Dict, Any, Optional
 
 class ToolManager:
     """Manager for all tools used by the agent."""
@@ -70,7 +71,9 @@ class ToolManager:
             return "I don't have specific data for that query. Please try a more specific question about products, revenue, customers, or order values."
 
     @classmethod
-    def configure_retriever(cls, chat_model_config: ChatModelConfig, query=None):
+    def configure_retriever(cls, 
+                            chat_model_config: ChatModelConfig, 
+                            query: Optional[str] = None):
         """
         Configure and return a vector store retriever.
         
@@ -78,7 +81,7 @@ class ToolManager:
             chat_model_config: Configuration for the chat model and vector store
             query: Optional query string for metadata filtering
         """
-        if (chat_model_config.llm_proxy_config == None 
+        if (chat_model_config.llm_proxy_config is None 
             or chat_model_config.llm_proxy_config.proxy_type == LlmProxyType.PORTKEY):
             # should be using OpenAI
             vector_store_config = chat_model_config.vector_store_config
@@ -94,7 +97,7 @@ class ToolManager:
             )
 
             # Set up metadata filters based on query content
-            search_kwargs = {
+            search_kwargs: Dict[str, Any] = {
                 "k": cls.config.RETRIEVER_CONFIG["k"],
                 "fetch_k": cls.config.RETRIEVER_CONFIG["fetch_k"],
                 "lambda_mult": cls.config.RETRIEVER_CONFIG["lambda_mult"]

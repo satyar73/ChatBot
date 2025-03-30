@@ -54,6 +54,7 @@ class ChatConfig:
 
         # Ollama Settings
         self.OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
+        self.OLLAMA_MODEL = os.getenv("OLLAMA_MODEL")
         self.OLLAMA_EMBEDDING_MODEL = os.getenv("OLLAMA_MODEL")
         self.OLLAMA_PINECONE_INDEX_NAME = os.getenv("OLLAMA_PINECONE_INDEX_NAME")
 

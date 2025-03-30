@@ -3,8 +3,8 @@ from enum import Enum
 class LlmProxyType(Enum):
     """
     To run LLM, we can use one of the below as proxies. 
-    PORTKEY is a online service that customers can subsribe
-    Ollama is a opensource tool / service that will help run various models (e.g. llama) locally (without having to pay for OpenAI)
+    PORTKEY is an online service that customers can subscribe
+    Ollama is an opensource tool / service that will help run various models (e.g. llama) locally (without having to pay for OpenAI)
     """
     PORTKEY = 1,
     OLLAMA = 2
@@ -12,8 +12,9 @@ class LlmProxyType(Enum):
 class LlmProxyConfig:
     """
     To run LLM, we can use one of the below as proxies. 
-    PORTKEY is a online service that customers can subsribe
-    Ollama is a opensource tool / service that will help run various models (e.g. llama) locally (without having to pay for OpenAI)
+    PORTKEY is an online service that customers can subscribe
+    Ollama is an opensource tool / service that will help run various models
+    (e.g. llama) locally (without having to pay for OpenAI)
     """
     def __init__(self, proxy_type: LlmProxyType, url: str, api_key: str = None, cache_ttl: int = 3600):
         self._proxy_type = proxy_type
