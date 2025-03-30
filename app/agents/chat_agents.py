@@ -365,9 +365,9 @@ class AgentFactory:
         return llm
 
     @classmethod
-    def create_agent_prompt(cls, system_content):
+    def create_agent_prompt(cls, system_prompt):
         """Create agent prompt with system message and history placeholder."""
-        system_message = SystemMessage(content=dedent(system_content))
+        system_message = SystemMessage(content=dedent(system_prompt))
         prompt = OpenAIFunctionsAgent.create_prompt(
             system_message=system_message,
             extra_prompt_messages=[MessagesPlaceholder(variable_name="history")]
@@ -375,7 +375,7 @@ class AgentFactory:
 
         # Log the created prompt template
         cls.prompt_capture.logger.debug(f"Created prompt template with "
-                                        f"system content: {system_content[:100]}...")
+                                        f"system content: {system_prompt[:100]}...")
 
         return prompt
 
