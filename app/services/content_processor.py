@@ -14,6 +14,7 @@ from langchain_pinecone import PineconeVectorStore
 from app.config.chat_config import ChatConfig
 from app.services.enhancement_service import enhancement_service
 from app.utils.logging_utils import get_logger
+from app.utils.text_splitters import TokenTextSplitter
 
 
 class ContentProcessor:
@@ -55,23 +56,100 @@ class ContentProcessor:
         
         return enhanced_records
 
-    def index_to_pinecone(self, records: List[Dict[str, Any]]) -> bool:
+    def prepare_documents_for_indexing(self, records: List[Dict[str, Any]]) -> List[Document]:
         """
-        Index content records to Pinecone vector database.
+        Prepare documents for indexing by splitting content into chunks and adding metadata.
         
         Args:
-            records: List of enhanced content records with title, url, and markdown
+            records: List of content records with title, url, and markdown
+            
+        Returns:
+            List of Document objects ready for indexing
+        """
+        docs = []
+        for i, record in enumerate(records):
+            # Check if record has markdown content
+            if 'markdown' not in record:
+                self.logger.warning(f"Record {i} missing 'markdown' field: {record}")
+                continue  # Skip records without markdown
+
+            # Split content into chunks
+            if record.get('type') == 'qa_pair':
+                # For Q&A content, don't split questions from answers
+                chunks = [record['markdown']]
+            else:
+                # Define special technical terms to preserve
+                special_terms = [
+                    "advanced attribution multiplier",
+                    "attribution multiplier",
+                    "marketing mix modeling",
+                    # Add other multi-word technical terms
+                ]
+
+                # For technical content, use smaller chunks with more overlap
+                if any(term in record['markdown'].lower() for term in special_terms):
+                    text_splitter = TokenTextSplitter(
+                        chunk_size=self.config.CHUNK_SIZE // 2,  # Smaller chunks for technical content
+                        chunk_overlap=self.config.CHUNK_OVERLAP * 2,  # More overlap
+                        model_name=self.config.OPENAI_EMBEDDING_MODEL
+                    )
+                else:
+                    text_splitter = TokenTextSplitter(
+                        chunk_size=self.config.CHUNK_SIZE,
+                        chunk_overlap=self.config.CHUNK_OVERLAP,
+                        model_name=self.config.OPENAI_EMBEDDING_MODEL
+                    )
+                chunks = text_splitter.split_text(record['markdown'])
+
+            # Create documents with metadata
+            for j, chunk in enumerate(chunks):
+                # Get attribution metadata
+                attribution_metadata = self.enhancement_service.enrich_attribution_metadata(chunk)
+
+                # Merge with standard metadata
+                metadata = {
+                    "title": record['title'],
+                    "url": record['url'],
+                    "chunk": j,
+                    "source": f"{record.get('type', 'content')}"
+                }
+                metadata.update(attribution_metadata)
+                if record.get('source') == 'Google Drive':
+                    metadata["type"] = record.get('type')
+                    metadata["client"] = record.get('client')
+
+                # Add keywords if available
+                if 'keywords' in record:
+                    metadata["keywords"] = record['keywords']
+
+                # Create embedding prompt
+                optimized_text = self.enhancement_service.create_embedding_prompt(chunk, metadata)
+
+                doc = Document(
+                    page_content=optimized_text,
+                    metadata=metadata
+                )
+                docs.append(doc)
+
+        return docs
+
+    def index_to_pinecone(self, docs: List[Document]) -> bool:
+        """
+        Index documents to Pinecone vector database.
+        
+        Args:
+            docs: List of Document objects ready for indexing
             
         Returns:
             True if indexing was successful, False otherwise
         """
         try:
-            # If no records, return success
-            if not records:
-                self.logger.warning("No records to index")
+            # If no documents, return success
+            if not docs:
+                self.logger.warning("No documents to index")
                 return True
 
-            self.logger.info(f"Indexing {len(records)} records to Pinecone index "
+            self.logger.info(f"Indexing {len(docs)} document chunks to Pinecone index "
                              f"'{self.config.PINECONE_INDEX_NAME}'")
 
             # Initialize Pinecone
@@ -99,75 +177,6 @@ class ContentProcessor:
                 time.sleep(10)
             else:
                 self.logger.info(f"Using existing Pinecone index: {self.config.PINECONE_INDEX_NAME}")
-
-            # Prepare documents
-            docs = []
-            for i, record in enumerate(records):
-                # Check if record has markdown content
-                if 'markdown' not in record:
-                    self.logger.warning(f"Record {i} missing 'markdown' field: {record}")
-                    continue  # Skip records without markdown
-
-                # Split content into chunks
-                if record.get('type') == 'qa_pair':
-                    # For Q&A content, don't split questions from answers
-                    chunks = [record['markdown']]
-                else:
-                    # Define special technical terms to preserve
-                    special_terms = [
-                        "advanced attribution multiplier",
-                        "attribution multiplier",
-                        "marketing mix modeling",
-                        # Add other multi-word technical terms
-                    ]
-
-                    # Create a custom separator pattern that preserves these terms
-                    separators = ["\n\n", "\n", ". ", " ", ""]
-
-                    # For technical content, use smaller chunks with more overlap
-                    if any(term in record['markdown'].lower() for term in special_terms):
-                        text_splitter = RecursiveCharacterTextSplitter(
-                            chunk_size=self.config.CHUNK_SIZE // 2,  # Smaller chunks for technical content
-                            chunk_overlap=self.config.CHUNK_OVERLAP * 2,  # More overlap
-                            separators=separators
-                        )
-                    else:
-                        text_splitter = RecursiveCharacterTextSplitter(
-                            chunk_size=self.config.CHUNK_SIZE,
-                            chunk_overlap=self.config.CHUNK_OVERLAP,
-                            separators=separators
-                        )
-                    chunks = text_splitter.split_text(record['markdown'])
-
-                # Create documents with metadata
-                for j, chunk in enumerate(chunks):
-                    # Get attribution metadata
-                    attribution_metadata = self.enhancement_service.enrich_attribution_metadata(chunk)
-
-                    # Merge with standard metadata
-                    metadata = {
-                        "title": record['title'],
-                        "url": record['url'],
-                        "chunk": j,
-                        "source": f"{record.get('type', 'content')}"
-                    }
-                    metadata.update(attribution_metadata)
-                    if record.get('source') == 'Google Drive':
-                        metadata["type"] = record.get('type')
-                        metadata["client"] = record.get('client')
-
-                    # Add keywords if available
-                    if 'keywords' in record:
-                        metadata["keywords"] = record['keywords']
-
-                    # Create embedding prompt
-                    optimized_text = self.enhancement_service.create_embedding_prompt(chunk, metadata)
-
-                    doc = Document(
-                        page_content=optimized_text,
-                        metadata=metadata
-                    )
-                    docs.append(doc)
 
             # Initialize embeddings
             embeddings = OpenAIEmbeddings(

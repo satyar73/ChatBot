@@ -46,17 +46,21 @@ class IndexService:
             self.logger.debug("Processing and enhancing records")
             enhanced_records = self.content_processor.process_records(all_records)
             
-            # File saving is handled in the Shopify indexer
+            # Prepare documents for indexing
+            self.logger.debug("Preparing documents for indexing")
+            docs = self.content_processor.prepare_documents_for_indexing(enhanced_records)
+            self.logger.info(f"Prepared {len(docs)} documents for indexing")
             
-            # Index the enhanced records to Pinecone
-            self.logger.debug("Indexing records to Pinecone")
-            success = self.content_processor.index_to_pinecone(enhanced_records)
+            # Index the documents to Pinecone
+            self.logger.debug("Indexing documents to Pinecone")
+            success = self.content_processor.index_to_pinecone(docs)
             
             if success:
                 return {
                     "status": "success",
-                    "message": f"Successfully indexed {len(enhanced_records)} Shopify records",
-                    "record_count": len(enhanced_records)
+                    "message": f"Successfully indexed {len(docs)} document chunks",
+                    "record_count": len(enhanced_records),
+                    "chunk_count": len(docs)
                 }
             else:
                 return {
@@ -98,23 +102,32 @@ class IndexService:
             
             # Use asyncio to run the document preparation in a separate thread
             records = await asyncio.to_thread(indexer.prepare_drive_documents)
-            self.logger.info(f"Fetched {len(records)} records from Google Drive")
             
-            # File saving is handled in the Google Drive indexer
-                    
+            if not records:
+                return {
+                    "status": "error",
+                    "message": "No records found in Google Drive"
+                }
+            
             # Process and enhance records
             self.logger.debug("Processing and enhancing records")
             enhanced_records = self.content_processor.process_records(records)
             
-            # Index the enhanced records to Pinecone
-            self.logger.debug("Indexing records to Pinecone")
-            success = self.content_processor.index_to_pinecone(enhanced_records)
+            # Prepare documents for indexing
+            self.logger.debug("Preparing documents for indexing")
+            docs = self.content_processor.prepare_documents_for_indexing(enhanced_records)
+            self.logger.info(f"Prepared {len(docs)} documents for indexing")
+            
+            # Index the documents to Pinecone
+            self.logger.debug("Indexing documents to Pinecone")
+            success = self.content_processor.index_to_pinecone(docs)
             
             if success:
                 return {
                     "status": "success",
-                    "message": f"Successfully indexed {len(enhanced_records)} Google Drive records",
-                    "files_processed": len(enhanced_records)
+                    "message": f"Successfully indexed {len(docs)} document chunks",
+                    "record_count": len(enhanced_records),
+                    "chunk_count": len(docs)
                 }
             else:
                 return {
@@ -124,7 +137,7 @@ class IndexService:
 
         except Exception as e:
             self.logger.error(f"Error creating index from Google Drive: {str(e)}")
-            return {"status": "error", "message": f"Failed to create index from Google Drive: {str(e)}"}
+            return {"status": "error", "message": str(e)}
 
     async def get_index_info(self) -> Dict:
         """Get information about the current vector index"""

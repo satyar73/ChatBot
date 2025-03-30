@@ -632,115 +632,91 @@ class GoogleDriveIndexer:
 
         return records
 
-    def get_embedding_dimensions(self, model_name):
-        """Get the dimensions for a specific OpenAI embedding model"""
-        # Common OpenAI embedding model dimensions
+    def get_embedding_dimensions(self, model_name: str) -> int:
+        """Get the embedding dimensions for a given model"""
         model_dimensions = {
             "text-embedding-3-small": 1536,
             "text-embedding-3-large": 3072,
-            "text-embedding-ada-002": 1536,
-            # Add more models as needed
+            "text-embedding-ada-002": 1536
         }
         return model_dimensions.get(model_name, 1536)  # Default to 1536 if unknown
 
-    def index_to_pinecone(self, records):
-        """Index processed records to Pinecone"""
-        self.logger.info(f"Indexing {len(records)} records to Pinecone...")
-
-        # Then in your initialize_pinecone method or before creating the index:
-        embedding_dim = self.get_embedding_dimensions(self.config.OPENAI_EMBEDDING_MODEL)
-
-        # Initialize Pinecone
-        pc = Pinecone(api_key=self.config.PINECONE_API_KEY)
-
-        # Check if index exists, create if not
-        available_indexes = pc.list_indexes().names()
-        if self.config.PINECONE_INDEX_NAME not in available_indexes:
-            self.logger.info(f"Index '{self.config.PINECONE_INDEX_NAME}' not found. Creating a new index...")
-
-            pc.create_index(
-                name=self.config.PINECONE_INDEX_NAME,
-                dimension=embedding_dim,
-                metric='cosine',
-                spec=ServerlessSpec(
-                    cloud=self.config.PINECONE_CLOUD,
-                    region=self.config.PINECONE_REGION
-                )
-            )
-            self.logger.info(f"Index '{self.config.PINECONE_INDEX_NAME}' created successfully.")
-
-        # Create loader for the records
-        loader = CustomJsonLoader(
-            records,
-            dataset_mapping_function=lambda item: Document(
-                page_content=item["markdown"] or "",
-                metadata={'url': item["url"], "title": item["title"]}
-            )
-        )
-
-        # Initialize embeddings with model-appropriate parameters
-        # Newer models don't support explicit dimensions parameter
-        if self.config.OPENAI_EMBEDDING_MODEL in ["text-embedding-3-small", "text-embedding-3-large"]:
-            embeddings = OpenAIEmbeddings(
-                api_key=self.config.OPENAI_API_KEY,
-                model=self.config.OPENAI_EMBEDDING_MODEL
-            )
-        else:
-            # Older models like text-embedding-ada-002 support dimensions
-            embeddings = OpenAIEmbeddings(
-                api_key=self.config.OPENAI_API_KEY,
-                model=self.config.OPENAI_EMBEDDING_MODEL,
-                dimensions=embedding_dim
-            )
-
-        # Load documents
-        documents = loader.load()
-        self.logger.info(f"Loaded {len(documents)} documents.")
-
-        # Split text into smaller chunks based on tokens
-        from app.utils.text_splitters import TokenTextSplitter
-        text_splitter = TokenTextSplitter(
-            chunk_size=self.config.CHUNK_SIZE,  # This should now be in tokens
-            chunk_overlap=self.config.CHUNK_OVERLAP,  # This should now be in tokens
-            model_name=self.config.OPENAI_EMBEDDING_MODEL
-        )
-        docs = text_splitter.split_documents(documents)
-        self.last_chunks = docs  # Store for reporting
-        self.logger.info(f"Split into {len(docs)} chunks based on tokens.")
-
-        # Store in Pinecone
-        try:
-            self.logger.info("Uploading documents to Pinecone...")
-            vectorstore = PineconeVectorStore.from_documents(
-                docs,
-                index_name=self.config.PINECONE_INDEX_NAME,
-                pinecone_api_key=self.config.PINECONE_API_KEY,
-                embedding=embeddings
-            )
-            self.logger.info(
-                f"Successfully indexed {len(docs)} document chunks to Pinecone index '{self.config.PINECONE_INDEX_NAME}'.")
-            return True
-        except Exception as e:
-            self.logger.error(f"Error indexing to Pinecone: {str(e)}")
-            return False
-
-    def run_full_process(self):
-        """Initialize the Google Drive API and validate settings"""
-        try:
-            # Validate credentials and API access
-            files = self.list_folder_contents()
+    def _get_file_type(self, mime_type: str) -> str:
+        """
+        Get a human-readable file type from MIME type.
+        
+        Args:
+            mime_type: MIME type of the file
             
-            self.logger.info(f"Successfully connected to Google Drive API, found {len(files)} accessible files")
-            return {
-                "status": "success", 
-                "message": f"Successfully connected to Google Drive API, found {len(files)} accessible files",
-                "files_count": len(files)
-            }
+        Returns:
+            Human-readable file type
+        """
+        mime_to_type = {
+            'application/vnd.google-apps.presentation': 'presentation',
+            'application/vnd.google-apps.document': 'document',
+            'application/vnd.google-apps.spreadsheet': 'spreadsheet',
+            'application/pdf': 'pdf',
+            'image/jpeg': 'image',
+            'image/png': 'image',
+            'text/plain': 'text'
+        }
+        return mime_to_type.get(mime_type, 'unknown')
 
-        except Exception as e:
-            self.logger.error(f"Error initializing Google Drive API: {str(e)}")
-            return {"status": "error", "message": str(e)}
-            
+    def process_drive(self, folder_id: str = None) -> List[Dict[str, Any]]:
+        """Process all supported files from Google Drive"""
+        self.logger.info("Fetching and processing Google Drive documents...")
+
+        # Get folder_id from config if available, otherwise use None (root)
+        folder_id = folder_id or getattr(self.config, 'GOOGLE_DRIVE_FOLDER_ID', None)
+        recursive = getattr(self.config, 'GOOGLE_DRIVE_RECURSIVE', True)
+
+        files = self.get_supported_files(folder_id, recursive)
+        records = []
+
+        for file in tqdm(files):
+            try:
+                self.logger.info(f"Processing {file['name']}...")
+
+                # Download and extract content
+                content = self.download_and_extract_content(file)
+
+                # Skip if content extraction failed
+                if not content.strip():
+                    self.logger.warning(f"Empty content for file: {file['name']}")
+                    continue
+
+                # Add file title if not in content
+                if file['name'] not in content:
+                    content = f"# {file['name']}\n\n{content}"
+
+                # Summarize if needed
+                if self.config.SUMMARIZE_CONTENT:
+                    content = self.condense_content_using_llm(content)
+
+                # Create record
+                record = {
+                    'title': file['name'],
+                    'url': file.get('webViewLink', ''),
+                    'source': 'Google Drive',
+                    'type': self._get_file_type(file['mimeType']),
+                    'client': file['potential_client'],
+                    'markdown': content
+                }
+                records.append(record)
+
+            except Exception as ex:
+                self.logger.error(f"Could not process {file['name']} due to: {ex}")
+
+        self.logger.info(f"Prepared {len(records)} document records!")
+
+        # Save intermediate file if needed
+        if self.config.SAVE_INTERMEDIATE_FILES:
+            processed_file = os.path.join(self.config.OUTPUT_DIR, "drive_processed.json")
+            with open(processed_file, 'w') as f:
+                json.dump(records, f, indent=2)
+
+        return records
+
     def get_google_drive_files(self) -> Dict[str, Any]:
         """Get list of indexed Google Drive files"""
         try:
