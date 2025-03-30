@@ -9,6 +9,7 @@ from app.config.chat_config import ChatConfig, chat_config
 from app.services.enhancement_service import enhancement_service
 from app.utils.text_splitters import TokenTextSplitter
 from app.utils.vectorstore_client import VectorStoreClient
+from langchain.schema import Document
 
 
 class ContentProcessor:
@@ -62,7 +63,8 @@ class ContentProcessor:
                 "error": str(e)
             }
 
-    def prepare_documents_for_indexing(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def prepare_documents_for_indexing(self, records: List[Dict[str, Any]]) \
+                                                -> List[Document]:
         """
         Prepare documents for indexing by splitting content into chunks and adding metadata.
         
@@ -70,7 +72,7 @@ class ContentProcessor:
             records: List of content records with title, url, and markdown
             
         Returns:
-            List of processed documents ready for indexing
+            List of Document objects ready for indexing
         """
         docs = []
         # Extract keywords from QA content once for all chunks
@@ -137,15 +139,15 @@ class ContentProcessor:
                 # Create embedding prompt
                 optimized_text = self.enhancement_service.create_embedding_prompt(chunk, metadata)
 
-                doc = {
-                    "page_content": optimized_text,
-                    "metadata": metadata
-                }
+                doc = Document(
+                    page_content=optimized_text,
+                    metadata=metadata
+                )
                 docs.append(doc)
 
         return docs
 
-    def index_to_vector_store(self, records: List[Dict[str, Any]]) -> bool:
+    def index_to_vector_store(self, docs: List[Document]) -> bool:
         """
         Go through each configured vector store (e.g. Pinecone, Neon, etc.) and index the documents
         """
@@ -153,6 +155,6 @@ class ContentProcessor:
         for chat_model_config in chat_config.chat_model_configs.values():
             vector_store_config = chat_model_config.vector_store_config
             vector_store_client: VectorStoreClient = VectorStoreClient.get_vector_store_client(vector_store_config)
-            success &= vector_store_client.index_to_vector_store(chat_model_config, records)
+            success &= vector_store_client.index_to_vector_store(chat_model_config, docs)
 
         return success

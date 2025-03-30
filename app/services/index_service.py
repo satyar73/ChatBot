@@ -88,7 +88,7 @@ class IndexService:
             if recursive is not None:
                 self.gdrive_indexer.config.GOOGLE_DRIVE_RECURSIVE = recursive
             if enhanced_slides is not None:
-                self.gdrive_indexer.config.ENHANCED_SLIDES = enhanced_slides
+                self.gdrive_indexer.config.USE_ENHANCED_SLIDES = enhanced_slides
             
             # Use asyncio to run the document preparation in a separate thread
             records = await asyncio.to_thread(self.gdrive_indexer.prepare_drive_documents)

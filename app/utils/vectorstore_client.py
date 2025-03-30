@@ -3,11 +3,10 @@ import os
 import time
 from typing import List, Dict, Any, Optional
 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.docstore.document import Document
 from langchain_openai import OpenAIEmbeddings
 from pinecone import Pinecone, ServerlessSpec
 from langchain_pinecone import PineconeVectorStore
+from langchain.schema import Document
 
 from app.config.chat_config import chat_config
 from app.config.chat_model_config import ChatModelConfig
@@ -25,7 +24,7 @@ class VectorStoreClient:
         self.config = chat_config
         self.enhancement_service = enhancement_service
 
-    def index_to_vector_store(self, chat_model_config: ChatModelConfig, records: List[Dict[str, Any]]) -> bool:
+    def index_to_vector_store(self, chat_model_config: ChatModelConfig, docs: List[Document]) -> bool:
         pass
 
     def get_index_info(self) -> Dict:
@@ -63,24 +62,24 @@ class PineconeClient(VectorStoreClient):
 
     def index_to_vector_store(self, 
                               chat_model_config: ChatModelConfig, 
-                              records: List[Dict[str, Any]]) -> bool:
+                              docs: List[Document]) -> bool:
         """
-        Index content records to Pinecone vector database.
+        Index documents to Pinecone vector database.
         
         Args:
             chat_model_config: Configuration for the chat model to use for indexing, including embedding model and dimensionality
-            records: List of enhanced content records with title, url, and markdown
+            docs: List of Document objects ready for indexing
             
         Returns:
             True if indexing was successful, False otherwise
         """
         try:
-            # If no records, return success
-            if not records:
-                self.logger.warning("No records to index")
+            # If no documents, return success
+            if not docs:
+                self.logger.warning("No documents to index")
                 return True
 
-            self.logger.info(f"Indexing {len(records)} records to Pinecone index "
+            self.logger.info(f"Indexing {len(docs)} document chunks to Pinecone index "
                              f"'{self._pinecone_config.index_name}'")
 
             # Initialize Pinecone
@@ -114,72 +113,6 @@ class PineconeClient(VectorStoreClient):
                 time.sleep(10)
             else:
                 self.logger.info(f"Using existing Pinecone index: {self._pinecone_config.index_name}")
-
-            # Prepare documents
-            docs = []
-            for i, record in enumerate(records):
-                # Check if record has markdown content
-                if 'markdown' not in record:
-                    self.logger.warning(f"Record {i} missing 'markdown' field: {record}")
-                    continue  # Skip records without markdown
-
-                # Split content into chunks
-                if record.get('type') == 'qa_pair':
-                    # For Q&A content, don't split questions from answers
-                    chunks = [record['markdown']]
-                else:
-                    # Define special technical terms to preserve
-                    special_terms = [
-                        "advanced attribution multiplier",
-                        "attribution multiplier",
-                        "marketing mix modeling",
-                        # Add other multi-word technical terms
-                    ]
-
-                    # Create a custom separator pattern that preserves these terms
-                    separators = ["\n\n", "\n", ". ", " ", ""]
-
-                    # For technical content, use smaller chunks with more overlap
-                    if any(term in record['markdown'].lower() for term in special_terms):
-                        text_splitter = RecursiveCharacterTextSplitter(
-                            chunk_size=self.config.CHUNK_SIZE // 2,  # Smaller chunks for technical content
-                            chunk_overlap=self.config.CHUNK_OVERLAP * 2,  # More overlap
-                            separators=separators
-                        )
-                    else:
-                        text_splitter = RecursiveCharacterTextSplitter(
-                            chunk_size=self.config.CHUNK_SIZE,
-                            chunk_overlap=self.config.CHUNK_OVERLAP,
-                            separators=separators
-                        )
-                    chunks = text_splitter.split_text(record['markdown'])
-
-                # Create documents with metadata
-                for j, chunk in enumerate(chunks):
-                    # Get attribution metadata
-                    attribution_metadata = self.enhancement_service.enrich_attribution_metadata(chunk)
-
-                    # Merge with standard metadata
-                    metadata = {
-                        "title": record['title'],
-                        "url": record['url'],
-                        "chunk": j,
-                        "source": f"{record.get('type', 'content')}"
-                    }
-                    metadata.update(attribution_metadata)
-
-                    # Add keywords if available
-                    if 'keywords' in record:
-                        metadata["keywords"] = record['keywords']
-
-                    # Create embedding prompt
-                    optimized_text = self.enhancement_service.create_embedding_prompt(chunk, metadata)
-
-                    doc = Document(
-                        page_content=optimized_text,
-                        metadata=metadata
-                    )
-                    docs.append(doc)
 
             # Index documents
             self.logger.info(f"Indexing {len(docs)} document chunks to Pinecone...")
