@@ -159,7 +159,8 @@ class ResponseStrategy:
         agent = self.agent_manager.get_agent(
             chat_model_config=chat_model_config,
             agent_type=agent_type,
-            custom_system_prompt=system_prompt
+            custom_system_prompt=system_prompt,
+            query=query
         )
         
         # Execute the agent
@@ -314,6 +315,7 @@ class ResponseStrategy:
         # Get the RAG agent with the appropriate configuration
         return self.agent_manager.get_agent(
             chat_model_config=chat_model_config,
+            query=query,
             agent_type="rag",
             custom_system_prompt=custom_system_prompt,
             prompt_style=prompt_style

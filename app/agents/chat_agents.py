@@ -503,7 +503,7 @@ class AgentManager:
             self._rag_agent = self._configure_rag_agent(
                 chat_model_config=chat_model_config,
                 custom_system_prompt=None,
-                query=None
+                query=query
             )
         return self._rag_agent
 
