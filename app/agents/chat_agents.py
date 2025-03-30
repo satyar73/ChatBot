@@ -458,7 +458,8 @@ class AgentManager:
         """Get or lazy-initialize the default RAG-enabled agent."""
         if self._rag_agent is None:
             self.logger.debug("Initializing RAG agent")
-            self._rag_agent = self._configure_rag_agent(chat_model_config=None, query=None)
+            default_config = ChatModelConfig()  # Create default config
+            self._rag_agent = self._configure_rag_agent(chat_model_config=default_config, query=None)
         return self._rag_agent
 
     @property
