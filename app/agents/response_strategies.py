@@ -4,6 +4,7 @@ Response strategies for handling different types of chat queries.
 from typing import Dict, List, Tuple, Any, Optional, Union, TYPE_CHECKING
 import re
 
+from app.config import prompt_config
 from app.config.chat_model_config import ChatModelConfig
 from app.models.chat_models import ChatHistory, Source
 from langchain.agents import AgentExecutor
@@ -126,7 +127,6 @@ class ResponseStrategy:
         response, queries_tried = await self.chat_service.enhancement_service.try_alternative_queries(
             original_query=query,
             process_function=process_query,
-            is_adequate_function=None,  # Use default adequacy check
             history=history,
             max_attempts=max_attempts
         )
@@ -138,8 +138,7 @@ class ResponseStrategy:
                                   query: str,
                                   agent_name: str,
                                   chat_history: List,
-                                  system_prompt: str = None,
-                                  prompt_style: str = "default") -> Tuple[Dict[str, Any], List[str]]:
+                                  system_prompt: str = None) -> Tuple[Dict[str, Any], List[str]]:
         """
         Invoke an agent with fallback to standard agent if needed.
         
@@ -149,7 +148,6 @@ class ResponseStrategy:
             agent_name: The name of the agent to use ("rag", "standard", or "database")
             chat_history: The chat history
             system_prompt: Optional system prompt
-            prompt_style: The prompt style to use
             
         Returns:
             Tuple of (agent_response, queries_tried)
@@ -161,8 +159,7 @@ class ResponseStrategy:
         agent = self.agent_manager.get_agent(
             chat_model_config=chat_model_config,
             agent_type=agent_type,
-            custom_system_prompt=system_prompt,
-            prompt_style=prompt_style
+            custom_system_prompt=system_prompt
         )
         
         # Execute the agent
@@ -319,8 +316,7 @@ class ResponseStrategy:
             chat_model_config=chat_model_config,
             agent_type="rag",
             custom_system_prompt=custom_system_prompt,
-            prompt_style=prompt_style,
-            query=query
+            prompt_style=prompt_style
         )
 
     async def _get_rag_response(self,
