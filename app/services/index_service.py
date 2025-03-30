@@ -7,7 +7,7 @@ from app.services.shopify_indexer import ShopifyIndexer
 from app.services.gdrive_indexer import GoogleDriveIndexer
 from app.services.content_processor import ContentProcessor
 from app.utils.logging_utils import get_logger
-from app.utils.vectorstore_client import VectorStoreClient, get_vector_store_client
+from app.utils.vectorstore_client import VectorStoreClient
 
 class IndexService:
     def __init__(self):
@@ -130,7 +130,7 @@ class IndexService:
             ret_val = []
             for chat_model_config in chat_config.chat_model_configs.values():
                 vector_store_config = chat_model_config.vector_store_config
-                vector_store_client: VectorStoreClient = get_vector_store_client(vector_store_config)
+                vector_store_client: VectorStoreClient = VectorStoreClient.get_vector_store_client(vector_store_config)
                 ret_val.append(vector_store_client.get_index_info())
         except Exception as e:
             print(f"Error in get_index_info: {str(e)}")
@@ -156,7 +156,7 @@ class IndexService:
 
             for chat_model_config in chat_config.chat_model_configs.values():
                 vector_store_config = chat_model_config.vector_store_config
-                vector_store_client: VectorStoreClient = get_vector_store_client(vector_store_config)
+                vector_store_client: VectorStoreClient = VectorStoreClient.get_vector_store_client(vector_store_config)
                 ret_val.append(vector_store_client.delete_index())
 
             return ret_val

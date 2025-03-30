@@ -18,6 +18,9 @@ from app.utils.logging_utils import get_logger
 
 
 class VectorStoreClient():
+    """
+    VectorStoreClient is an interface class for performing CURL operations on various vector stores such as Pinecone, Neon, etc
+    """
     def __init__(self):
         self.logger = get_logger(__name__, "DEBUG")
         self.config = chat_config
@@ -34,6 +37,18 @@ class VectorStoreClient():
 
     def get_vector_count(self) -> int:
         pass
+
+    @staticmethod
+    def get_vector_store_client(vector_store_config: VectorStoreConfig):
+        """
+        Factory method to get the appropriate vector store client.
+        """
+        vector_store_client = None
+        if vector_store_config.vector_store_type == VectorStoreType.PINECONE:
+            vector_store_client = PineconeClient(vector_store_config)
+        elif vector_store_config.vector_store_type == VectorStoreType.NEON:
+            vector_store_client = NeonClient(vector_store_config)
+        return vector_store_client
 
 
 class PineconeClient(VectorStoreClient):
@@ -290,12 +305,4 @@ class NeonClient(VectorStoreClient):
         #TODO implement later
         return 0
 
-
-def get_vector_store_client(vector_store_config: VectorStoreConfig):
-    vector_store_client = None
-    if vector_store_config.vector_store_type == VectorStoreType.PINECONE:
-        vector_store_client = PineconeClient(vector_store_config)
-    elif vector_store_config.vector_store_type == VectorStoreType.NEON:
-        vector_store_client = NeonClient(vector_store_config)
-    return vector_store_client
 

@@ -20,7 +20,7 @@ from googleapiclient.discovery import build
 
 from app.config.chat_config import ChatConfig, chat_config
 from app.services.enhancement_service import enhancement_service
-from app.utils.vectorstore_client import VectorStoreClient, get_vector_store_client
+from app.utils.vectorstore_client import VectorStoreClient
 
 class CustomJsonLoader(BaseLoader):
     """Custom loader for JSON data"""
@@ -533,7 +533,7 @@ class GoogleDriveIndexer:
                     total_vector_count = 0
                     for chat_model_config in chat_config.chat_model_configs.values():
                         vector_store_config = chat_model_config.vector_store_config
-                        vector_store_client: VectorStoreClient = get_vector_store_client(vector_store_config)
+                        vector_store_client: VectorStoreClient = VectorStoreClient.get_vector_store_client(vector_store_config)
                         total_vector_count += vector_store_client.get_vector_count()
                     
                     #TODO we should not sum the vector count across two different indexes; UI need to pass the index_name

@@ -7,7 +7,7 @@ from typing import List, Dict, Any, Optional
 from app.config.chat_config import ChatConfig, chat_config
 from app.services.enhancement_service import enhancement_service
 from app.utils.logging_utils import get_logger
-from app.utils.vectorstore_client import VectorStoreClient, get_vector_store_client
+from app.utils.vectorstore_client import VectorStoreClient
 
 
 class ContentProcessor:
@@ -56,7 +56,7 @@ class ContentProcessor:
         success = True
         for chat_model_config in chat_config.chat_model_configs.values():
             vector_store_config = chat_model_config.vector_store_config
-            vector_store_client: VectorStoreClient = get_vector_store_client(vector_store_config)
+            vector_store_client: VectorStoreClient = VectorStoreClient.get_vector_store_client(vector_store_config)
             success &= vector_store_client.index_to_vector_store(chat_model_config, records)
 
         return success
