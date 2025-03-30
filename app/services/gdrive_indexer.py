@@ -12,18 +12,15 @@ import PyPDF2
 import pptx
 from langchain.docstore.document import Document
 from langchain.document_loaders.base import BaseLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from pinecone import Pinecone, ServerlessSpec
-from langchain_pinecone import PineconeVectorStore
-from langchain_openai import OpenAIEmbeddings
 
 # Import from your existing project structure
 import requests
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
-from app.config.chat_config import ChatConfig
+from app.config.chat_config import ChatConfig, chat_config
 from app.services.enhancement_service import enhancement_service
+from app.utils.vectorstore_client import VectorStoreClient
 
 # Define a type for the file/folder item
 class DriveItem(TypedDict):
@@ -66,7 +63,7 @@ class GoogleDriveIndexer:
 
     def __init__(self, config: Optional[ChatConfig] = None):
         """Initialize the indexer with configuration"""
-        self.config = config or ChatConfig()
+        self.config = config or chat_config
         self.last_chunks = []  # Store chunks for reporting
 
         # Validate configuration
@@ -717,6 +714,23 @@ class GoogleDriveIndexer:
 
         return records
 
+    def run_full_process(self):
+        """Initialize the Google Drive API and validate settings"""
+        try:
+            # Validate credentials and API access
+            files = self.list_folder_contents()
+            
+            self.logger.info(f"Successfully connected to Google Drive API, found {len(files)} accessible files")
+            return {
+                "status": "success", 
+                "message": f"Successfully connected to Google Drive API, found {len(files)} accessible files",
+                "files_count": len(files)
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error initializing Google Drive API: {str(e)}")
+            return {"status": "error", "message": str(e)}
+
     def get_google_drive_files(self) -> Dict[str, Any]:
         """Get list of indexed Google Drive files"""
         try:
@@ -746,17 +760,19 @@ class GoogleDriveIndexer:
             else:
                 # Check if we can query the vector store directly
                 try:
-                    pc = Pinecone(api_key=self.config.PINECONE_API_KEY)
+                    total_vector_count = 0
+                    for chat_model_config in chat_config.chat_model_configs.values():
+                        vector_store_config = chat_model_config.vector_store_config
+                        vector_store_client: VectorStoreClient = VectorStoreClient.get_vector_store_client(vector_store_config)
+                        total_vector_count += vector_store_client.get_vector_count()
                     
-                    if self.config.PINECONE_INDEX_NAME in pc.list_indexes().names():
-                        index = pc.Index(self.config.PINECONE_INDEX_NAME)
-                        stats = index.describe_index_stats()
-                        
+                    #TODO we should not sum the vector count across two different indexes; UI need to pass the index_name
+                    if total_vector_count > 0:
                         return {
                             "status": "success",
                             "files": [],
                             "count": 0,
-                            "vector_count": stats.total_vector_count,
+                            "vector_count": total_vector_count,
                             "message": "Drive file list not available, but vectors are in the index"
                         }
                 except Exception as e:

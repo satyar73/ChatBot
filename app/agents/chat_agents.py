@@ -8,6 +8,7 @@ from langchain_core.prompts import MessagesPlaceholder
 from langchain.callbacks.base import BaseCallbackHandler
 from typing_extensions import Optional
 
+from app.config.chat_model_config import ChatModelConfig
 from app.tools.gpt_tools import ToolManager
 from app.config.chat_config import ChatConfig
 from app.services.enhancement_service import enhancement_service
@@ -402,56 +403,42 @@ class AgentManager:
         self.logger = get_logger(f"{__name__}.AgentManager", "DEBUG")
         self.logger.info("AgentManager initialized")
 
-    def get_rag_agent(self, custom_system_prompt=None,
+    def get_rag_agent(self, chat_model_config: ChatModelConfig, custom_system_prompt=None,
                       expected_answer=None, query=None) -> AgentExecutor:
         """
         Get or create a RAG-enabled agent with optional custom system prompt.
         
         Args:
-            custom_system_prompt: Optional custom system prompt to override default
-            expected_answer: Optional expected answer to include as a hint
-            query: Optional user query to configure retriever filters
+            chat_model_config: Configuration for the chat model and vector store
+            custom_system_prompt: Optional custom system prompt
+            expected_answer: Optional expected answer to enhance the prompt
+            query: Optional query string for metadata filtering
             
         Returns:
-            Agent executor configured for RAG
+            Configured RAG agent
         """
-        # If we have an expected answer, incorporate it into the system prompt
+        # Enhance system prompt with expected answer if provided
         if expected_answer:
-            self.logger.debug("Adding expected answer to RAG agent system "
-                              "prompt with strong anti-verbatim guidance")
-
-            # Start with either the custom prompt or the default
-            base_prompt = custom_system_prompt or self.config.RAG_SYSTEM_PROMPT
-
-            # Extract key concepts from the expected answer without including
-            # the full text This helps prevent verbatim copying while still
-            # providing guidance
-
-            # Use the enhancement service to enhance the prompt with expected answer
-            enhanced_prompt = (
-                enhancement_service.enhance_prompt_with_expected_answer(
-                                                    base_prompt,
-                                                    expected_answer))
-
+            enhanced_prompt = self._enhance_prompt_with_answer(custom_system_prompt, expected_answer)
             custom_system_prompt = enhanced_prompt
             self.logger.info("Enhanced system prompt with expected answer")
 
         if custom_system_prompt or query:
             self.logger.debug(f"Creating RAG agent with custom system"
                               f"prompt or query-specific retriever")
-            return self._configure_rag_agent(custom_system_prompt, query)
+            return self._configure_rag_agent(chat_model_config, custom_system_prompt, query)
         
         if self._rag_agent is None:
             self.logger.debug("Initializing RAG agent with default system prompt")
-            self._rag_agent = self._configure_rag_agent(query=None)
+            self._rag_agent = self._configure_rag_agent(chat_model_config, query=None)
         return self._rag_agent
-        
+
     @property
-    def rag_agent(self):
+    def rag_agent(self) -> AgentExecutor:
         """Get or lazy-initialize the default RAG-enabled agent."""
         if self._rag_agent is None:
             self.logger.debug("Initializing RAG agent")
-            self._rag_agent = self._configure_rag_agent(query=None)
+            self._rag_agent = self._configure_rag_agent(chat_model_config=None, query=None)
         return self._rag_agent
 
     @property
@@ -470,17 +457,18 @@ class AgentManager:
             self._database_agent = self._configure_database_agent()
         return self._database_agent
 
-    def _configure_rag_agent(self, custom_system_prompt=None,
-                              query=None) -> AgentExecutor:
+    def _configure_rag_agent(self, chat_model_config: ChatModelConfig, custom_system_prompt=None,
+                            query=None) -> AgentExecutor:
         """
         Configure and return a RAG-enabled agent.
         
         Args:
-            custom_system_prompt: Optional custom system prompt to override default
-            query: Optional user query to configure retriever filters
+            chat_model_config: Configuration for the chat model and vector store
+            custom_system_prompt: Optional custom system prompt
+            query: Optional query string for metadata filtering
             
         Returns:
-            Agent executor configured for RAG
+            Configured RAG agent
         """
         self.logger.debug("Configuring RAG agent with prompt")
         llm = AgentFactory.create_llm()
@@ -489,10 +477,10 @@ class AgentManager:
         if query:
             self.logger.info(f"Configuring retriever with query-specific"
                               f"filters for: {query}")
-            retriever_tool = ToolManager.get_retriever_tool(query)
+            retriever_tool = ToolManager.get_retriever_tool(chat_model_config, query)
             tools = [retriever_tool, ToolManager.get_current_time]
         else:
-            tools = ToolManager.get_rag_tools()
+            tools = ToolManager.get_rag_tools(chat_model_config)
             
         for tool in tools:
             if not hasattr(tool, "callbacks") or tool.callbacks is None:
@@ -580,7 +568,8 @@ class AgentManager:
         self.logger.debug("Creating database agent executor")
         return AgentFactory.create_agent_executor(agent, tools)
 
-    def get_agent(self, agent_type: str, custom_system_prompt: str = None) -> Optional[AgentExecutor]:
+    def get_agent(self, chat_model_config: ChatModelConfig, agent_type: str, 
+                  custom_system_prompt: str = None) -> Optional[AgentExecutor]:
         """
         Get an agent by type, with optional custom system prompt.
         
@@ -593,7 +582,7 @@ class AgentManager:
         """
         # For RAG agent, we need special handling because of the get_rag_agent method
         if agent_type == "rag":
-            return self.get_rag_agent(custom_system_prompt=custom_system_prompt)
+            return self.get_rag_agent(chat_model_config, custom_system_prompt=custom_system_prompt)
         
         # For other agents, configure with custom prompt if provided
         if custom_system_prompt:

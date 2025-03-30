@@ -1,0 +1,7 @@
+*.pyc
+/frontend/node_modules
+/logs
+/.vscode
+/data/cache
+frontend/package-lock.json
+.DS_Store

@@ -7,11 +7,13 @@ from langchain.agents.agent_toolkits import create_retriever_tool
 from langchain_core.prompts import PromptTemplate
 from langchain_pinecone import PineconeVectorStore
 from langchain_openai import OpenAIEmbeddings
-from app.config.chat_config import ChatConfig
+from app.config.chat_config import chat_config
+from app.config.chat_model_config import ChatModelConfig
+from app.config.llm_proxy_config import LlmProxyType
 
 class ToolManager:
     """Manager for all tools used by the agent."""
-    config = ChatConfig()
+    config = chat_config
 
     @staticmethod
     @tool
@@ -68,48 +70,68 @@ class ToolManager:
             return "I don't have specific data for that query. Please try a more specific question about products, revenue, customers, or order values."
 
     @classmethod
-    def configure_retriever(cls, query=None):
-        """Configure and return a vector store retriever."""
-        embeddings = OpenAIEmbeddings(
-            model=cls.config.VECTOR_STORE_CONFIG["embedding_model"],
-            dimensions=cls.config.VECTOR_STORE_CONFIG["dimensions"]
-        )
+    def configure_retriever(cls, chat_model_config: ChatModelConfig, query=None):
+        """
+        Configure and return a vector store retriever.
+        
+        Args:
+            chat_model_config: Configuration for the chat model and vector store
+            query: Optional query string for metadata filtering
+        """
+        if (chat_model_config.llm_proxy_config == None 
+            or chat_model_config.llm_proxy_config.proxy_type == LlmProxyType.PORTKEY):
+            # should be using OpenAI
+            vector_store_config = chat_model_config.vector_store_config
 
-        vectorstore = PineconeVectorStore(
-            index_name=cls.config.VECTOR_STORE_CONFIG["index_name"],
-            embedding=embeddings
-        )
-        
-        # Set up metadata filters based on query content
-        search_kwargs = {
-            "k": cls.config.RETRIEVER_CONFIG["k"],
-            "fetch_k": cls.config.RETRIEVER_CONFIG["fetch_k"],
-            "lambda_mult": cls.config.RETRIEVER_CONFIG["lambda_mult"]
-        }
-        
-        # Apply filter based on query content
-        if query and "LaserAway" in query:
-            # Filter for client-specific content when LaserAway is mentioned
-            search_kwargs["filter"] = {
-                "type": "client",
-                "client": "LaserAway"
+            embeddings = OpenAIEmbeddings(
+                model=chat_model_config.model,
+                dimensions=vector_store_config.get_embedding_dimensions(model_name=chat_model_config.model)
+            )
+
+            vectorstore = PineconeVectorStore(
+                index_name=vector_store_config.index_name,
+                embedding=embeddings
+            )
+
+            # Set up metadata filters based on query content
+            search_kwargs = {
+                "k": cls.config.RETRIEVER_CONFIG["k"],
+                "fetch_k": cls.config.RETRIEVER_CONFIG["fetch_k"],
+                "lambda_mult": cls.config.RETRIEVER_CONFIG["lambda_mult"]
             }
+            
+            # Apply filter based on query content
+            if query and "LaserAway" in query:
+                # Filter for client-specific content when LaserAway is mentioned
+                search_kwargs["filter"] = {
+                    "type": "client",
+                    "client": "LaserAway"
+                }
+            else:
+                # Default filter for domain knowledge
+                search_kwargs["filter"] = {
+                    "type": "Domain Knowledge"
+                }
+
+            retriever = vectorstore.as_retriever(
+                search_type=cls.config.RETRIEVER_CONFIG["search_type"],
+                search_kwargs=search_kwargs
+            )
+            return retriever
         else:
-            # Default filter for domain knowledge
-            search_kwargs["filter"] = {
-                "type": "Domain Knowledge"
-            }
-
-        retriever = vectorstore.as_retriever(
-            search_type=cls.config.RETRIEVER_CONFIG["search_type"],
-            search_kwargs=search_kwargs
-        )
-        return retriever
+            #should be using Ollama
+            return None #TODO for now return None
 
     @classmethod
-    def get_retriever_tool(cls, query=None):
-        """Create and return a retriever tool."""
-        retriever = cls.configure_retriever(query)
+    def get_retriever_tool(cls, chat_model_config: ChatModelConfig, query=None):
+        """
+        Create and return a retriever tool.
+        
+        Args:
+            chat_model_config: Configuration for the chat model and vector store
+            query: Optional query string for metadata filtering
+        """
+        retriever = cls.configure_retriever(chat_model_config, query)
 
         return create_retriever_tool(
             retriever,
@@ -119,9 +141,9 @@ class ToolManager:
         )
 
     @classmethod
-    def get_rag_tools(cls):
+    def get_rag_tools(cls, chat_model_config: ChatModelConfig):
         """Get tools for RAG-enabled agent."""
-        return [cls.get_retriever_tool(), cls.get_current_time]
+        return [cls.get_retriever_tool(chat_model_config), cls.get_current_time]
 
     @classmethod
     def get_standard_tools(cls):

@@ -1,5 +1,9 @@
 import os
+from typing import Dict
 from dotenv import load_dotenv
+from app.config.chat_model_config import ChatModelConfig, CloudProvider
+from app.config.llm_proxy_config import LlmProxyConfig, LlmProxyType
+from app.config.vector_store_config import PineconeConfig
 from app.utils.other_utlis import load_feature_flags
 
 class ChatConfig:
@@ -48,12 +52,16 @@ class ChatConfig:
         self.PINECONE_CLOUD = os.getenv("PINECONE_CLOUD")
         self.PINECONE_REGION = os.getenv("PINECONE_REGION")
 
+        # Ollama Settings
+        self.OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
+        self.OLLAMA_EMBEDDING_MODEL = os.getenv("OLLAMA_MODEL")
+        self.OLLAMA_PINECONE_INDEX_NAME = os.getenv("OLLAMA_PINECONE_INDEX_NAME")
+
         # OpenAI Settings
         self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
         self.OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
         self.OPENAI_SUMMARY_MODEL = "gpt-3.5-turbo"
         self.EMBEDDING_CONTEXT_LENGTH = 8192
-
 
         # Processing Settings
         self.SUMMARIZE_CONTENT = False  # Set to True if you want to summarize content
@@ -84,12 +92,7 @@ class ChatConfig:
             "model": "gpt-4o"
         }
 
-        # Vector Store Configuration
-        self.VECTOR_STORE_CONFIG = {
-            "index_name": self.PINECONE_INDEX_NAME,
-            "embedding_model": self.OPENAI_EMBEDDING_MODEL,
-            "dimensions": 1536
-        }
+        self.chat_model_configs: Dict[str, ChatModelConfig] = self._get_model_configs()
 
         # Retriever Configuration
         self.RETRIEVER_CONFIG = {
@@ -239,3 +242,58 @@ class ChatConfig:
             missing_settings.append("OPENAI_API_KEY")
 
         return missing_settings
+    
+    def _get_model_configs(self) -> Dict[str, ChatModelConfig]:
+        llm_proxy_config = None
+        portkey_api_key = os.getenv("PORTKEY_API_KEY")
+        if portkey_api_key is not None:
+            llm_proxy_config = LlmProxyConfig(
+                proxy_type = LlmProxyType.PORTKEY,
+                url = "https://api.portkey.ai/v1/proxy", 
+                api_key = portkey_api_key, 
+                cache_ttl = int(os.getenv("PORTKEY_CACHE_TTL", "3600"))
+            )
+
+        chat_model_configs: Dict[str, ChatModelConfig] = {} # user can configure more than one models
+        if self.OPENAI_EMBEDDING_MODEL is not None:
+            if self.PINECONE_INDEX_NAME is None:
+                # we do need a vector store; if not found throw error
+                raise ValueError(f"Pinecone index name not found for OpenAI model '{self.PINECONE_INDEX_NAME}'")
+            
+            vector_store_config = PineconeConfig(
+                api_key = self.PINECONE_API_KEY,
+                index_name = self.PINECONE_INDEX_NAME,
+                cloud = self.PINECONE_CLOUD,
+                region = self.PINECONE_REGION)
+            
+            chat_model_configs[self.OPENAI_EMBEDDING_MODEL] = ChatModelConfig(
+                cloud_provider=CloudProvider.OpenAI,
+                model = self.OPENAI_EMBEDDING_MODEL,
+                vector_store_config = vector_store_config,
+                cloud_api_key = self.OPENAI_API_KEY,
+                llm_proxy_config = llm_proxy_config,
+                embedding_context_length = self.EMBEDDING_CONTEXT_LENGTH)
+
+        if self.OLLAMA_EMBEDDING_MODEL is not None:
+            if self.OLLAMA_PINECONE_INDEX_NAME is None:
+                # we do need a vector store; if not found throw error
+                raise ValueError(f"Pinecone index name not found for Ollama model '{self.PINECONE_INDEX_NAME}'")
+            
+            vector_store_config = PineconeConfig(
+                api_key = self.PINECONE_API_KEY,
+                index_name = self.OLLAMA_PINECONE_INDEX_NAME,
+                cloud = self.PINECONE_CLOUD,
+                region = self.PINECONE_REGION)
+            
+            chat_model_configs[self.OPENAI_EMBEDDING_MODEL] = ChatModelConfig(
+                cloud_provider=CloudProvider.Local,
+                model = self.OLLAMA_EMBEDDING_MODEL,
+                vector_store_config = vector_store_config,
+                cloud_api_key = None,
+                llm_proxy_config = llm_proxy_config,
+                embedding_context_length = self.EMBEDDING_CONTEXT_LENGTH
+            )
+        return chat_model_configs
+
+# Create a singleton instance
+chat_config = ChatConfig()
