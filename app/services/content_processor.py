@@ -38,24 +38,6 @@ class ContentProcessor:
         # Create output directory if needed
         os.makedirs(self.config.OUTPUT_DIR, exist_ok=True)
 
-    def process_records(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Process and enhance records before indexing.
-        
-        Args:
-            records: List of content records with title, url, and markdown
-            
-        Returns:
-            Enhanced records with additional metadata
-        """
-        # Extract keywords from QA content
-        keyword_map = self.enhancement_service.extract_keywords_from_qa()
-        
-        # Enhance records with keywords
-        enhanced_records = self.enhancement_service.enhance_records_with_keywords(records, keyword_map)
-        
-        return enhanced_records
-
     def prepare_documents_for_indexing(self, records: List[Dict[str, Any]]) -> List[Document]:
         """
         Prepare documents for indexing by splitting content into chunks and adding metadata.
@@ -67,6 +49,9 @@ class ContentProcessor:
             List of Document objects ready for indexing
         """
         docs = []
+        # Extract keywords from QA content once for all chunks
+        keyword_map = self.enhancement_service.extract_keywords_from_qa()
+        
         for i, record in enumerate(records):
             # Check if record has markdown content
             if 'markdown' not in record:
@@ -105,6 +90,9 @@ class ContentProcessor:
             for j, chunk in enumerate(chunks):
                 # Get attribution metadata
                 attribution_metadata = self.enhancement_service.enrich_attribution_metadata(chunk)
+                
+                # Enhance chunk with keywords
+                chunk_keywords = self.enhancement_service.enhance_chunk_with_keywords(chunk, keyword_map)
 
                 # Merge with standard metadata
                 metadata = {
@@ -118,9 +106,9 @@ class ContentProcessor:
                     metadata["type"] = record.get('type')
                     metadata["client"] = record.get('client')
 
-                # Add keywords if available
-                if 'keywords' in record:
-                    metadata["keywords"] = record['keywords']
+                # Add chunk-specific keywords
+                if chunk_keywords:
+                    metadata["keywords"] = chunk_keywords
 
                 # Create embedding prompt
                 optimized_text = self.enhancement_service.create_embedding_prompt(chunk, metadata)

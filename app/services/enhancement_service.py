@@ -632,6 +632,38 @@ class EnhancementService:
         self.logger.info(f"Enhanced {len(enhanced_records)} records with keywords")
         return enhanced_records
     
+    def enhance_chunk_with_keywords(self, chunk: str, keyword_map: Dict[str, List[str]]) -> List[str]:
+        """
+        Enhance a single chunk of text with relevant keywords.
+        
+        Args:
+            chunk: Text chunk to analyze
+            keyword_map: Dictionary mapping keywords to related terms
+            
+        Returns:
+            List of relevant keywords for the chunk
+        """
+        try:
+            # Convert chunk to lowercase for case-insensitive matching
+            chunk_lower = chunk.lower()
+            
+            # Initialize set to store unique keywords
+            chunk_keywords = set()
+            
+            # Check each keyword and its related terms
+            for keyword, related_terms in keyword_map.items():
+                # Check if keyword or any related term appears in the chunk
+                if (keyword.lower() in chunk_lower or 
+                    any(term.lower() in chunk_lower for term in related_terms)):
+                    chunk_keywords.add(keyword)
+            
+            # Convert set to sorted list for consistent output
+            return sorted(list(chunk_keywords))
+            
+        except Exception as e:
+            self.logger.error(f"Error enhancing chunk with keywords: {str(e)}")
+            return []
+
     def analyze_image_with_llm(self, image_content: bytes, prompt: str, model: str = "gpt-4o") -> Optional[str]:
         """
         Analyze image content using Vision API.
