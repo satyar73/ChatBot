@@ -9,13 +9,19 @@ from fastapi import (
     Query,
     UploadFile,
     File,
+    Form,
 )
+from typing import Optional
 
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 import os
 import tempfile
 
 from app.models.chat_models import Message, ResponseMessage
+from app.utils.logging_utils import get_logger
+
+# Create logger
+logger = get_logger(__name__)
 from app.models.chat_test_models import (
     ChatTestRequest,
     ChatTestResponse,
@@ -24,6 +30,7 @@ from app.models.chat_test_models import (
 from app.services.chat_service import ChatService
 from app.services.chat_test_service import ChatTestService
 from app.services.cache_service import chat_cache
+from app.services.slides_service import SlidesService
 
 # Initialize router
 router = APIRouter(prefix="/chat", tags=["chat", "cache"])
@@ -174,6 +181,36 @@ async def get_cache_stats():
         Dictionary with cache statistics
     """
     return chat_cache.get_cache_stats()
+    
+@router.get("/test-slides-connection")
+async def test_slides_connection():
+    """
+    Test endpoint to verify connectivity to the slides service.
+    
+    Returns:
+        Simple message confirming connectivity
+    """
+    return {"status": "ok", "message": "Connection to slides service is working"}
+
+@router.post("/test-slides-upload")
+async def test_slides_upload(
+    file: UploadFile = File(...),
+):
+    """
+    Test endpoint to verify file upload functionality.
+    
+    Args:
+        file: Test file to upload
+        
+    Returns:
+        Information about the uploaded file
+    """
+    return {
+        "status": "ok", 
+        "filename": file.filename,
+        "content_type": file.content_type,
+        "size": len(await file.read())
+    }
 
 
 @router.delete("/cache", response_model=Dict[str, Any], tags=["cache"])
@@ -214,3 +251,104 @@ async def clear_cache(older_than_days: Optional[int] = None):
             "older_than_days": older_than_days,
             "entries_cleared": entries_cleared
         }
+
+@router.post("/create-slides")
+async def create_slides(
+    file: UploadFile = File(...),
+    title: str = Form("Q&A Presentation"),
+    owner_email: Optional[str] = Form(None, description="Email address to transfer ownership to"),
+    author_name: Optional[str] = Form(None, description="Name of the author to display on the title slide"),
+    use_rag: bool = Form(True, description="Whether to use RAG to generate answers (defaults to True)")
+):
+    """
+    Create a Google Slides presentation from a CSV file containing questions.
+    If use_rag is True (default), answers will be generated using the RAG system.
+    Otherwise, answers from the CSV file will be used.
+    
+    Args:
+        file: CSV file with questions (and optional answers as fallback)
+        title: Title for the presentation
+        owner_email: Email address to transfer ownership to
+        author_name: Name of the author to display on the title slide
+        use_rag: Whether to generate answers using RAG (True) or use answers from CSV (False)
+        
+    Returns:
+        dict: Contains the presentation ID and URL
+    """
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(status_code=400, detail="File must be a CSV file")
+    
+    try:
+        # Save the uploaded file temporarily
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as temp_file:
+            content = await file.read()
+            temp_file.write(content)
+            temp_file_path = temp_file.name
+        
+        # Create slides
+        slides_service = SlidesService()
+        presentation_id = await slides_service.create_presentation_from_csv(
+            csv_path=temp_file_path,
+            title=title,
+            author_name=author_name,
+            use_rag=use_rag
+        )
+        
+        # Get the Drive service
+        drive_service = slides_service._get_drive_service()
+        
+        # Make the document accessible with a link
+        anyone_permission = {
+            'type': 'anyone',
+            'role': 'writer',
+            'allowFileDiscovery': False
+        }
+        
+        # Add the public permission
+        drive_service.permissions().create(
+            fileId=presentation_id,
+            body=anyone_permission,
+            fields='id'
+        ).execute()
+        
+        # Share with editor access if email is provided
+        # Note: We can't transfer ownership directly due to Google API limitations
+        # requiring user consent. Instead, we'll grant editor access.
+        if owner_email:
+            try:
+                # First try with editor role instead of owner
+                editor_permission = {
+                    'type': 'user',
+                    'role': 'writer',  # 'writer' provides edit access
+                    'emailAddress': owner_email
+                }
+                
+                # Add the permission to the file
+                drive_service.permissions().create(
+                    fileId=presentation_id,
+                    body=editor_permission,
+                    fields='id',
+                    sendNotificationEmail=True
+                ).execute()
+                
+                # Log the action
+                logger.info(f"Granted editor access to {owner_email} for presentation {presentation_id}")
+            except Exception as share_error:
+                # If sharing fails, log it but continue
+                logger.error(f"Error sharing presentation with {owner_email}: {str(share_error)}")
+                # Don't re-raise, as we want to return the presentation even if sharing fails
+        
+        # Clean up the temporary file
+        os.unlink(temp_file_path)
+        
+        return {
+            "presentation_id": presentation_id,
+            "url": f"https://docs.google.com/presentation/d/{presentation_id}",
+            "shared_with": owner_email if owner_email else None,  # Changed from owner to shared_with
+            "author": author_name if author_name else None,
+            "used_rag": use_rag,
+            "note": "The presentation is shared with anyone who has the link. If an email was provided, they've been granted editor access."
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

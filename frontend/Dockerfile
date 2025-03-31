@@ -37,3 +37,12 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
 
 CMD ["nginx", "-g", "daemon off;"]
+
+COPY docker-entrypoint-custom.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint-custom.sh
+
+# Install netcat for backend checking
+RUN apk add --no-cache netcat-openbsd
+
+# Use our custom entrypoint
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint-custom.sh"]

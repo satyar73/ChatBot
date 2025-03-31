@@ -45,7 +45,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./test_results:/app/test_results
-      - ./.env:/app/.env
+      - ./.env.docker:/app/.env
       - ./app:/app/app  # Mount app directory for live code changes
       - /Users/satyaramachandran/credentials:/app/credentials
     environment:
@@ -77,6 +77,8 @@ services:
         condition: service_healthy
     networks:
       - chatbot-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     # When using debug profile, make sure we depend on backend-debug instead
     profiles:
@@ -95,6 +97,8 @@ services:
         condition: service_healthy
     networks:
       - chatbot-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     profiles:
       - debug

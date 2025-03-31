@@ -76,12 +76,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Allow all origins (replace "*" with the specific origin of your Angular app if possible)
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # In production, replace with specific origins
     allow_credentials=True,
-    allow_methods=["GET", "POST", "DELETE"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -90,12 +90,10 @@ app.include_router(chat_routes.router)
 app.include_router(index_routes.router)
 app.include_router(test_routes.router)
 
-
 @app.get("/health")
 async def health_endpoint():
     logger.debug("Health endpoint called")
     return {"message": "Up and running!"}
-
 
 if __name__ == "__main__":
     import uvicorn
