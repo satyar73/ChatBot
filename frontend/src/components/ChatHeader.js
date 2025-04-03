@@ -5,11 +5,13 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import FormatSizeIcon from '@mui/icons-material/FormatSize';
 import { useChatContext } from '../context/ChatContext';
 import useChatActions from '../hooks/useChatActions';
+import { useEnvironment } from '../context/EnvironmentContext';
 
 const ChatHeader = () => {
   const { state } = useChatContext();
   const { responseMode, promptStyle, sessionId, systemPrompt } = state;
   const { setResponseMode, setPromptStyle, clearChat, toggleSystemPrompt } = useChatActions();
+  const { COMPANY_NAME } = useEnvironment();
   
   // State for prompt style menu
   const [anchorEl, setAnchorEl] = React.useState(null);
@@ -31,7 +33,7 @@ const ChatHeader = () => {
   return (
     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
       <Typography variant="h6">
-        Chat with Marketing Bot
+        Chat with {COMPANY_NAME} Marketing Bot
         {sessionId && (
           <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
             Session: {sessionId.substring(0, 8)}...

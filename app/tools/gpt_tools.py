@@ -73,14 +73,28 @@ class ToolManager:
     @classmethod
     def configure_retriever(cls, 
                             chat_model_config: ChatModelConfig, 
-                            query: Optional[str] = None):
+                            query: Optional[str] = None,
+                            content_type: Optional[str] = None,
+                            client_name: Optional[str] = None, 
+                            topic: Optional[str] = None):
         """
-        Configure and return a vector store retriever.
+        Configure and return a vector store retriever with enhanced filtering.
         
         Args:
             chat_model_config: Configuration for the chat model and vector store
-            query: Optional query string for metadata filtering
+            query: The main search query string
+            content_type: Optional content type to filter by ("article", "blog", "product", etc.)
+            client_name: Optional client name to filter by (e.g., "LaserAway")
+            topic: Optional topic to filter by ("attribution", "geo_testing", etc.)
         """
+        # Log all parameters for debugging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Configuring retriever with parameters:")
+        logger.info(f"  query: {query}")
+        logger.info(f"  content_type: {content_type}")
+        logger.info(f"  client_name: {client_name}")
+        logger.info(f"  topic: {topic}")
         if (chat_model_config.llm_proxy_config is None 
             or chat_model_config.llm_proxy_config.proxy_type == LlmProxyType.PORTKEY):
             # should be using OpenAI
@@ -93,28 +107,48 @@ class ToolManager:
 
             vectorstore = PineconeVectorStore(
                 index_name=vector_store_config.index_name,
-                embedding=embeddings
+                embedding=embeddings,
+                namespace=vector_store_config.namespace
             )
 
-            # Set up metadata filters based on query content
+            # Set up base search parameters
             search_kwargs: Dict[str, Any] = {
                 "k": cls.config.RETRIEVER_CONFIG["k"],
                 "fetch_k": cls.config.RETRIEVER_CONFIG["fetch_k"],
                 "lambda_mult": cls.config.RETRIEVER_CONFIG["lambda_mult"]
             }
             
-            # Apply filter based on query content
-            if query and "LaserAway" in query:
-                # Filter for client-specific content when LaserAway is mentioned
-                search_kwargs["filter"] = {
-                    "type": "client",
-                    "client": "LaserAway"
-                }
-            else:
-                # Default filter for domain knowledge
-                search_kwargs["filter"] = {
-                    "type": "Domain Knowledge"
-                }
+            # Build a more specific filter based on provided parameters
+            filter_dict = {}
+            
+            # Apply client filter if provided or detected in query
+            if client_name:
+                # Direct client name specification takes precedence
+                filter_dict["client"] = client_name
+                # Also set type to client for client-specific content
+                filter_dict["type"] = "client"
+            elif query and "LaserAway" in query:
+                # Backward compatibility with existing logic
+                filter_dict["client"] = "LaserAway"
+                filter_dict["type"] = "client"
+                
+            # Apply content type filter if provided
+            if content_type:
+                # Map content_type to source field in metadata
+                if content_type in ["article", "blog", "product", "client_case_study"]:
+                    filter_dict["source"] = content_type
+                    
+            # Apply topic filter if provided
+            if topic:
+                # Add topic to keywords field for filtering
+                filter_dict["keywords"] = topic
+                
+            # Set default filter if no specific filters were applied
+            if not filter_dict:
+                filter_dict["type"] = "Domain Knowledge"
+                
+            # Apply the constructed filter
+            search_kwargs["filter"] = filter_dict
 
             retriever = vectorstore.as_retriever(
                 search_type=cls.config.RETRIEVER_CONFIG["search_type"],
@@ -126,15 +160,25 @@ class ToolManager:
             return None #TODO for now return None
 
     @classmethod
-    def get_retriever_tool(cls, chat_model_config: ChatModelConfig, query=None):
+    def get_retriever_tool(cls, chat_model_config: ChatModelConfig, query=None, content_type=None, client_name=None, topic=None):
         """
-        Create and return a retriever tool.
+        Create and return a retriever tool with enhanced filtering capabilities.
         
         Args:
             chat_model_config: Configuration for the chat model and vector store
-            query: Optional query string for metadata filtering
+            query: Main search query string
+            content_type: Optional content type to filter by ("article", "blog", "product", etc.)
+            client_name: Optional client name to filter by (e.g., "LaserAway")
+            topic: Optional topic to filter by ("attribution", "geo_testing", etc.)
         """
-        retriever = cls.configure_retriever(chat_model_config, query)
+        # Configure retriever with all available parameters
+        retriever = cls.configure_retriever(
+            chat_model_config=chat_model_config, 
+            query=query,
+            content_type=content_type,
+            client_name=client_name,
+            topic=topic
+        )
 
         return create_retriever_tool(
             retriever,

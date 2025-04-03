@@ -28,8 +28,28 @@ testing, and managing document indexing.
 3. The application will be available at http://localhost
 
 ## Configuration
+
+### API Configuration
 The application is configured to proxy API requests to http://localhost:8005 where the backend should be running. You
 can modify this in the `package.json` file if your backend is running on a different port.
+
+### Environment Variables
+The application uses environment variables for configuration. These variables can be set in a `.env` file in the root directory of the frontend project.
+
+Available Environment Variables:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `REACT_APP_COMPANY_NAME` | The name of the company using the chatbot | "MSquared" |
+| `REACT_APP_API_BASE_URL` | The base URL for the backend API | "http://localhost:8005" |
+| `REACT_APP_ENABLE_DEBUG_MODE` | Whether to enable debug mode | false |
+
+Example .env file:
+```
+REACT_APP_COMPANY_NAME=MyCompany
+REACT_APP_API_BASE_URL=http://localhost:8005
+REACT_APP_ENABLE_DEBUG_MODE=false
+```
 
 ## Pages
 - **Chat**: Main chat interface with the marketing bot
@@ -111,8 +131,11 @@ src/
 │   ├── indexing/      # Components for indexing interfaces
 │   ├── testing/       # Components for testing interface
 │   └── ...            # Chat interface components
+├── config/            # Configuration files
+│   └── config.js      # Environment configuration
 ├── context/           # Context providers for state management
 │   ├── indexing/      # Indexing-specific contexts
+│   ├── EnvironmentContext.js # Environment variables provider
 │   ├── TestingContext.js
 │   └── ChatContext.js
 ├── hooks/             # Custom hooks for business logic

@@ -1,5 +1,6 @@
 """
 FastAPI routes for testing functionality with support for long-running operations.
+Also includes basic service health and diagnostic endpoints.
 """
 from fastapi import (
     APIRouter,
@@ -33,7 +34,7 @@ from app.services.background_jobs import (
 )
 
 # Initialize router
-router = APIRouter(prefix="/test", tags=["testing"])
+router = APIRouter(prefix="/test", tags=["testing", "diagnostics"])
 
 # Dependency to get the test service
 def get_test_service():
@@ -294,3 +295,52 @@ async def list_test_jobs():
         List of all test jobs and their status
     """
     return get_all_jobs()
+
+
+# Diagnostic endpoints
+@router.get("/status", tags=["diagnostics"])
+async def test_backend_status():
+    """
+    Check if the backend service is running correctly.
+    
+    Returns:
+        Basic status confirmation message
+    """
+    import platform
+    import sys
+    
+    return {
+        "status": "ok", 
+        "message": "Backend is up and running",
+        "version": {
+            "python": sys.version,
+            "platform": platform.platform(),
+        }
+    }
+
+@router.post("/upload", tags=["diagnostics"])
+async def test_file_upload(
+    file: UploadFile = File(...),
+):
+    """
+    Test endpoint to verify file upload functionality.
+    
+    Args:
+        file: Test file to upload
+        
+    Returns:
+        Information about the uploaded file
+    """
+    file_content = await file.read()
+    file_size = len(file_content)
+    
+    # Read the first few bytes of the file content for type verification
+    content_preview = file_content[:100].decode('utf-8', errors='replace') if file_size > 0 else ""
+    
+    return {
+        "status": "ok", 
+        "filename": file.filename,
+        "content_type": file.content_type,
+        "size": file_size,
+        "content_preview": content_preview if len(content_preview) < 100 else content_preview[:100] + "..."
+    }

@@ -21,13 +21,15 @@ class IndexService:
         self.gdrive_indexer = GoogleDriveIndexer()
         self.content_processor = ContentProcessor()
 
-    async def create_shopify_index(self, store: Optional[str] = None, summarize: Optional[bool] = None) -> Dict[str, Any]:
+    async def create_shopify_index(self, store: Optional[str] = None, summarize: Optional[bool] = None, 
+                            namespace: Optional[str] = None) -> Dict[str, Any]:
         """
         Create a vector index from Shopify content.
         
         Args:
             store: Optional Shopify store domain
             summarize: Optional boolean to enable content summarization
+            namespace: Optional namespace to use for this index
             
         Returns:
             Dict containing status and message
@@ -37,6 +39,14 @@ class IndexService:
             if store:
                 self.shopify_indexer.config.SHOPIFY_SHOP_DOMAIN = store
                 self.shopify_indexer.setup_shopify_indexer()
+            
+            # Update namespace if provided
+            if namespace:
+                for config in self.content_processor.config.chat_model_configs.values():
+                    if hasattr(config.vector_store_config, 'namespace'):
+                        old_namespace = config.vector_store_config._namespace
+                        config.vector_store_config._namespace = namespace
+                        self.logger.info(f"Changed namespace from '{old_namespace}' to '{namespace}'")
             
             # Fetch content from Shopify
             self.logger.debug("Fetching content from Shopify")
@@ -53,9 +63,15 @@ class IndexService:
             success = self.content_processor.index_to_vector_store(docs)
             
             if success:
+                namespace_info = ""
+                for config in self.content_processor.config.chat_model_configs.values():
+                    if hasattr(config.vector_store_config, 'namespace'):
+                        namespace_info = f" in namespace '{config.vector_store_config.namespace}'"
+                        break
+                
                 return {
                     "status": "success",
-                    "message": f"Successfully indexed {len(docs)} documents from Shopify"
+                    "message": f"Successfully indexed {len(docs)} documents from Shopify{namespace_info}"
                 }
             else:
                 return {
@@ -68,7 +84,8 @@ class IndexService:
             return {"status": "error", "message": str(e)}
 
     async def create_gdrive_index(self, folder_id: Optional[str] = None, recursive: Optional[bool] = None, 
-                                summarize: Optional[bool] = None, enhanced_slides: Optional[bool] = None) -> Dict[str, Any]:
+                                summarize: Optional[bool] = None, enhanced_slides: Optional[bool] = None,
+                                namespace: Optional[str] = None) -> Dict[str, Any]:
         """
         Create a vector index from Google Drive content.
         
@@ -77,6 +94,7 @@ class IndexService:
             recursive: Optional boolean to enable recursive folder processing
             summarize: Optional boolean to enable content summarization
             enhanced_slides: Optional boolean to use enhanced slide processing
+            namespace: Optional namespace to use for this index
             
         Returns:
             Dict containing status and message
@@ -89,6 +107,14 @@ class IndexService:
                 self.gdrive_indexer.config.GOOGLE_DRIVE_RECURSIVE = recursive
             if enhanced_slides is not None:
                 self.gdrive_indexer.config.USE_ENHANCED_SLIDES = enhanced_slides
+                
+            # Update namespace if provided
+            if namespace:
+                for config in self.content_processor.config.chat_model_configs.values():
+                    if hasattr(config.vector_store_config, 'namespace'):
+                        old_namespace = config.vector_store_config._namespace
+                        config.vector_store_config._namespace = namespace
+                        self.logger.info(f"Changed namespace from '{old_namespace}' to '{namespace}'")
             
             # Use asyncio to run the document preparation in a separate thread
             records = await asyncio.to_thread(self.gdrive_indexer.prepare_drive_documents)
@@ -109,9 +135,15 @@ class IndexService:
             success = self.content_processor.index_to_vector_store(docs)
             
             if success:
+                namespace_info = ""
+                for config in self.content_processor.config.chat_model_configs.values():
+                    if hasattr(config.vector_store_config, 'namespace'):
+                        namespace_info = f" in namespace '{config.vector_store_config.namespace}'"
+                        break
+                
                 return {
                     "status": "success",
-                    "message": f"Successfully indexed {len(docs)} documents from Google Drive"
+                    "message": f"Successfully indexed {len(docs)} documents from Google Drive{namespace_info}"
                 }
             else:
                 return {

@@ -80,7 +80,7 @@ class PineconeClient(VectorStoreClient):
                 return True
 
             self.logger.info(f"Indexing {len(docs)} document chunks to Pinecone index "
-                             f"'{self._pinecone_config.index_name}'")
+                             f"'{self._pinecone_config.index_name}' in namespace '{self._pinecone_config.namespace}'")
 
             # Initialize Pinecone
             pc = Pinecone(api_key=self._pinecone_config.api_key)
@@ -117,17 +117,18 @@ class PineconeClient(VectorStoreClient):
             # Index documents
             self.logger.info(f"Indexing {len(docs)} document chunks to Pinecone...")
 
-            # Store in Pinecone
+            # Store in Pinecone with namespace support
             vectorstore = PineconeVectorStore.from_documents(
                 docs,
                 index_name=self._pinecone_config.index_name,
                 pinecone_api_key=self._pinecone_config.api_key,
-                embedding=embeddings
+                embedding=embeddings,
+                namespace=self._pinecone_config.namespace
             )
 
             self.logger.info(
                 f"Successfully indexed {len(docs)} document chunks to "
-                f"Pinecone index '{self._pinecone_config.index_name}'.")
+                f"Pinecone index '{self._pinecone_config.index_name}' in namespace '{self._pinecone_config.namespace}'.")
             return True
 
         except Exception as e:

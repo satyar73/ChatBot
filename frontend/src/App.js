@@ -5,27 +5,34 @@ import TestingPage from './pages/TestingPage';
 import GoogleDriveIndexingPage from './pages/GoogleDriveIndexingPage';
 import ShopifyIndexingPage from './pages/ShopifyIndexingPage';
 import CreateSlidesPage from './pages/CreateSlidesPage';
-import NetworkTest from './pages/NetworkTest';
-import SimpleTest from './pages/SimpleTest';
+import CreateDocumentPage from './pages/CreateDocumentPage';
+import DiagnosticsPage from './pages/DiagnosticsPage';
 import AppLayout from './components/AppLayout';
+import { EnvironmentProvider } from './context/EnvironmentContext';
 
 function App() {
   console.log('App rendering with HashRouter');
   
   return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<AppLayout />}>
-          <Route index element={<ChatPage />} />
-          <Route path="testing" element={<TestingPage />} />
-          <Route path="gdrive-indexing" element={<GoogleDriveIndexingPage />} />
-          <Route path="shopify-indexing" element={<ShopifyIndexingPage />} />
-          <Route path="create-slides" element={<CreateSlidesPage />} />
-          <Route path="network-test" element={<NetworkTest />} />
-          <Route path="simple-test" element={<SimpleTest />} />
-        </Route>
-      </Routes>
-    </Router>
+    <EnvironmentProvider>
+      <Router>
+        <Routes>
+          <Route path="/" element={<AppLayout />}>
+            <Route index element={<ChatPage />} />
+            <Route path="testing" element={<TestingPage />} />
+            <Route path="gdrive-indexing" element={<GoogleDriveIndexingPage />} />
+            <Route path="shopify-indexing" element={<ShopifyIndexingPage />} />
+            <Route path="create-document" element={<CreateDocumentPage />} />
+            {/* Keeping route for backward compatibility, but pointing to new component */}
+            <Route path="create-slides" element={<CreateDocumentPage />} />
+            <Route path="diagnostics" element={<DiagnosticsPage />} />
+            {/* Redirects for backwards compatibility */}
+            <Route path="network-test" element={<DiagnosticsPage />} />
+            <Route path="simple-test" element={<DiagnosticsPage />} />
+          </Route>
+        </Routes>
+      </Router>
+    </EnvironmentProvider>
   );
 }
 

@@ -96,6 +96,24 @@ class EnhancementService:
             return None
             
         try:
+            # Note: We now use metadata from the Message object to pass the document question directly,
+            # but we keep the marker code for backward compatibility with old code paths
+            doc_service_marker = "<DOCUMENT_SERVICE_QUESTION>:"
+            if isinstance(question, str) and doc_service_marker in question:
+                # Extract the actual question after our marker
+                marker_index = question.find(doc_service_marker)
+                end_of_line_index = question.find("\n", marker_index)
+                
+                if end_of_line_index > marker_index:
+                    # Extract between marker and end of line
+                    extracted_question = question[marker_index + len(doc_service_marker):end_of_line_index].strip()
+                else:
+                    # Extract to the end if no newline found
+                    extracted_question = question[marker_index + len(doc_service_marker):].strip()
+                
+                self.logger.info(f"Extracted document service question from marker: '{extracted_question}'")
+                question = extracted_question
+
             # Look for exact match
             if question in self.qa_data:
                 return {
@@ -429,99 +447,115 @@ class EnhancementService:
             # Return the base prompt if there was an error
             return base_prompt
     
-    def extract_keywords_from_qa(self) -> Dict[str, List[str]]:
-        """
-        Extract keywords from Q&A pairs to use for tagging content.
-
-        Returns:
-            Dictionary mapping keywords to related terms
-        """
-        # Define key topic areas and related terms
-        keyword_map = {
-            "causal attribution": ["attribution", "base attribution", "advanced attribution",
-                            "self-attribution", "self-attributed", "attribution multiplier",
-                            "advanced attribution multiplier", "causal attribution",
-                             "multi-touch attribution", "mta", "multi touch", "touchpoints"],
-            "incrementality": ["incrementality", "incrementality testing", "geo testing",
-                               "holdout test", "scale test", "lift"],
-            "market_mix_modeling": ["marketing mix modeling", "mmm", "marketing mix model",
-                                    "media mix"],
-            "measurement": ["measurement", "metrics", "kpi", "measure",
-                            "statistical significance", "minimum detectable lift",
-                            "mdl", "confidence"],
-            "marketing_funnel": ["funnel", "awareness", "consideration", "conversion",
-                                 "retention", "advocacy"],
-            "tracking": ["tracking", "cookies", "first-party", "third-party", "pixels"],
-            "optimization": ["optimization", "budget allocation", "diminishing returns",
-                             "roas", "roi", "cpa", "cac", "icac"],
-            "channels": ["facebook", "google", "tiktok", "search", "social", "display"]
-        }
-
-        # Extract all questions/answers as a list to build a frequency map
-        q_a = list(self.qa_data.items())
-
-        # Count frequency of keywords in questions
-        keyword_frequency = {}
-        for q, a in q_a:
-            q_a_item = q + " " + a
-            for category, terms in keyword_map.items():
-                for term in terms:
-                    if term.lower() in q_a_item.lower():
-                        if category not in keyword_frequency:
-                            keyword_frequency[category] = 0
-                        keyword_frequency[category] += 1
-
-        # Sort by frequency for each category
-        sorted_keywords = {k: v for k, v in sorted(
-            keyword_frequency.items(), key=lambda item: item[1], reverse=True)}
-
-        self.logger.info(f"Extracted keywords with frequencies: {sorted_keywords}")
-        return keyword_map
-    
     def create_embedding_prompt(self, text: str, metadata: Dict[str, Any] = None) -> str:
         """
-        Create an optimized prompt for embedding that highlights attribution terms.
+        Create a comprehensive and semantically-enhanced prompt for embedding.
+        
+        This function enriches the text with relevant context, metadata, technical definitions,
+        domain-specific terminology, and document structure to create a more effective 
+        representation for semantic matching.
 
         Args:
             text: Original text to embed
             metadata: Metadata associated with the text
 
         Returns:
-            Enhanced prompt for embedding
+            Enhanced prompt for embedding that provides richer semantic context
         """
+        if not text:
+            return ""
+            
         metadata = metadata or {}
-
-        # Add definitions for any technical terms found in the text
+        embedding_components = []
+        
+        # 1. Start with document type and source identification
+        doc_type = metadata.get('type', '')
+        source = metadata.get('source', '')
+        
+        # Include document type and source as context prefix
+        if doc_type and source:
+            embedding_components.append(f"Document type: {doc_type} from {source}")
+        elif doc_type:
+            embedding_components.append(f"Document type: {doc_type}")
+        elif source:
+            embedding_components.append(f"Source: {source}")
+        
+        # 2. Add document title as context
+        title = metadata.get('title', '')
+        if title:
+            embedding_components.append(f"Title: {title}")
+            
+        # 3. Add client information if available
+        client = metadata.get('client', '')
+        if client:
+            embedding_components.append(f"Client: {client}")
+            
+        # 4. Add presentation/slide specific info if applicable
+        if metadata.get('document_type') == 'presentation_slide':
+            presentation = metadata.get('parent_presentation', '')
+            slide_number = metadata.get('slide_number', '')
+            if presentation and slide_number:
+                embedding_components.append(f"From presentation: {presentation}, Slide {slide_number}")
+                
+        # 5. Add technical term definitions for any terms found in the text
         term_definitions = []
         for term, definition in self.technical_definitions.items():
             if term.lower() in text.lower():
                 term_definitions.append(f"{term}: {definition}")
-
+                
         if term_definitions:
-            term_context = "\n".join(term_definitions)
-            return f"Technical marketing terms context:\n{term_context}\n\n{text}"
-
+            embedding_components.append("Technical marketing terms:")
+            embedding_components.extend(term_definitions)
+            
+        # 6. Add keywords from metadata if available
+        keywords = metadata.get('keywords', [])
+        if keywords:
+            embedding_components.append(f"Keywords: {', '.join(keywords)}")
+            
+        # 7. Add attribution terms if present
+        attribution_terms = metadata.get('attribution_terms', [])
+        if attribution_terms:
+            embedding_components.append(f"Attribution concepts: {', '.join(attribution_terms)}")
+            
+        # 8. Add domain-specific context based on content type
+        
         # For tracking-specific Q&A
         if 'special_type' in metadata and metadata['special_type'] == 'tracking_types_examples':
-            return f"""
+            embedding_components.append("""
             Context: Web and app tracking methods categorized as first-party and third-party tracking. 
             First-party tracking uses first-party cookies and internal systems.
             Third-party tracking uses third-party cookies and external platforms.
-
-            {text}
-            """
-
-        # For attribution-specific texts, add context
+            """)
+            
+        # For attribution-specific texts, add specialized context
         is_attribution_related = any(term in text.lower() for term in [
             "attribution", "incrementality", "MDL", "MMM", "MTA", "CAC", "last click",
             "self-attribution", "self-attributed", "base attribution",
             "advanced attribution", "advanced attribution multiplier"
         ])
-
+        
         if is_attribution_related:
-            return f"Marketing attribution context: {text}"
-
-        return text
+            embedding_components.append("Context: Marketing attribution methodologies and measurement approaches for evaluating marketing effectiveness across channels.")
+            
+        # 9. For QA content, add Q&A specific context
+        if doc_type == 'qa_pair':
+            embedding_components.append("Format: Question and Answer pair on marketing attribution topics")
+            
+        # 10. Check for slide content to provide presentation context
+        if "## Slide" in text:
+            embedding_components.append("Format: Presentation slide with structured content")
+            
+        # 11. Add URL if available for reference context
+        url = metadata.get('url', '')
+        if url and url not in ['#qa', '#tracking-types']:  # Skip placeholder URLs
+            embedding_components.append(f"Reference: {url}")
+            
+        # 12. Combine all context elements with the original text
+        context_text = "\n".join(embedding_components)
+        
+        # Keep the original text as is - don't modify it
+        # Just prepend the context information
+        return f"{context_text}\n\n{text}" if context_text else text
     
     def enrich_attribution_metadata(self, content: str) -> Dict[str, Any]:
         """
@@ -534,6 +568,7 @@ class EnhancementService:
             Dictionary of attribution-related metadata
         """
         # Key attribution terms to identify
+        # This list needs to be expanded more
         attribution_terms = [
             "attribution", "incrementality", "MDL", "Minimum Detectable Lift",
             "MMM", "marketing mix modeling", "MTA", "multi-touch attribution",
@@ -591,48 +626,7 @@ class EnhancementService:
 
         return qa_records
     
-    def enhance_records_with_keywords(self, records: List[Dict[str, Any]],
-                                   keyword_map: Dict[str, List[str]]) -> List[Dict[str, Any]]:
-        """
-        Enhance records with keywords based on content analysis.
-
-        Args:
-            records: List of content records
-            keyword_map: Dictionary of keywords and related terms
-
-        Returns:
-            Enhanced records with keywords
-        """
-        enhanced_records = []
-
-        for record in records:
-            # Skip if no markdown content
-            if 'markdown' not in record:
-                enhanced_records.append(record)
-                continue
-
-            # Ensure content is a string
-            content = str(record['markdown']).lower()
-            record_keywords = set()
-
-            # Check for each keyword category in the content
-            for category, terms in keyword_map.items():
-                for term in terms:
-                    if term.lower() in content:
-                        record_keywords.add(category)
-                        # Add the specific term that matched
-                        record_keywords.add(term.lower())
-
-            # Add keywords to record
-            if record_keywords:
-                record['keywords'] = list(record_keywords)
-
-            enhanced_records.append(record)
-
-        self.logger.info(f"Enhanced {len(enhanced_records)} records with keywords")
-        return enhanced_records
-    
-    def enhance_chunk_with_keywords(self, chunk: str, keyword_map: Dict[str, List[str]]) -> List[str]:
+    def enhance_chunk_with_keywords(self, chunk: str) -> List[str]:
         """
         Enhance a single chunk of text with relevant keywords.
         
@@ -643,10 +637,45 @@ class EnhancementService:
         Returns:
             List of relevant keywords for the chunk
         """
+
+        keyword_map = {
+            "causal attribution": ["attribution", "base attribution", "advanced attribution",
+                                   "self-attribution", "self-attributed", "attribution multiplier",
+                                   "advanced attribution multiplier", "causal attribution",
+                                   "multi-touch attribution", "mta", "multi touch", "touchpoints"],
+            "incrementality": ["incrementality", "incrementality testing", "geo testing",
+                               "holdout test", "scale test", "lift"],
+            "market_mix_modeling": ["marketing mix modeling", "mmm", "marketing mix model",
+                                    "media mix"],
+            "measurement": ["measurement", "metrics", "kpi", "measure",
+                            "statistical significance", "minimum detectable lift",
+                            "mdl", "confidence"],
+            "marketing_funnel": ["funnel", "awareness", "consideration", "conversion",
+                                 "retention", "advocacy"],
+            "tracking": ["tracking", "cookies", "first-party", "third-party", "pixels"],
+            "optimization": ["optimization", "budget allocation", "diminishing returns",
+                             "roas", "roi", "cpa", "cac", "icac"],
+            "channels": ["facebook", "google", "tiktok", "search", "social", "display"]
+        }
+
         try:
-            # Convert chunk to lowercase for case-insensitive matching
             chunk_lower = chunk.lower()
-            
+
+            # Count frequency of keywords in questions
+            keyword_frequency = {}
+            for category, terms in keyword_map.items():
+                for term in terms:
+                    if term.lower() in chunk_lower:
+                        if category not in keyword_frequency:
+                            keyword_frequency[category] = 0
+                            keyword_frequency[category] += 1
+
+                # Sort by frequency for each category
+            sorted_keywords = {k: v for k, v in sorted(
+                keyword_frequency.items(), key=lambda item: item[1], reverse=True)}
+
+            self.logger.info(f"Extracted keywords with frequencies: {sorted_keywords}")
+
             # Initialize set to store unique keywords
             chunk_keywords = set()
             

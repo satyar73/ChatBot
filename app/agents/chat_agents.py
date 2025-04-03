@@ -156,10 +156,47 @@ class PromptCaptureCallback(BaseCallbackHandler):
     def on_tool_start(self, serialized, input_str, **kwargs):
         """Log when a tool is called."""
         try:
+            # Special handling for search_rag_docs to parse advanced parameters
+            tool_name = serialized.get("name", "unknown_tool")
+            
+            if tool_name == "search_rag_docs":
+                import json
+                import logging
+                logger = logging.getLogger("tool_parser")
+                
+                # Try to parse the input string to extract parameters
+                try:
+                    # Input might be a stringified JSON or a simple string
+                    if input_str.startswith('{') and input_str.endswith('}'):
+                        try:
+                            # Try parsing as JSON
+                            parsed_input = json.loads(input_str)
+                            logger.info(f"Parsed tool input: {parsed_input}")
+                            
+                            # Check if we have the additional parameters
+                            if isinstance(parsed_input, dict):
+                                query = parsed_input.get('query', '')
+                                content_type = parsed_input.get('content_type')
+                                client_name = parsed_input.get('client_name')
+                                topic = parsed_input.get('topic')
+                                
+                                # Log the extracted parameters
+                                logger.info(f"Extracted search_rag_docs parameters:")
+                                logger.info(f"  query: {query}")
+                                logger.info(f"  content_type: {content_type}")
+                                logger.info(f"  client_name: {client_name}")
+                                logger.info(f"  topic: {topic}")
+                        except json.JSONDecodeError:
+                            logger.info(f"Could not parse input as JSON: {input_str}")
+                    else:
+                        logger.info(f"Tool input is a simple string: {input_str}")
+                except Exception as parse_err:
+                    logger.error(f"Error parsing tool input: {parse_err}")
+            
             tool_data = {
                 "event": "tool_start",
                 "timestamp": datetime.now().isoformat(),
-                "tool": serialized.get("name", "unknown_tool"),
+                "tool": tool_name,
                 "input": input_str
             }
 
@@ -376,7 +413,7 @@ class AgentFactory:
 
         # Log the created prompt template
         cls.prompt_capture.logger.debug(f"Created prompt template with "
-                                        f"system content: {system_prompt[:100]}...")
+                                      f"system content: {system_prompt[:100]}...")
 
         return prompt
 
@@ -570,6 +607,8 @@ class AgentManager:
             retriever_tool = ToolManager.get_retriever_tool(
                 chat_model_config=chat_model_config, 
                 query=query
+                # No additional parameters here - we'll let the LLM specify them
+                # in its tool calls for more specific filtering
             )
             tools = [retriever_tool, ToolManager.get_current_time]
         else:

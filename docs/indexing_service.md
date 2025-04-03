@@ -4,7 +4,7 @@ for Retrieval-Augmented Generation (RAG).
 
 ## 1. Overview
 The Indexing Service is responsible for:
-- Fetching content from various sources (Shopify, Google Drive)
+- Fetching content from various sources (Shopify, Google Drive --> supported now)
 - Processing and transforming content to embeddings
 - Indexing content to a vector database (Right now only Pinecone is supported)
 - Managing vector indexes
@@ -20,7 +20,7 @@ The service consists of four main components:
 The `IndexService` class provides a high-level interface for creating and managing vector indexes.
 ### 2.1 Key Methods
 
-#### `create_index(store, summarize) -> Dict`
+#### `create_shopify_index(store, summarize) -> Dict`
 Creates and populates a new vector index with Shopify content.
 
 **Parameters**:
@@ -37,9 +37,20 @@ Creates and populates a vector index with Google Drive data.
 - `folder_id`: Optional Google Drive folder ID
 - `recursive`: Optional boolean to enable recursive folder processing
 - `summarize`: Optional boolean to enable content summarization
+- 'enhanced_slides': Optional boolean for enhanced slide processing
 
 **Returns**:
 - Dictionary with status and result information
+
+#### `get_google_drive_files() -> Dict[str, Any]`
+Get list of indexed Google Drive files
+
+**Returns**:
+- Dictionary with:
+  - File Id
+  - Title
+  - URL
+  - File size
 
 #### `get_index_info() -> Dict`
 Gets information about the current vector index.
@@ -63,78 +74,99 @@ The IndexService relies on configuration from:
 - `app.config.chat_config.ChatConfig`: Contains API keys and index settings
 
 ## 3. ContentProcessor
-The `ContentProcessor` class provides a base class for processing and indexing document content to Pinecone.
+The `ContentProcessor` class provides a base class for processing and indexing document content to vector stores. It's designed to be a common foundation for all indexers in the system.
 
 ### 3.1 Key Components
-- **Base Processing Framework**: Provides a common foundation for different indexers
-- **Integration with EnhancementService**: Leverages the enhancement service for content enrichment
+- **Base Processing Framework**: Provides common functionality used by different content indexers
+- **Vector Store Integration**: Supports indexing to multiple vector stores through VectorStoreClient
+- **EnhancementService Integration**: Leverages the enhancement service for content enrichment 
 - **Adaptive Chunking**: Implements specialized chunking strategies for different content types
 - **Attribution Metadata**: Enriches documents with attribution-related metadata
 - **Embedding Optimization**: Creates enhanced embedding prompts for technical content
+- **Keyword Extraction**: Adds relevant keywords based on content analysis
 
 ### 3.2 Key Methods
 
-#### `process_records(records) -> List[Dict[str, Any]]`
-Processes and enhances records before indexing.
+#### `get_index_info() -> Dict[str, Any]`
+Gets information about the current vector index.
+
+**Returns**:
+- Dictionary containing:
+  - total_documents: Number of documents indexed
+  - total_chunks: Number of chunks/vectors
+  - index_name: Name of the vector index
+  - last_updated: Timestamp of last update
+  - dimension: Embedding dimension
+  
+#### `prepare_documents_for_indexing(records) -> List[Document]`
+Processes documents and prepares them for indexing by chunking content, adding metadata, and creating optimal embedding prompts.
 
 **Parameters**:
 - `records`: List of content records with title, url, and markdown
 
-**Returns**:
-- Enhanced records with additional metadata
+**Flow**:
+1. Extracts keywords from QA content for all chunks
+2. For each content record:
+   - Analyzes content type and decides on chunking strategy:
+      - Preserves Q&A pairs without splitting
+      - Uses smaller chunks with more overlap for technical content
+      - Uses standard chunking for general content
+   - Adds attribution metadata with the enhancement service
+   - Enhances chunks with relevant keywords
+   - Creates optimized embedding prompts for better retrieval
+   - Assembles Document objects with content and metadata
 
-#### `index_to_pinecone(records) -> bool`
-Indexes content records to Pinecone vector database with enhanced metadata.
+**Returns**:
+- List of Document objects ready for indexing to vector stores
+
+#### `index_to_vector_store(docs) -> bool`
+Indexes documents to all configured vector stores.
 
 **Parameters**:
-- `records`: List of enhanced content records with title, url, and markdown
+- `docs`: List of Document objects to index
 
 **Flow**:
-1. Initializes Pinecone connection
-2. Creates index if it doesn't exist
-3. Prepares documents with special handling for different content types:
-   - Preserves Q&A pairs without splitting
-   - Uses smaller chunks with more overlap for technical content
-   - Uses standard chunking for general content
-4. Enriches documents with attribution metadata
-5. Creates optimized embedding prompts
-6. Generates embeddings and uploads to Pinecone
+1. Iterates through all configured vector stores
+2. For each vector store:
+   - Gets the appropriate vector store client
+   - Indexes the documents to that vector store
+   - Tracks success across all operations
 
 **Returns**:
-- True if indexing was successful, False otherwise
+- True if indexing was successful for all vector stores, False otherwise
 
 ## 4. ShopifyIndexer
-The `ShopifyIndexer` class fetches content from a Shopify store and indexes it to Pinecone with 
-metadata enrichment and more optimal embedding techniques.
+The `ShopifyIndexer` class fetches content from a Shopify store and works with the ContentProcessor for processing and indexing to vector stores.
 
 ### 4.1 Key Components
-- **API Integration**: Connects to Shopify Admin API to fetch blogs, articles, and products
-- **Content Processors**: Converts HTML to markdown and processes content with specialized handling
-- **Metadata Enrichment**: Enhances records with:
-  - Marketing attribution terminology detection
-  - Technical term identification and definitions
-  - Keyword extraction and categorization
-  - Q&A pair processing
-- **Optimized Embedding Generation**: Uses the EnhancementService to create custom embedding prompts that highlight technical marketing terms
-- **Vector Indexing**: Uses the ContentProcessor for embedding generation and Pinecone uploads
-- **Chunking Strategies**: Leverages adaptive text chunking from ContentProcessor based on content type and technical terminology
+- **Shopify Admin API Integration**: 
+  - Connects securely to the Shopify Admin API
+  - Fetches blogs, articles, and products using authenticated requests
+  - Supports pagination for large content collections
+- **Content Processing**: 
+  - Converts Shopify HTML content to well-structured markdown
+  - Organizes content into records with consistent metadata
+  - Preserves content relationships (blogs to articles, products to variants)
+- **EnhancementService Integration**:
+  - Leverages the enhancement service for content enrichment
+  - Identifies attribution and marketing terminology
+  - Extracts keywords for better content categorization
+  - Processes Q&A content with specialized handling
+- **ContentProcessor Collaboration**:
+  - Prepares formatted content records for the ContentProcessor
+  - Lets ContentProcessor handle chunking, embedding, and indexing
+  - Maintains separation of concerns: fetching vs. processing/indexing
 
 ### 4.2 Key Methods
 
-#### `run_full_process() -> Dict`
-Runs the complete Shopify indexing process.
-
-**Returns**:
-- Dictionary with status and message
-
-#### `index_all_content() -> bool`
-Indexes all Shopify content (blogs, articles, products) to Pinecone.
-
-**Returns**:
-- True if indexing was successful, False otherwise
-
 #### `get_blogs() -> List[Dict]`
-Gets all blogs from Shopify store.
+Gets all blogs from Shopify store using the Admin API.
+
+**Flow**:
+1. Constructs the Shopify Admin API URL for blogs
+2. Sets up authentication with the Shopify API key
+3. Makes the API request with appropriate parameters
+4. Processes the response and extracts blog data
 
 **Returns**:
 - List of blog objects containing id, handle, title, and updated_at
@@ -145,206 +177,221 @@ Gets all articles for a specific blog.
 **Parameters**:
 - `blog_id`: The Shopify blog ID
 
-**Returns**:
-- List of article objects
-
-#### `prepare_blog_articles() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]`
-Prepares blog articles for indexing.
-
 **Flow**:
-1. Fetches all blogs from Shopify store
-2. For each blog, creates a blog record with title and URL
-3. Fetches all articles for each blog
-4. Converts article HTML content to markdown
-5. Creates article records with title, URL, and markdown content
+1. Constructs the Shopify Admin API URL for articles
+2. Sets up authentication and pagination parameters
+3. Makes the API request
+4. Processes the response and extracts article data
 
 **Returns**:
-- Tuple of (blog_records, article_records)
-
-#### `prepare_products() -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]`
-Prepares products for indexing.
-
-**Flow**:
-1. Fetches all products from Shopify store
-2. Converts product HTML descriptions to markdown
-3. Creates product records with title, URL, and markdown content
-4. Processes product variants if needed
-
-**Returns**:
-- Tuple of (product_records, variant_records)
-
-#### `prepare_qa_pairs(qa_content) -> List[Dict[str, Any]]`
-Processes Q&A content to preserve question-answer relationships.
-
-**Parameters**:
-- `qa_content`: Raw Q&A content with questions and answers
-
-**Flow**:
-1. Parses Q&A content to extract question-answer pairs
-2. Preserves the relationship between questions and answers
-3. Adds special metadata for certain types of Q&A content
-4. Formats Q&A pairs for optimal retrieval
-
-**Returns**:
-- List of processed Q&A records
+- List of article objects with content and metadata
 
 #### `get_products() -> List[Dict]`
 Gets all products from Shopify store.
 
+**Flow**:
+1. Constructs the Shopify Admin API URL for products
+2. Sets up authentication and product field parameters
+3. Makes the API request with appropriate pagination
+4. Processes the response and extracts product data
+
 **Returns**:
-- List of product objects
+- List of product objects with descriptions and metadata
 
 #### `html_to_markdown(html_content) -> str`
-Converts HTML content to markdown for better chunking and indexing.
+Converts HTML content to markdown for better processing.
 
 **Parameters**:
-- `html_content`: HTML content to convert
-
-**Returns**:
-- Markdown string
-
-#### `extract_keywords_from_qa(qa_content) -> Dict[str, List[str]]`
-Extracts keywords from Q&A pairs to use for tagging articles.
-
-**Parameters**:
-- `qa_content`: Raw Q&A content with questions and answers
-
-**Returns**:
-- Dictionary mapping keyword categories to related terms
-
-#### `enhance_records_with_keywords(records, keyword_map) -> List[Dict]`
-Enhances content records with keywords based on content analysis.
-
-**Parameters**:
-- `records`: List of content records
-- `keyword_map`: Dictionary of keywords and related terms
-
-**Returns**:
-- Enhanced records with keywords added
-
-#### `create_embedding_prompt(text, metadata) -> str`
-Creates an optimized prompt for embedding that highlights attribution terms and technical concepts.
-
-**Parameters**:
-- `text`: Original text to embed
-- `metadata`: Metadata associated with the text
-
-**Returns**:
-- Enhanced prompt for embedding with additional context
-
-#### `enrich_attribution_metadata(content) -> Dict`
-Analyzes content for attribution terminology and creates enhanced metadata.
-
-**Parameters**:
-- `content`: Markdown or text content to analyze
-
-**Returns**:
-- Dictionary of attribution-related metadata
-
-#### `index_to_pinecone(records) -> bool`
-Indexes content records to Pinecone vector database with enhanced metadata and embedding techniques.
-
-**Parameters**:
-- `records`: List of content records with title, url, and markdown
+- `html_content`: HTML content from Shopify
 
 **Flow**:
-1. Processes records to extract metadata and keywords
-2. Creates optimized embedding prompts for technical content
-3. Uses adaptive chunking strategies based on content type
-4. Applies different chunking sizes for technical vs. general content
-5. Generates enhanced embeddings with custom prompts
-6. Batches vectors for efficient Pinecone uploads
+1. Uses markdownify library to convert HTML to markdown
+2. Cleans up the markdown formatting
+3. Preserves important structural elements like headers and lists
 
 **Returns**:
-- True if indexing was successful, False otherwise
+- Cleaned markdown string
 
-### 3.3 Configuration
+#### `prepare_blog_articles() -> List[Dict[str, Any]]`
+Prepares blog articles for processing by ContentProcessor.
+
+**Flow**:
+1. Fetches all blogs from Shopify store
+2. For each blog, fetches all published articles
+3. Converts article HTML content to markdown
+4. Creates structured content records for each article
+5. Adds consistent metadata including content type, URL, and title
+
+**Returns**:
+- List of article records ready for ContentProcessor
+
+#### `prepare_products() -> List[Dict[str, Any]]`
+Prepares products for processing by ContentProcessor.
+
+**Flow**:
+1. Fetches all products from Shopify store
+2. Converts product HTML descriptions to markdown
+3. Creates structured content records for each product
+4. Adds metadata with product information and type
+
+**Returns**:
+- List of product records ready for ContentProcessor
+
+#### `run_full_process(content_processor) -> Dict`
+Coordinates the complete Shopify indexing process.
+
+**Parameters**:
+- `content_processor`: ContentProcessor instance for document processing
+
+**Flow**:
+1. Prepares blog and article records
+2. Prepares product records
+3. Combines all records into a single collection
+4. Passes the records to ContentProcessor for:
+   - Document preparation
+   - Chunking
+   - Embedding 
+   - Vector store indexing
+5. Returns status information with document counts
+
+**Returns**:
+- Dictionary with status, message, and document counts
+
+### 4.3 Configuration
 ShopifyIndexer requires the following configuration:
 - `SHOPIFY_SHOP_DOMAIN` or `SHOPIFY_STORE`: Shopify store domain
 - `SHOPIFY_API_KEY`: Shopify API key
 - `SHOPIFY_API_VERSION`: Shopify API version
 - `PINECONE_API_KEY`: Pinecone API key
 - `PINECONE_INDEX_NAME`: Pinecone index name
-- `PINECONE_DIMENSION`: Embedding dimensions
+- `PINECONE_DIMENSION`: Embedding dimensions (default 1536)
 - `OPENAI_API_KEY`: OpenAI API key
-- `OPENAI_EMBEDDING_MODEL`: OpenAI embedding model name
+- `OPENAI_EMBEDDING_MODEL`: OpenAI embedding model name (default "text-embedding-3-small")
+- `OPENAI_VISION_MODEL`: OpenAI vision model for image analysis (default "gpt-4o")
+- `INDEXER_FEATURE_FLAGS`: Feature flags controlling special indexing behaviors (see indexerfeatureflags.json)
 
 ## 5. GoogleDriveIndexer
-The `GoogleDriveIndexer` class fetches content from Google Drive and indexes it to Pinecone.
+The `GoogleDriveIndexer` class fetches content from Google Drive and works with ContentProcessor to process and index documents to vector stores, with specialized handling for different file types.
 
 ### 5.1 Key Components
-- **Google Drive API**: Connects to Google Drive
-- **Document Processors**: Extracts text from various file formats
-- **Content Conversion**: Converts documents to markdown
-- **Vector Indexing**: Uses the ContentProcessor for embedding generation and Pinecone uploads
-- **Content Enhancement**: Leverages the EnhancementService for content enrichment
+- **Google Drive API Integration**: 
+  - Connects securely to Google Drive using service account credentials
+  - Supports file and folder operations with appropriate permissions
+  - Provides recursive folder traversal capabilities
+- **Multi-Format Document Processing**: 
+  - Supports multiple file formats through specialized handlers:
+    - Microsoft Office formats (DOCX, PPTX)
+    - PDF documents
+    - Plain text and Markdown
+    - Google Workspace files (Docs, Sheets, Slides)
+  - Extracts text with format preservation
+- **Document Organization**:
+  - Maintains folder structure information
+  - Tracks document paths and relationships
+  - Identifies client-specific content through folder analysis
+- **ContentProcessor Collaboration**:
+  - Prepares document records for the ContentProcessor
+  - Delegates chunking, embedding, and indexing to ContentProcessor
+  - Maintains separation of concerns: fetching vs. processing/indexing
 
 ### 5.2 Key Methods
-#### `run_full_process() -> Dict`
 
-Runs the complete Google Drive indexing process.
+#### `_initialize_drive_api()`
+Initializes the Google Drive API client with service account credentials.
 
-**Returns**:
-- Dictionary with status and message
+**Flow**:
+1. Loads service account credentials from the specified JSON file
+2. Configures API access scopes for read-only operations
+3. Builds the Drive API service client
 
-#### `prepare_drive_documents() -> List[Dict]`
-Processes all supported files from Google Drive.
-
-**Returns**:
-- List of document records with title, url, and content
-
-#### `get_supported_files(folder_id, recursive) -> List[Dict]`
-
-Gets all supported files, optionally from a specific folder.
+#### `get_supported_files(folder_id, recursive) -> List[DriveItem]`
+Gets all supported files from Google Drive, optionally from a specific folder.
 
 **Parameters**:
-- `folder_id`: Optional folder ID to start from
+- `folder_id`: Optional folder ID to start from (uses root if not specified)
 - `recursive`: Whether to process subfolders recursively
 
+**Flow**:
+1. Queries Google Drive API for files matching supported MIME types
+2. Handles pagination for large folder contents
+3. If recursive, traverses subfolders with proper path tracking
+4. Builds complete file metadata including paths and client information
+
 **Returns**:
-- List of file objects
+- List of DriveItem objects with complete metadata
 
 #### `download_and_extract_content(file_item) -> str`
-
-Downloads and extracts text content from a Google Drive file.
-
-**Parameters**:
-- `file_item`: Google Drive file object
-
-**Returns**:
-- Extracted text content
-
-#### `condense_content_using_llm(content) -> str`
-
-Summarize content using OpenAI's API.
+Downloads and extracts text content from a Google Drive file based on its type.
 
 **Parameters**:
-- `content`: Original content text
+- `file_item`: DriveItem object with file metadata
+
+**Flow**:
+1. Determines the appropriate extraction method based on MIME type
+2. Downloads the file content using the Drive API
+3. Processes the content based on file type:
+   - Extracts text from DOCX using docx library
+   - Extracts text from PDF using PyPDF2
+   - Extracts text and structure from PPTX using pptx library
+   - Handles plain text and other formats directly
+4. Returns the extracted content with format preservation
 
 **Returns**:
-- Summarized content
+- Extracted text content in markdown format
 
-#### `index_to_pinecone(records) -> bool`
-
-Indexes content records to Pinecone vector database.
+#### `prepare_drive_documents(content_processor) -> List[Dict]`
+Prepares documents from Google Drive for processing by ContentProcessor.
 
 **Parameters**:
-- `records`: List of content records with title, url, and markdown
+- `content_processor`: ContentProcessor instance
+
+**Flow**:
+1. Gets all supported files using get_supported_files
+2. For each file:
+   - Downloads and extracts content
+   - Creates structured records with metadata
+   - Adds client and path information
+3. Prepares the records for processing
 
 **Returns**:
-- True if indexing was successful, False otherwise
+- List of document records ready for ContentProcessor
 
-### 4.3 Configuration
+#### `run_full_process(content_processor) -> Dict`
+Coordinates the complete Google Drive indexing process.
+
+**Parameters**:
+- `content_processor`: ContentProcessor instance
+
+**Flow**:
+1. Prepares document records from Google Drive
+2. Passes records to ContentProcessor for:
+   - Document preparation (chunking, metadata enhancement)
+   - Embedding generation
+   - Vector store indexing
+3. Returns status information with document counts
+
+**Returns**:
+- Dictionary with status, message, and document counts
+
+### 5.3 Configuration
 
 GoogleDriveIndexer requires the following configuration:
 - `GOOGLE_DRIVE_CREDENTIALS_FILE`: Path to service account credentials
 - `GOOGLE_DRIVE_FOLDER_ID`: Optional folder ID to process
-- `GOOGLE_DRIVE_RECURSIVE`: Whether to process recursively
+- `GOOGLE_DRIVE_RECURSIVE`: Whether to process recursively (default true)
 - `PINECONE_API_KEY`: Pinecone API key
 - `PINECONE_INDEX_NAME`: Pinecone index name
+- `PINECONE_DIMENSION`: Embedding dimensions (default 1536)
 - `OPENAI_API_KEY`: OpenAI API key
-- `OPENAI_EMBEDDING_MODEL`: OpenAI embedding model name
-- `OPENAI_SUMMARY_MODEL`: Model to use for summarization
+- `OPENAI_EMBEDDING_MODEL`: OpenAI embedding model name (default "text-embedding-3-small")
+- `OPENAI_SUMMARY_MODEL`: Model to use for summarization (default "gpt-4o")
+- `OPENAI_VISION_MODEL`: OpenAI vision model for image analysis (default "gpt-4o")
+- `VISION_MAX_TOKENS`: Maximum tokens for vision response (default 4000)
+- `INDEXER_FEATURE_FLAGS`: Feature flags controlling special indexing behaviors:
+  - `use_vision_api`: Whether to analyze images in documents and presentations
+  - `extract_slides_images`: Whether to extract and process images from slides
+  - `enhance_with_keywords`: Whether to enhance documents with extracted keywords
+  - `use_enhanced_embeddings`: Whether to use specialized embedding prompts
 
 ## 6. Usage Examples
 
@@ -356,8 +403,8 @@ from app.services.index_service import IndexService
 # Initialize the service
 index_service = IndexService()
 
-# Create an index
-result = await index_service.create_index_from_shopify_store(
+# Create an index with all Shopify content
+result = await index_service.create_index(
     store="your-store.myshopify.com",
     summarize=True
 )
@@ -378,20 +425,75 @@ from app.services.index_service import IndexService
 index_service = IndexService()
 
 # Create an index from Google Drive
-result = await index_service.create_index_from_google_drive(
-  folder_id="your_folder_id",
-  recursive=True,
-  summarize=True
+result = await index_service.create_index_from_drive(
+  folder_id="your_folder_id",  # Optional - uses root folder if not specified
+  recursive=True,  # Process subfolders recursively
+  summarize=True   # Use AI to summarize long documents
 )
 
 # Check the result
 if result["status"] == "success":
-  print("Google Drive content indexed successfully")
+  print(f"Google Drive content indexed successfully: {result['count']} documents processed")
 else:
   print(f"Indexing failed: {result['message']}")
 ```
 
-### 6.3 Getting Index Information
+### 6.3 Complete Example with Feature Flags
+
+```python
+import asyncio
+import json
+from app.services.index_service import IndexService
+
+async def run_indexer():
+    # Load feature flags from config file
+    with open('indexerfeatureflags.json', 'r') as f:
+        feature_flags = json.load(f)
+    
+    # Initialize the service with custom configuration
+    index_service = IndexService(
+        pinecone_api_key="your_pinecone_api_key",
+        index_name="your_index_name",
+        dimension=1536
+    )
+    
+    # First, check if index exists and delete if needed
+    info = await index_service.get_index_info()
+    if info["exists"]:
+        print(f"Deleting existing index '{info['name']}'")
+        await index_service.delete_index()
+    
+    # Enable special features for image processing
+    feature_flags["use_vision_api"] = True
+    feature_flags["extract_slides_images"] = True
+    
+    # Set the feature flags
+    index_service.set_feature_flags(feature_flags)
+    
+    # Index both Google Drive and Shopify content
+    drive_result = await index_service.create_index_from_drive(
+        folder_id="1ABC123XYZ",
+        recursive=True
+    )
+    
+    shopify_result = await index_service.create_index(
+        store="your-store.myshopify.com"
+    )
+    
+    # Show final results
+    total_docs = drive_result.get('count', 0) + shopify_result.get('count', 0)
+    print(f"Indexed {total_docs} total documents")
+    
+    # Get final index information
+    info = await index_service.get_index_info()
+    print(f"Index contains {info['stats']['total_vector_count']} vectors")
+
+# Run the async function
+if __name__ == "__main__":
+    asyncio.run(run_indexer())
+```
+
+### 6.4 Getting Index Information
 
 ```python
 from app.services.index_service import IndexService
@@ -413,7 +515,7 @@ else:
     print(f"Index '{info['name']}' does not exist")
 ```
 
-### 6.4 Deleting an Index
+### 6.5 Deleting an Index
 
 ```python
 from app.services.index_service import IndexService
@@ -462,20 +564,53 @@ The Indexing Service uses standard logging to track progress:
 - `DEBUG`: Provides detailed information for troubleshooting
 
 ## 9. Best Practices
-- **Incremental Indexing**: Consider implementing delta updates rather than full reindexing
-- **Content Pre-processing**: Optimize content before embedding (clean HTML, remove boilerplate)
-- **Index Monitoring**: Regularly check vector counts and dimensions
-- **Adaptive Content Chunking**: Adjust chunk size based on content type and technical terminology:
-  - Use smaller chunks with more overlap for technical content
-  - Use standard chunk sizes for general content
-  - Preserve special terms during chunking
-- **Custom Embedding Prompts**: Enhance embedding quality with context-specific prompting:
-  - Add technical definitions for specialized terminology
-  - Highlight attribution-related content
-  - Provide additional context for domain-specific terms
-- **Metadata Enrichment**: Add rich metadata for improved retrieval:
-  - Keyword categorization
-  - Attribution terminology detection
-  - Technical term identification
-  - Q&A relationship preservation
-- **Batch Processing**: Use efficient batching for vector uploads to improve performance
+
+### 9.1 Content Optimization
+- **Incremental Indexing**: Implement delta updates rather than full reindexing for efficiency
+- **Content Pre-processing**: Optimize content before embedding:
+  - Clean HTML and remove boilerplate elements
+  - Extract and process images with vision models
+  - Preserve document structure and hierarchy
+  - Transform content to well-formatted markdown
+- **Enhanced Chunking Strategies**:
+  - Use smaller chunks (256-512 tokens) with more overlap (25-50%) for technical content
+  - Use standard chunks (1000 tokens) with minimal overlap (10%) for general content
+  - Apply document-specific chunking for different file types
+  - Preserve special terms and relationships during chunking
+
+### 9.2 Embedding Quality
+- **Custom Embedding Prompts**: Use the EnhancementService for better quality:
+  - Create prompts that highlight technical marketing terms
+  - Add domain-specific definitions for specialized terminology
+  - Emphasize attribution-related concepts in the embedding context
+  - Include relationship context for connected concepts
+- **AI-Enhanced Content**: Leverage AI capabilities for content understanding:
+  - Extract textual content from images using vision models
+  - Generate detailed descriptions for slides and figures
+  - Summarize long documents while preserving key information
+  - Identify key concepts and technical terminology
+
+### 9.3 Metadata and Retrieval
+- **Rich Metadata Enrichment**: Add detailed metadata for improved retrieval:
+  - Keyword categorization and hierarchical classification
+  - Attribution terminology detection and relationship mapping
+  - Technical term identification with definitions
+  - Q&A relationship preservation and context awareness
+  - Image content tagging and description metadata
+- **Semantic Filtering**: Add semantic filters to improve response accuracy:
+  - Filter by document type (presentation, article, product)
+  - Filter by content domain (attribution, tracking, measurement)
+  - Filter by technical complexity (beginner, intermediate, advanced)
+  - Filter by recency and relevance
+
+### 9.4 Performance and Scaling
+- **Batch Processing**: Use efficient batching strategies:
+  - Process vectors in batches of 100-200 for optimal performance
+  - Implement parallel processing for large document sets
+  - Use async operations for I/O-bound tasks
+  - Add retry logic for API rate limits
+- **Resource Management**:
+  - Monitor memory usage when processing large files
+  - Implement timeout handling for long-running operations
+  - Add progress tracking and logging for observability
+  - Use connection pooling for database operations

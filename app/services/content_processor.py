@@ -63,6 +63,32 @@ class ContentProcessor:
                 "error": str(e)
             }
 
+    def save_chunks_to_file(self, all_chunks: List[Dict[str, Any]], filename: str = "document_chunks.json") -> str:
+        """
+        Save document chunks to a JSON file for analysis.
+        
+        Args:
+            all_chunks: List of document chunks with metadata
+            filename: Name of the output file
+            
+        Returns:
+            Path to the saved file
+        """
+        import json
+        import datetime
+        
+        # Add timestamp to filename to avoid overwriting
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename_with_timestamp = f"{os.path.splitext(filename)[0]}_{timestamp}{os.path.splitext(filename)[1]}"
+        
+        output_path = os.path.join(self.config.OUTPUT_DIR, filename_with_timestamp)
+        
+        with open(output_path, 'w') as f:
+            json.dump(all_chunks, f, indent=2)
+            
+        self.logger.info(f"Saved {len(all_chunks)} chunks to {output_path}")
+        return output_path
+
     def prepare_documents_for_indexing(self, records: List[Dict[str, Any]]) \
                                                 -> List[Document]:
         """
@@ -75,8 +101,9 @@ class ContentProcessor:
             List of Document objects ready for indexing
         """
         docs = []
-        # Extract keywords from QA content once for all chunks
-        keyword_map = self.enhancement_service.extract_keywords_from_qa()
+
+        # Create a list to store all chunks for debugging/logging
+        all_chunks = []
         
         for i, record in enumerate(records):
             # Check if record has markdown content
@@ -85,9 +112,49 @@ class ContentProcessor:
                 continue  # Skip records without markdown
 
             # Split content into chunks
-            if record.get('type') == 'qa_pair':
-                # For Q&A content, don't split questions from answers
+            is_qa_pair = record.get('type') == 'qa_pair'
+            is_slide = record.get('document_type') == 'presentation_slide'
+            
+            # Don't split QA pairs or presentation slides
+            if is_qa_pair or is_slide:
+                # For Q&A content and slide content, don't split the content
                 chunks = [record['markdown']]
+                
+                if is_qa_pair:
+                    self.logger.info(f"QA Pair not split: {record['title']}")
+                    special_handling = "QA pair preserved as single chunk"
+                    doc_type = "qa_pair"
+                else:
+                    self.logger.info(f"Presentation slide not split: {record['title']}")
+                    special_handling = "Slide preserved as single chunk"
+                    doc_type = record.get('type')  # Preserve original type (e.g., "client")
+                
+                # Create a temporary text splitter just for token counting
+                temp_splitter = TokenTextSplitter(
+                    chunk_size=self.config.CHUNK_SIZE,
+                    chunk_overlap=self.config.CHUNK_OVERLAP,
+                    model_name=self.config.OPENAI_EMBEDDING_MODEL
+                )
+                
+                # Add record to chunks list with metadata
+                chunk_data = {
+                    "doc_title": record['title'],
+                    "doc_url": record.get('url', 'No URL'),
+                    "doc_source": record.get('source', 'Unknown'),
+                    "doc_type": doc_type,
+                    "chunk_index": 0,
+                    "chunk_content": record['markdown'],
+                    "chunk_token_count": temp_splitter.count_tokens(record['markdown']),
+                    "special_handling": special_handling
+                }
+                
+                # Add slide-specific metadata if available
+                if record.get('document_type') == 'presentation_slide':
+                    chunk_data["document_type"] = "presentation_slide"
+                    chunk_data["parent_presentation"] = record.get('parent_presentation', '')
+                    chunk_data["slide_number"] = record.get('slide_number', 0)
+                
+                all_chunks.append(chunk_data)
             else:
                 # Define special technical terms to preserve
                 special_terms = [
@@ -98,7 +165,9 @@ class ContentProcessor:
                 ]
 
                 # For technical content, use smaller chunks with more overlap
-                if any(term in record['markdown'].lower() for term in special_terms):
+                is_technical = any(term in record['markdown'].lower() for term in special_terms)
+                if is_technical:
+                    self.logger.info(f"Using smaller chunks for technical content: {record['title']}")
                     text_splitter = TokenTextSplitter(
                         chunk_size=self.config.CHUNK_SIZE // 2,  # Smaller chunks for technical content
                         chunk_overlap=self.config.CHUNK_OVERLAP * 2,  # More overlap
@@ -111,14 +180,36 @@ class ContentProcessor:
                         model_name=self.config.OPENAI_EMBEDDING_MODEL
                     )
                 chunks = text_splitter.split_text(record['markdown'])
+                
+                # Log chunking information
+                self.logger.info(f"Split document '{record['title']}' into {len(chunks)} chunks")
+                
+                # Save chunks with document info for debugging
+                for j, chunk in enumerate(chunks):
+                    chunk_data = {
+                        "doc_title": record['title'],
+                        "doc_url": record.get('url', 'No URL'),
+                        "doc_source": record.get('source', 'Unknown'),
+                        "doc_type": record.get('type', 'Unknown'),
+                        "chunk_index": j,
+                        "chunk_content": chunk,
+                        "chunk_token_count": text_splitter.count_tokens(chunk),
+                        "total_chunks": len(chunks)
+                    }
+                    
+                    # Add technical content flag if applicable
+                    if is_technical:
+                        chunk_data["special_handling"] = "Technical content with smaller chunks"
+                        
+                    all_chunks.append(chunk_data)
 
             # Create documents with metadata
             for j, chunk in enumerate(chunks):
                 # Get attribution metadata
                 attribution_metadata = self.enhancement_service.enrich_attribution_metadata(chunk)
-                
+
                 # Enhance chunk with keywords
-                chunk_keywords = self.enhancement_service.enhance_chunk_with_keywords(chunk, keyword_map)
+                chunk_keywords = self.enhancement_service.enhance_chunk_with_keywords(chunk)
 
                 # Merge with standard metadata
                 metadata = {
@@ -128,23 +219,43 @@ class ContentProcessor:
                     "source": f"{record.get('type', 'content')}"
                 }
                 metadata.update(attribution_metadata)
-                if record.get('source') == 'Google Drive':
-                    metadata["type"] = record.get('type')
-                    metadata["client"] = record.get('client')
-
                 # Add chunk-specific keywords
                 if chunk_keywords:
                     metadata["keywords"] = chunk_keywords
 
-                # Create embedding prompt
+                if record.get('source') == 'Google Drive':
+                    metadata["type"] = record.get('type')
+                    metadata["client"] = record.get('client')
+                    
+                    # Add slide-specific metadata if this is a presentation slide
+                    if record.get('document_type') == 'presentation_slide':
+                        metadata["document_type"] = "presentation_slide"
+                        metadata["parent_presentation"] = record.get('parent_presentation', '')
+                        metadata["slide_number"] = record.get('slide_number', 0)
+
+                # Create embedding prompt. This is one that is used for semantic search
                 optimized_text = self.enhancement_service.create_embedding_prompt(chunk, metadata)
+                
+                # Add metadata to the corresponding chunk data for logging
+                for chunk_data in all_chunks:
+                    if (chunk_data.get("doc_title") == record['title'] and 
+                        chunk_data.get("chunk_index") == j):
+                        # Add the full metadata to the chunk data
+                        chunk_data["metadata"] = metadata.copy()
+                        # Add the optimized text used for embedding
+                        chunk_data["embedding_text"] = optimized_text
+                        break
 
                 doc = Document(
                     page_content=optimized_text,
                     metadata=metadata
                 )
                 docs.append(doc)
-
+        
+        # Save all chunks to file for analysis
+        if all_chunks:
+            self.save_chunks_to_file(all_chunks)
+            
         return docs
 
     def index_to_vector_store(self, docs: List[Document]) -> bool:

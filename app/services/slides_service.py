@@ -1,17 +1,12 @@
-import csv
 import re
 import asyncio
-import uuid
 import os
 from typing import List, Dict, Any, Optional, Tuple
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
-from app.config.chat_config import ChatConfig
-from app.utils.logging_utils import get_logger
-from app.services.chat_service import ChatService
-from app.models.chat_models import Message
+from app.services.document_service import DocumentService
 
-class SlidesService:
+class SlidesService(DocumentService):
     """Service for creating and managing Google Slides presentations."""
     
     def __init__(self, credentials_path: str = None):
@@ -22,11 +17,8 @@ class SlidesService:
             credentials_path: Path to the Google service account credentials JSON file.
                             If None, will use the path from ChatConfig.
         """
-        self.config = ChatConfig()
-        self.credentials_path = credentials_path or self.config.GOOGLE_DRIVE_CREDENTIALS_FILE
+        super().__init__(credentials_path)
         self._service = self._get_slides_service()
-        self.chat_service = ChatService()
-        self.logger = get_logger(__name__)
         
     def _get_slides_service(self):
         """Get an authenticated Google Slides service."""
@@ -36,64 +28,158 @@ class SlidesService:
                     'https://www.googleapis.com/auth/drive']
         )
         return build('slides', 'v1', credentials=creds)
-        
-    def _get_drive_service(self):
-        """Get an authenticated Google Drive service for sharing."""
-        creds = service_account.Credentials.from_service_account_file(
-            self.credentials_path,
-            scopes=['https://www.googleapis.com/auth/drive']
-        )
-        return build('drive', 'v3', credentials=creds)
     
-    async def create_presentation_from_csv(self, csv_path: str, title: str = "Q&A Presentation", author_name: str = None, use_rag: bool = True) -> str:
+    async def create_presentation_from_csv(self, csv_path: str, title: str = "Q&A Presentation", author_name: str = None, owner_email: str = None) -> str:
         """
-        Create a Google Slides presentation from a CSV file containing questions.
-        Answers can be generated using RAG or taken from the CSV.
+        Create a Google Slides presentation from a CSV file containing questions and format templates.
+        Answers are generated using RAG with the specified format templates.
         
         Args:
-            csv_path: Path to the CSV file containing questions (and optional answers)
+            csv_path: Path to the CSV file containing questions and format templates
             title: Title for the presentation
             author_name: Name of the author to include on the title slide
-            use_rag: Whether to use RAG to generate answers (True) or use answers from CSV (False)
+            owner_email: Email address to share the presentation with
             
         Returns:
             The ID of the created presentation
         """
+        import time
+        
         # Read the CSV file
-        qa_pairs = self._read_csv(csv_path)
+        question_format_pairs = self.read_csv(csv_path)
         
-        # Create a new presentation
-        presentation = self._service.presentations().create(
-            body={'title': title}
-        ).execute()
-        presentation_id = presentation.get('presentationId')
+        # Create a new presentation with retry logic
+        max_retries = 3
+        retry_delay = 2  # seconds
         
-        # Create a title slide
-        self._create_title_slide(presentation_id, title, author_name)
+        for attempt in range(max_retries):
+            try:
+                presentation = self._service.presentations().create(
+                    body={'title': title}
+                ).execute()
+                presentation_id = presentation.get('presentationId')
+                self.logger.info(f"Created presentation with ID: {presentation_id}")
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    self.logger.warning(f"Error creating presentation (attempt {attempt+1}/{max_retries}): {str(e)}")
+                    time.sleep(retry_delay)
+                    # Increase delay for next attempt (exponential backoff)
+                    retry_delay *= 2
+                else:
+                    self.logger.error(f"Failed to create presentation after {max_retries} attempts: {str(e)}")
+                    raise
+        
+        # Create a title slide with retry logic
+        for attempt in range(max_retries):
+            try:
+                self._create_title_slide(presentation_id, title, author_name)
+                self.logger.info("Created title slide successfully")
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    self.logger.warning(f"Error creating title slide (attempt {attempt+1}/{max_retries}): {str(e)}")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                else:
+                    self.logger.error(f"Failed to create title slide after {max_retries} attempts: {str(e)}")
+                    # Continue without title slide rather than failing the whole process
+        
+        # Track the current slide number
+        current_slide_number = 1  # Start after title slide
         
         # Create slides for each question
-        for i, (question, fallback_answer) in enumerate(qa_pairs, start=1):
-            # Get answer from RAG if enabled, otherwise use the provided answer
-            if use_rag:
-                try:
-                    self.logger.info(f"Generating RAG answer for question: {question}")
-                    answer = await self._get_answer_from_rag(question)
-                    # If RAG fails or returns empty, use fallback
-                    if not answer or answer.startswith("Error generating answer"):
-                        self.logger.warning(f"Using fallback answer for question: {question}")
-                        answer = fallback_answer
-                except Exception as e:
-                    self.logger.error(f"Error in RAG processing: {str(e)}")
-                    answer = fallback_answer
-            else:
-                answer = fallback_answer
+        for i, (question, format_template) in enumerate(question_format_pairs, start=1):
+            try:
+                self.logger.info(f"Generating formatted RAG answer for question: {question}")
+                self.logger.info(f"Using format template: {format_template}")
                 
-            # Create the slide with the question and answer
-            self._create_qa_slide(
-                    presentation_id=presentation_id,
-                    question=question,
-                    answer=answer,
-                    slide_number=i)
+                # Get answer from RAG with format template
+                formatted_answer = await self.get_formatted_content(question, format_template, "slides")
+                
+                # Check if the answer contains slide delimiters
+                if "===SLIDE" in formatted_answer:
+                    # Process multi-slide content
+                    slide_contents = self._parse_slides_content(formatted_answer)
+                    
+                    # Create each slide
+                    for slide_content in slide_contents:
+                        slide_title = slide_content.get('title', f"Question {i}")
+                        slide_body = slide_content.get('content', "")
+                        
+                        # Add retry logic for slide creation
+                        for attempt in range(max_retries):
+                            try:
+                                self._create_qa_slide(
+                                    presentation_id=presentation_id,
+                                    question=slide_title,  # Use the slide title from formatted content
+                                    answer=slide_body,     # Use the slide body from formatted content
+                                    slide_number=current_slide_number
+                                )
+                                current_slide_number += 1
+                                break
+                            except Exception as e:
+                                if attempt < max_retries - 1:
+                                    self.logger.warning(f"Error creating slide {current_slide_number} (attempt {attempt+1}/{max_retries}): {str(e)}")
+                                    time.sleep(retry_delay)
+                                    retry_delay *= 2
+                                else:
+                                    self.logger.error(f"Failed to create slide {current_slide_number} after {max_retries} attempts: {str(e)}")
+                                    raise  # Let the outer exception handler catch this
+                else:
+                    # Create a single slide with the formatted answer
+                    for attempt in range(max_retries):
+                        try:
+                            self._create_qa_slide(
+                                presentation_id=presentation_id,
+                                question=question,
+                                answer=formatted_answer,
+                                slide_number=current_slide_number
+                            )
+                            current_slide_number += 1
+                            break
+                        except Exception as e:
+                            if attempt < max_retries - 1:
+                                self.logger.warning(f"Error creating slide {current_slide_number} (attempt {attempt+1}/{max_retries}): {str(e)}")
+                                time.sleep(retry_delay)
+                                retry_delay *= 2
+                            else:
+                                self.logger.error(f"Failed to create slide {current_slide_number} after {max_retries} attempts: {str(e)}")
+                                raise  # Let the outer exception handler catch this
+                    
+            except Exception as e:
+                self.logger.error(f"Error processing question {i}: {str(e)}")
+                # Create a slide with error message
+                try:
+                    self._create_qa_slide(
+                        presentation_id=presentation_id,
+                        question=question,
+                        answer=f"Error generating content: {str(e)}",
+                        slide_number=current_slide_number
+                    )
+                    current_slide_number += 1
+                except Exception as inner_e:
+                    self.logger.error(f"Error creating error slide for question {i}: {str(inner_e)}")
+                    # Continue without the error slide
+        
+        # Share the presentation if an email was provided
+        if owner_email:
+            max_share_retries = 3
+            share_retry_delay = 2  # seconds
+            
+            for attempt in range(max_share_retries):
+                try:
+                    self.share_document(presentation_id, owner_email, "presentation")
+                    self.logger.info(f"Successfully shared presentation with {owner_email}")
+                    break
+                except Exception as e:
+                    if attempt < max_share_retries - 1:
+                        self.logger.warning(f"Error sharing presentation (attempt {attempt+1}/{max_share_retries}): {str(e)}")
+                        time.sleep(share_retry_delay)
+                        share_retry_delay *= 2
+                    else:
+                        self.logger.error(f"Failed to share presentation after {max_share_retries} attempts: {str(e)}")
+                        # Continue without sharing rather than failing the process
             
         return presentation_id
         
@@ -326,63 +412,103 @@ class SlidesService:
                 body={'requests': text_requests}
             ).execute()
     
-    async def _get_answer_from_rag(self, question: str) -> str:
+    def _parse_slides_content(self, text: str) -> List[Dict]:
         """
-        Get an answer to a question using the RAG chatbot.
+        Parse multi-slide content with slide delimiters.
+        
+        Expected format:
+        ===SLIDE 1===
+        Title: Slide Title
+        Slide content here
+        
+        ===SLIDE 2===
+        Title: Another Title
+        More content
         
         Args:
-            question: The question to ask
+            text: Text with slide delimiters
             
         Returns:
-            The answer generated by the RAG system
+            List of dictionaries with slide title and content
         """
-        try:
-            # Create a unique session ID for this interaction
-            session_id = f"slides_gen_{uuid.uuid4().hex[:8]}"
-            
-            # Create a message object for the chat service
-            message = Message(
-                text=question,
-                session_id=session_id,
-                mode="rag"  # Use RAG mode to get the best context-aware response
-            )
-            
-            # Get response from the chat service
-            response = await self.chat_service.chat(message)
-            
-            # Extract and return just the RAG response text
-            return response.rag_response
-            
-        except Exception as e:
-            self.logger.error(f"Error getting RAG answer for question: {question}. Error: {str(e)}")
-            return f"Error generating answer: {str(e)}"
-
-    def _read_csv(self, csv_path: str) -> list[tuple[str | Any, str | Any]]:
-        """
-        Read questions from a CSV file. The CSV should contain at least a 'question' column.
-        An optional 'answer' column can be included as a fallback.
+        slides = []
         
-        Expected CSV format:
-        question,answer
-        "What is...","The answer is..."
-        
-        Args:
-            csv_path: Path to the CSV file
+        # Split by slide delimiter
+        if "===SLIDE" in text:
+            parts = text.split("===SLIDE")
             
-        Returns:
-            List of tuples containing (question, fallback_answer) pairs
-        """
-        qa_pairs = []
-        with open(csv_path, 'r', encoding='utf-8') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                if 'question' in row:
-                    # Use the provided answer as a fallback, or empty string if not available
-                    fallback_answer = row.get('answer', '')
-                    qa_pairs.append((row['question'], fallback_answer))
-        return qa_pairs
-
-
+            # Process each part (skip the first part if it's empty)
+            for part in parts:
+                if not part.strip():
+                    continue
+                    
+                # Split the part into lines
+                lines = part.strip().split('\n')
+                
+                # Skip any slide number in the first line
+                start_index = 0
+                if lines[0].strip().endswith("==="):
+                    start_index = 1
+                
+                # Find the title line
+                title = ""
+                title_index = -1
+                
+                for i, line in enumerate(lines[start_index:], start=start_index):
+                    if line.startswith("Title:"):
+                        title = line[6:].strip()
+                        title_index = i
+                        break
+                
+                # Get the content (everything after the title)
+                if title_index != -1 and title_index < len(lines) - 1:
+                    content_lines = lines[title_index + 1:]
+                    # Check if first content line starts with "Body:" and remove it
+                    if content_lines and content_lines[0].strip().startswith("Body:"):
+                        content_lines[0] = content_lines[0].strip()[5:].strip()
+                    content = '\n'.join(content_lines)
+                else:
+                    # If no title found or no content after title, use a default
+                    if title == "":
+                        title = "Slide"
+                    content = '\n'.join(lines[start_index:])
+                
+                # Remove "Body:" prefix from content if present
+                content = content.strip()
+                if content.startswith("Body:"):
+                    content = content[5:].strip()
+                
+                slides.append({
+                    'title': title,
+                    'content': content
+                })
+        else:
+            # Handle the case where there's no slide delimiter but still formatted text
+            lines = text.strip().split('\n')
+            
+            # Check if the first line is a title
+            if lines and lines[0].startswith("Title:"):
+                title = lines[0][6:].strip()
+                content_lines = lines[1:]
+                # Check if first content line starts with "Body:" and remove it
+                if content_lines and content_lines[0].strip().startswith("Body:"):
+                    content_lines[0] = content_lines[0].strip()[5:].strip()
+                content = '\n'.join(content_lines).strip()
+            else:
+                title = "Slide"
+                content = text.strip()
+                
+            # Remove "Body:" prefix from content if present
+            if content.startswith("Body:"):
+                content = content[5:].strip()
+                
+            slides.append({
+                'title': title,
+                'content': content
+            })
+        
+        return slides
+        
     def _parse_markdown(self, text: str) -> List[Dict]:
         """
         Parse Markdown text into structured content for slides.
@@ -393,6 +519,7 @@ class SlidesService:
         - Bold text using **bold** syntax
         - Italic text using *italic* syntax
         - Links using [text](url) syntax
+        - Headings using # syntax
 
         Args:
             text: Markdown formatted text
@@ -407,106 +534,160 @@ class SlidesService:
         # Handle newlines consistently
         text = text.replace('\r\n', '\n')
 
-        # Split the text into paragraphs (blocks separated by blank lines)
-        paragraphs = re.split(r'\n\s*\n', text)
-        self.logger.info(f"Split into {len(paragraphs)} paragraphs")
-
-        for paragraph_idx, paragraph in enumerate(paragraphs):
-            paragraph = paragraph.strip()
-            if not paragraph:
-                continue
-
-            self.logger.info(f"Processing paragraph {paragraph_idx}: {paragraph[:50]}...")
-
-            # Detect paragraph type based on its first line
-            lines = paragraph.split('\n')
-            first_line = lines[0].strip() if lines else ""
-
-            # Check if it's a bullet point list (starts with - or *)
-            if first_line.startswith('- ') or first_line.startswith('* '):
-                self.logger.info(f"Paragraph {paragraph_idx} is a bullet list")
-                items = []
-                current_item = ""
-                indent_level = 0
-
-                for line_idx, line in enumerate(lines):
-                    # Capture indentation before stripping
-                    indentation = len(line) - len(line.lstrip())
-                    line_content = line.strip()
-
-                    # Skip empty lines
-                    if not line_content:
-                        continue
-
-                    # Check if this is a new bullet point
-                    if line_content.startswith('- ') or line_content.startswith('* '):
-                        self.logger.info(f"Line {line_idx} is a bullet point: {line_content[:30]}...")
-
-                        # Determine nesting level (0, 1, 2, etc.)
-                        nest_level = indentation // 2  # Assuming 2 spaces per level
-                        self.logger.info(f"Detected nesting level: {nest_level}")
-
-                        # If we already have content, save the previous item
-                        if current_item:
-                            self.logger.info(f"Processing previous bullet item: {current_item[:30]}...")
-                            # Process markdown in bullet points
-                            processed_item = self._process_inline_formatting_v2(current_item)
-                            items.append({
-                                'text': processed_item['text'],
-                                'level': indent_level,
-                                'formats': processed_item.get('formats', []),
-                                'links': processed_item.get('links', [])
-                            })
-                            current_item = ""
-
-                        # Update the current indentation level
-                        indent_level = nest_level
-
-                        # Start a new item (removing the bullet marker)
-                        if line_content.startswith('- '):
-                            current_item = line_content[2:]
-                        else:  # starts with *
-                            current_item = line_content[2:]
-                    else:
-                        # This is a continuation of the current item
-                        self.logger.info(f"Line {line_idx} is continuation of bullet: {line_content[:30]}...")
-                        current_item += " " + line_content
-
-                # Add the last item if there is one
-                if current_item:
-                    self.logger.info(f"Processing final bullet item: {current_item[:30]}...")
-                    # Process markdown in bullet points
-                    processed_item = self._process_inline_formatting_v2(current_item)
-                    items.append({
-                        'text': processed_item['text'],
-                        'level': indent_level,
-                        'formats': processed_item.get('formats', []),
-                        'links': processed_item.get('links', [])
-                    })
-
-                # Add the bullet list to the result
-                if items:
-                    self.logger.info(f"Adding bullet list with {len(items)} items to result")
-                    result.append({
-                        'type': 'bullet_list',
-                        'items': items
-                    })
-            # Regular paragraph
+        # First identify and extract headings from other content
+        lines = text.split('\n')
+        current_section = []
+        processed_sections = []
+        
+        for line in lines:
+            # If line is a heading, start a new section
+            if line.strip().startswith('#'):
+                # If we have content in the current section, save it
+                if current_section:
+                    processed_sections.append('\n'.join(current_section))
+                    current_section = []
+                
+                # Add the heading as its own section
+                processed_sections.append(line)
+                current_section = []
             else:
-                self.logger.info(f"Paragraph {paragraph_idx} is a regular paragraph")
-                # Process inline formatting (bold, italic, links) for later application in slides
-                processed_paragraph = self._process_inline_formatting_v2(paragraph)
-
-                self.logger.info(f"Processed paragraph: text={processed_paragraph['text'][:50]}...")
-                self.logger.info(f"Found {len(processed_paragraph.get('formats', []))} format elements")
-                self.logger.info(f"Found {len(processed_paragraph.get('links', []))} links")
-
+                # Add line to current section
+                current_section.append(line)
+        
+        # Add the last section if it has content
+        if current_section:
+            processed_sections.append('\n'.join(current_section))
+        
+        self.logger.info(f"Split content into {len(processed_sections)} sections (headings + content blocks)")
+        
+        # Process each section to handle different content types
+        for section_idx, section in enumerate(processed_sections):
+            # If this is a heading, add it directly as a paragraph
+            if section.strip().startswith('#'):
+                self.logger.info(f"HEADING SECTION {section_idx}: '{section.strip()}'")
+                processed_content = self._process_inline_formatting_v2(section)
+                
                 result.append({
                     'type': 'paragraph',
-                    'text': processed_paragraph['text'],
-                    'formats': processed_paragraph.get('formats', []),
-                    'links': processed_paragraph.get('links', [])
+                    'text': section.strip(),  # Keep the # for detection during rendering
+                    'formats': processed_content.get('formats', []),
+                    'links': processed_content.get('links', [])
                 })
+                continue
+                
+            # For non-heading sections, split into paragraphs and process normally
+            section_paragraphs = re.split(r'\n\s*\n', section)
+            self.logger.info(f"CONTENT SECTION {section_idx}: Split into {len(section_paragraphs)} paragraphs")
+            
+            # Process each paragraph in this section
+            for paragraph_idx, paragraph in enumerate(section_paragraphs):
+                paragraph = paragraph.strip()
+                if not paragraph:
+                    continue
+                    
+                self.logger.info(f"Processing paragraph {paragraph_idx}: {paragraph[:50]}...")
+    
+                # Detect paragraph type based on its first line
+                lines = paragraph.split('\n')
+                first_line = lines[0].strip() if lines else ""
+
+                # Check if it's a heading (starts with #)
+                if first_line.startswith('#'):
+                    self.logger.info(f"Paragraph {paragraph_idx} is a heading")
+                    # Process as a regular paragraph - we'll detect the heading when rendering
+                    processed_paragraph = self._process_inline_formatting_v2(paragraph)
+                    
+                    result.append({
+                        'type': 'paragraph',  # Still treat as paragraph but we'll process it as heading later
+                        'text': paragraph,    # Keep the # markers for later detection
+                        'formats': processed_paragraph.get('formats', []),
+                        'links': processed_paragraph.get('links', [])
+                    })
+                # Check if it's a bullet point list (starts with - or *)
+                elif first_line.startswith('- ') or first_line.startswith('* '):
+                    self.logger.info(f"Paragraph {paragraph_idx} is a bullet list")
+                    items = []
+                    current_item = ""
+                    indent_level = 0
+
+                    for line_idx, line in enumerate(lines):
+                        # Capture indentation before stripping
+                        indentation = len(line) - len(line.lstrip())
+                        line_content = line.strip()
+
+                        # Skip empty lines
+                        if not line_content:
+                            continue
+
+                        # Check if this is a new bullet point
+                        if line_content.startswith('- ') or line_content.startswith('* '):
+                            self.logger.info(f"Line {line_idx} is a bullet point: {line_content[:30]}...")
+
+                            # Determine nesting level (0, 1, 2, etc.)
+                            nest_level = indentation // 2  # Assuming 2 spaces per level
+                            self.logger.info(f"Detected nesting level: {nest_level}")
+
+                            # If we already have content, save the previous item
+                            if current_item:
+                                self.logger.info(f"Processing previous bullet item: {current_item[:30]}...")
+                                # Process markdown in bullet points
+                                processed_item = self._process_inline_formatting_v2(current_item)
+                                items.append({
+                                    'text': processed_item['text'],
+                                    'level': indent_level,
+                                    'formats': processed_item.get('formats', []),
+                                    'links': processed_item.get('links', [])
+                                })
+                                current_item = ""
+
+                            # Update the current indentation level
+                            indent_level = nest_level
+
+                            # Start a new item (removing the bullet marker)
+                            if line_content.startswith('- '):
+                                current_item = line_content[2:]
+                            else:  # starts with *
+                                current_item = line_content[2:]
+                        else:
+                            # This is a continuation of the current item
+                            self.logger.info(f"Line {line_idx} is continuation of bullet: {line_content[:30]}...")
+                            current_item += " " + line_content
+
+                    # Add the last item if there is one
+                    if current_item:
+                        self.logger.info(f"Processing final bullet item: {current_item[:30]}...")
+                        # Process markdown in bullet points
+                        processed_item = self._process_inline_formatting_v2(current_item)
+                        items.append({
+                            'text': processed_item['text'],
+                            'level': indent_level,
+                            'formats': processed_item.get('formats', []),
+                            'links': processed_item.get('links', [])
+                        })
+
+                    # Add the bullet list to the result
+                    if items:
+                        self.logger.info(f"Adding bullet list with {len(items)} items to result")
+                        result.append({
+                            'type': 'bullet_list',
+                            'items': items
+                        })
+                # Regular paragraph
+                else:
+                    self.logger.info(f"Paragraph {paragraph_idx} is a regular paragraph")
+                    # Process inline formatting (bold, italic, links) for later application in slides
+                    processed_paragraph = self._process_inline_formatting_v2(paragraph)
+
+                    self.logger.info(f"Processed paragraph: text={processed_paragraph['text'][:50]}...")
+                    self.logger.info(f"Found {len(processed_paragraph.get('formats', []))} format elements")
+                    self.logger.info(f"Found {len(processed_paragraph.get('links', []))} links")
+
+                    result.append({
+                        'type': 'paragraph',
+                        'text': processed_paragraph['text'],
+                        'formats': processed_paragraph.get('formats', []),
+                        'links': processed_paragraph.get('links', [])
+                    })
 
         self.logger.info(f"Finished parsing markdown, found {len(result)} content blocks")
         return result
@@ -715,14 +896,52 @@ class SlidesService:
         self.logger.info(f"Question: {question[:50]}...")
         self.logger.info(f"Answer: {answer[:50]}...")
 
+        # Log the raw answer to see what's coming in
+        self.logger.info(f"RAW ANSWER: '{answer[:200]}...'")
+        
+        # Check for headings in raw text
+        for line in answer.split('\n'):
+            if line.strip().startswith('#'):
+                self.logger.info(f"FOUND HEADING in raw text: '{line.strip()}'")
+        
         # Parse the answer as markdown
         parsed_answer = self._parse_markdown(answer)
         self.logger.info(f"Parsed answer contains {len(parsed_answer)} blocks")
+        
+        # Log each parsed block for debugging
+        for idx, block in enumerate(parsed_answer):
+            block_type = block.get('type', 'unknown')
+            self.logger.info(f"PARSED BLOCK {idx}: Type={block_type}")
+            if 'text' in block:
+                self.logger.info(f"PARSED BLOCK {idx} TEXT: '{block['text'][:50]}...'")
+                # Check specifically for headings in parsed content
+                if block['text'].strip().startswith('#'):
+                    self.logger.info(f"HEADING FOUND IN PARSED BLOCK {idx}: '{block['text'][:50]}...'")
+                    
+            if block_type == 'bullet_list' and 'items' in block:
+                self.logger.info(f"PARSED BLOCK {idx}: Contains {len(block['items'])} bullet items")
+                # Check first few bullet items
+                for i, item in enumerate(block['items'][:3]):
+                    if isinstance(item, dict) and 'text' in item:
+                        self.logger.info(f"  BULLET ITEM {i}: '{item['text'][:30]}...'")
+                        if item['text'].strip().startswith('#'):
+                            self.logger.info(f"  HEADING FOUND IN BULLET ITEM {i}: '{item['text'][:30]}...'")
+                    elif isinstance(item, str):
+                        self.logger.info(f"  BULLET ITEM {i}: '{item[:30]}...'")
+                        if item.strip().startswith('#'):
+                            self.logger.info(f"  HEADING FOUND IN BULLET ITEM {i}: '{item[:30]}...'")
+                    else:
+                        self.logger.info(f"  BULLET ITEM {i}: Unknown format")
+
+        # Generate a unique slide ID using both number and timestamp
+        import time
+        unique_slide_id = f'qa_slide_{slide_number}_{int(time.time() * 1000)}'
+        self.logger.info(f"Using unique slide ID: {unique_slide_id}")
 
         # Step 1: Create the slide
         create_slide_request = [{
             'createSlide': {
-                'objectId': f'qa_slide_{slide_number}',
+                'objectId': unique_slide_id,
                 'insertionIndex': slide_number,
                 'slideLayoutReference': {
                     'predefinedLayout': 'TITLE_AND_BODY'
@@ -746,16 +965,17 @@ class SlidesService:
         # Get the current slide
         current_slide = None
         for s in slide.get('slides', []):
-            if s.get('objectId') == f'qa_slide_{slide_number}':
+            if s.get('objectId') == unique_slide_id:
                 current_slide = s
                 break
 
         # If we couldn't find the slide, use a different approach
         if not current_slide:
             self.logger.info(f"Could not find slide {slide_number}, using fallback approach")
-            # Alternative approach: Create text boxes directly
-            question_box_id = f'question_box_{slide_number}'
-            answer_box_id = f'answer_box_{slide_number}'
+            # Alternative approach: Create text boxes directly with unique IDs
+            timestamp_suffix = int(time.time() * 1000)
+            question_box_id = f'question_box_{slide_number}_{timestamp_suffix}'
+            answer_box_id = f'answer_box_{slide_number}_{timestamp_suffix}'
 
             text_boxes_request = [
                 # Create a text box for the question at the top
@@ -764,7 +984,7 @@ class SlidesService:
                         'objectId': question_box_id,
                         'shapeType': 'TEXT_BOX',
                         'elementProperties': {
-                            'pageObjectId': f'qa_slide_{slide_number}',
+                            'pageObjectId': unique_slide_id,
                             'size': {
                                 'width': {'magnitude': 350, 'unit': 'PT'},
                                 'height': {'magnitude': 100, 'unit': 'PT'}
@@ -784,7 +1004,7 @@ class SlidesService:
                     'insertText': {
                         'objectId': question_box_id,
                         'insertionIndex': 0,
-                        'text': f'Question {slide_number}:\n{question}'
+                        'text': question
                     }
                 },
                 # Create a text box for the answer below
@@ -793,7 +1013,7 @@ class SlidesService:
                         'objectId': answer_box_id,
                         'shapeType': 'TEXT_BOX',
                         'elementProperties': {
-                            'pageObjectId': f'qa_slide_{slide_number}',
+                            'pageObjectId': unique_slide_id,
                             'size': {
                                 'width': {'magnitude': 350, 'unit': 'PT'},
                                 'height': {'magnitude': 200, 'unit': 'PT'}
@@ -814,7 +1034,7 @@ class SlidesService:
                     'insertText': {
                         'objectId': answer_box_id,
                         'insertionIndex': 0,
-                        'text': f'Answer:\n{answer.replace("**", "").replace("*", "")}'  # Simple markdown stripping
+                        'text': answer.replace("**", "").replace("*", "")  # Simple markdown stripping
                     }
                 },
                 # Format the question text as title
@@ -843,18 +1063,9 @@ class SlidesService:
                         },
                         'style': {
                             'fontSize': {
-                                'magnitude': 16,
+                                'magnitude': 14,
                                 'unit': 'PT'
                             },
-                            'foregroundColor': {
-                                'opaqueColor': {
-                                    'rgbColor': {
-                                        'red': 0.5,
-                                        'green': 0.5,
-                                        'blue': 0.5
-                                    }
-                                }
-                            }
                         },
                         'fields': 'fontSize,foregroundColor'
                     }
@@ -891,7 +1102,7 @@ class SlidesService:
                 'insertText': {
                     'objectId': title_id,
                     'insertionIndex': 0,
-                    'text': f'Question {slide_number}: {question}'
+                    'text': question
                 }
             })
 
@@ -914,36 +1125,131 @@ class SlidesService:
             })
 
         if body_id:
-            # First insert the "Answer:" label
-            text_requests.append({
-                'insertText': {
-                    'objectId': body_id,
-                    'insertionIndex': 0,
-                    'text': 'Answer:\n'
-                }
-            })
-
-            insertion_index = len('Answer:\n')
+            # Start with empty body
+            insertion_index = 0
 
             # Process the markdown content
             for block_idx, content in enumerate(parsed_answer):
                 self.logger.info(f"Processing content block {block_idx}, type={content['type']}")
 
                 if content['type'] == 'paragraph':
+                    # Determine if this paragraph should be treated as a heading
+                    is_heading = False
+                    heading_level = 0
+                    text_content = content['text']
+                    
+                    # Add more detailed logging
+                    self.logger.info(f"HEADING DETECTION - Examining text: '{text_content[:40]}...'")
+                    
+                    # PART 1: Check for explicit Markdown heading patterns (# Heading or ## Subheading)
+                    if text_content.lstrip().startswith('#'):
+                        # Get the stripped version for more accurate detection
+                        stripped_content = text_content.lstrip()
+                        self.logger.info(f"POTENTIAL HEADING - Stripped text starts with #: '{stripped_content[:40]}...'")
+                        
+                        # Count the number of # symbols at the start
+                        heading_chars = 0
+                        for char in stripped_content:
+                            if char == '#':
+                                heading_chars += 1
+                            else:
+                                break
+                                
+                        if heading_chars > 0 and heading_chars <= 3:  # Support up to ### (h3)
+                            # Extract the heading text without the # symbols
+                            heading_text = stripped_content[heading_chars:].strip()
+                            text_content = heading_text  # Remove the # symbols from displayed text
+                            is_heading = True
+                            heading_level = heading_chars
+                            self.logger.info(f"CONFIRMED HEADING - Level {heading_level}: '{heading_text[:40]}...'")
+                            self.logger.info(f"HEADING DISPLAY - Will display as: '{text_content[:40]}...'")
+                        else:
+                            self.logger.info(f"NOT A MARKDOWN HEADING - Invalid # symbols: {heading_chars}")
+                    
+                    # PART 2: Infer heading status from structure and formatting
+                    # If the text isn't already identified as a heading by explicit Markdown
+                    elif (
+                        # 1. Short lines that are likely headers/section names
+                        (len(text_content.strip().split()) <= 4) or
+                        
+                        # 2. Lines ending with colon (often introducing lists/sections)
+                        text_content.strip().endswith(':') or
+                        
+                        # 3. Lines without terminal punctuation
+                        (not any(text_content.strip().endswith(p) for p in ['.', '!', '?', ',', ';'])) or
+                        
+                        # 4. Short self-contained statements
+                        (len(text_content.strip()) < 40 and ',' not in text_content)
+                    ):
+                        is_heading = True
+                        heading_level = 1  # Treat as h1 by default 
+                        self.logger.info(f"INFERRED HEADING - Based on structure: '{text_content[:40]}...'")
+                    else:
+                        self.logger.info(f"NOT A HEADING - No heading patterns detected")
+                    
                     # Add the paragraph text
                     text_requests.append({
                         'insertText': {
                             'objectId': body_id,
                             'insertionIndex': insertion_index,
-                            'text': content['text'] + '\n\n'
+                            'text': text_content + '\n'
                         }
                     })
 
-                    self.logger.info(f"Added paragraph text: '{content['text'][:50]}...'")
-                    self.logger.info(f"Insertion index now at: {insertion_index}")
+                    self.logger.info(f"TEXT INSERTION - Added text: '{text_content[:50]}...'")
+                    self.logger.info(f"INSERTION INDEX - Now at: {insertion_index}")
+                    
+                    if is_heading:
+                        self.logger.info(f"HEADING STYLE - Will apply heading level {heading_level} formatting next")
+                    else:
+                        self.logger.info(f"PARAGRAPH STYLE - Will apply normal paragraph formatting")
 
+                    # Apply special formatting for headings
+                    if is_heading:
+                        # Make headings bold always
+                        text_requests.append({
+                            'updateTextStyle': {
+                                'objectId': body_id,
+                                'textRange': {
+                                    'type': 'FIXED_RANGE',
+                                    'startIndex': insertion_index,
+                                    'endIndex': insertion_index + len(text_content)
+                                },
+                                'style': {
+                                    'bold': True,
+                                    'fontSize': {
+                                        # Size based on heading level
+                                        'magnitude': 18 - (heading_level * 1),  # H1=18pt, H2=17pt, H3=16pt
+                                        'unit': 'PT'
+                                    }
+                                },
+                                'fields': 'bold,fontSize'
+                            }
+                        })
+                        
+                        # Add some space after headings
+                        text_requests.append({
+                            'updateParagraphStyle': {
+                                'objectId': body_id,
+                                'textRange': {
+                                    'type': 'FIXED_RANGE',
+                                    'startIndex': insertion_index,
+                                    'endIndex': insertion_index + len(text_content)
+                                },
+                                'style': {
+                                    'spaceBelow': {
+                                        'magnitude': 10,
+                                        'unit': 'PT'
+                                    }
+                                },
+                                'fields': 'spaceBelow'
+                            }
+                        })
+                        
+                        self.logger.info(f"Applied heading style to: {text_content}")
+                    
                     # Apply formatting for formatted segments (bold, italic)
-                    current_text_length = len(content['text']) + 2  # +2 for the newlines
+                    current_text_length = len(text_content) + 1  # +1 for the newline
 
                     if 'formats' in content and content['formats']:
                         for fmt_idx, format_info in enumerate(content['formats']):
@@ -954,41 +1260,53 @@ class SlidesService:
                             self.logger.info(
                                 f"Applying format {fmt_idx}: type={format_info['type']}, start={start_pos}, end={end_pos}")
 
-                            # Apply formatting
-                            if format_info['type'] == 'bold':
-                                text_requests.append({
-                                    'updateTextStyle': {
-                                        'objectId': body_id,
-                                        'textRange': {
-                                            'type': 'FIXED_RANGE',
-                                            'startIndex': insertion_index + start_pos,
-                                            'endIndex': insertion_index + end_pos
-                                        },
-                                        'style': {
-                                            'bold': True
-                                        },
-                                        'fields': 'bold'
-                                    }
-                                })
-                                self.logger.info(
-                                    f"Applied bold formatting from {insertion_index + start_pos} to {insertion_index + end_pos}")
-                            elif format_info['type'] == 'italic':
-                                text_requests.append({
-                                    'updateTextStyle': {
-                                        'objectId': body_id,
-                                        'textRange': {
-                                            'type': 'FIXED_RANGE',
-                                            'startIndex': insertion_index + start_pos,
-                                            'endIndex': insertion_index + end_pos
-                                        },
-                                        'style': {
-                                            'italic': True
-                                        },
-                                        'fields': 'italic'
-                                    }
-                                })
-                                self.logger.info(
-                                    f"Applied italic formatting from {insertion_index + start_pos} to {insertion_index + end_pos}")
+                            # Get current text length - we'll use this to validate ranges
+                            # This is needed because format positions might get misaligned due to content changes
+                            current_text_length = insertion_index + len(content['text']) + 1  # +1 for the newline
+                            
+                            # Apply formatting with safety checks
+                            start_idx = min(insertion_index + start_pos, current_text_length - 1)
+                            end_idx = min(insertion_index + end_pos, current_text_length)
+                            
+                            # Only apply formatting if range is valid
+                            if start_idx < end_idx:
+                                if format_info['type'] == 'bold':
+                                    text_requests.append({
+                                        'updateTextStyle': {
+                                            'objectId': body_id,
+                                            'textRange': {
+                                                'type': 'FIXED_RANGE',
+                                                'startIndex': start_idx,
+                                                'endIndex': end_idx
+                                            },
+                                            'style': {
+                                                'bold': True
+                                            },
+                                            'fields': 'bold'
+                                        }
+                                    })
+                                    self.logger.info(
+                                        f"Applied bold formatting from {start_idx} to {end_idx}")
+                                elif format_info['type'] == 'italic':
+                                    text_requests.append({
+                                        'updateTextStyle': {
+                                            'objectId': body_id,
+                                            'textRange': {
+                                                'type': 'FIXED_RANGE',
+                                                'startIndex': start_idx,
+                                                'endIndex': end_idx
+                                            },
+                                            'style': {
+                                                'italic': True
+                                            },
+                                            'fields': 'italic'
+                                        }
+                                    })
+                                    self.logger.info(
+                                        f"Applied italic formatting from {start_idx} to {end_idx}")
+                            else:
+                                self.logger.warning(
+                                    f"Skipping invalid {format_info['type']} formatting range: {start_idx}-{end_idx}")
 
                     # Apply links
                     if 'links' in content and content['links']:
@@ -1000,37 +1318,48 @@ class SlidesService:
                             self.logger.info(
                                 f"Applying link {link_idx}: url={link_info['url']}, start={start_pos}, end={end_pos}")
 
-                            # Create hyperlink in the slide
-                            text_requests.append({
-                                'updateTextStyle': {
-                                    'objectId': body_id,
-                                    'textRange': {
-                                        'type': 'FIXED_RANGE',
-                                        'startIndex': insertion_index + start_pos,
-                                        'endIndex': insertion_index + end_pos
-                                    },
-                                    'style': {
-                                        'link': {
-                                            'url': link_info['url']
+                            # Get current text length for validation
+                            current_text_length = insertion_index + len(content['text']) + 1  # +1 for the newline
+                            
+                            # Apply safety checks to link positions
+                            start_idx = min(insertion_index + start_pos, current_text_length - 1)
+                            end_idx = min(insertion_index + end_pos, current_text_length)
+                            
+                            # Only apply link if range is valid
+                            if start_idx < end_idx:
+                                # Create hyperlink in the slide
+                                text_requests.append({
+                                    'updateTextStyle': {
+                                        'objectId': body_id,
+                                        'textRange': {
+                                            'type': 'FIXED_RANGE',
+                                            'startIndex': start_idx,
+                                            'endIndex': end_idx
                                         },
-                                        'foregroundColor': {
-                                            'opaqueColor': {
-                                                'rgbColor': {
-                                                    'red': 0.0,
-                                                    'green': 0.0,
-                                                    'blue': 0.8
+                                        'style': {
+                                            'link': {
+                                                'url': link_info['url']
+                                            },
+                                            'foregroundColor': {
+                                                'opaqueColor': {
+                                                    'rgbColor': {
+                                                        'red': 0.0,
+                                                        'green': 0.0,
+                                                        'blue': 0.8
+                                                    }
                                                 }
-                                            }
+                                            },
+                                            'underline': True
                                         },
-                                        'underline': True
-                                    },
-                                    'fields': 'link,foregroundColor,underline'
-                                }
-                            })
-                            self.logger.info(f"Applied link from {insertion_index + start_pos} to {insertion_index + end_pos}")
+                                        'fields': 'link,foregroundColor,underline'
+                                    }
+                                })
+                                self.logger.info(f"Applied link from {start_idx} to {end_idx}")
+                            else:
+                                self.logger.warning(f"Skipping invalid link range: {start_idx}-{end_idx}")
 
                     # Advance insertion index
-                    insertion_index += len(content['text']) + 2
+                    insertion_index += len(content['text']) + 1
                     self.logger.info(f"Advanced insertion index to {insertion_index}")
 
                 elif content['type'] in ['bullet_list', 'numbered_list']:
@@ -1079,41 +1408,53 @@ class SlidesService:
                             self.logger.info(
                                 f"Applying format {fmt_idx} to list item: type={format_info['type']}, start={start_pos}, end={end_pos}")
 
-                            # Apply formatting
-                            if format_info['type'] == 'bold':
-                                text_requests.append({
-                                    'updateTextStyle': {
-                                        'objectId': body_id,
-                                        'textRange': {
-                                            'type': 'FIXED_RANGE',
-                                            'startIndex': insertion_index + start_pos,
-                                            'endIndex': insertion_index + end_pos
-                                        },
-                                        'style': {
-                                            'bold': True
-                                        },
-                                        'fields': 'bold'
-                                    }
-                                })
-                                self.logger.info(
-                                    f"Applied bold formatting to list item from {insertion_index + start_pos} to {insertion_index + end_pos}")
-                            elif format_info['type'] == 'italic':
-                                text_requests.append({
-                                    'updateTextStyle': {
-                                        'objectId': body_id,
-                                        'textRange': {
-                                            'type': 'FIXED_RANGE',
-                                            'startIndex': insertion_index + start_pos,
-                                            'endIndex': insertion_index + end_pos
-                                        },
-                                        'style': {
-                                            'italic': True
-                                        },
-                                        'fields': 'italic'
-                                    }
-                                })
-                                self.logger.info(
-                                    f"Applied italic formatting to list item from {insertion_index + start_pos} to {insertion_index + end_pos}")
+                            # Get list item text length for validation
+                            item_text_length = insertion_index + len(item_text) + 1  # +1 for newline
+                            
+                            # Apply safety checks to formatting positions
+                            start_idx = min(insertion_index + start_pos, item_text_length - 1)
+                            end_idx = min(insertion_index + end_pos, item_text_length)
+                            
+                            # Only apply formatting if range is valid
+                            if start_idx < end_idx:
+                                # Apply formatting
+                                if format_info['type'] == 'bold':
+                                    text_requests.append({
+                                        'updateTextStyle': {
+                                            'objectId': body_id,
+                                            'textRange': {
+                                                'type': 'FIXED_RANGE',
+                                                'startIndex': start_idx,
+                                                'endIndex': end_idx
+                                            },
+                                            'style': {
+                                                'bold': True
+                                            },
+                                            'fields': 'bold'
+                                        }
+                                    })
+                                    self.logger.info(
+                                        f"Applied bold formatting to list item from {start_idx} to {end_idx}")
+                                elif format_info['type'] == 'italic':
+                                    text_requests.append({
+                                        'updateTextStyle': {
+                                            'objectId': body_id,
+                                            'textRange': {
+                                                'type': 'FIXED_RANGE',
+                                                'startIndex': start_idx,
+                                                'endIndex': end_idx
+                                            },
+                                            'style': {
+                                                'italic': True
+                                            },
+                                            'fields': 'italic'
+                                        }
+                                    })
+                                    self.logger.info(
+                                        f"Applied italic formatting to list item from {start_idx} to {end_idx}")
+                            else:
+                                self.logger.warning(
+                                    f"Skipping invalid {format_info['type']} formatting for list item: {start_idx}-{end_idx}")
 
                         # Apply links in bullet items
                         for link_idx, link_info in enumerate(item_links):
@@ -1124,35 +1465,45 @@ class SlidesService:
                             self.logger.info(
                                 f"Applying link {link_idx} to list item: url={link_info['url']}, start={start_pos}, end={end_pos}")
 
-                            # Create hyperlink in the slide
-                            text_requests.append({
-                                'updateTextStyle': {
-                                    'objectId': body_id,
-                                    'textRange': {
-                                        'type': 'FIXED_RANGE',
-                                        'startIndex': insertion_index + start_pos,
-                                        'endIndex': insertion_index + end_pos
-                                    },
-                                    'style': {
-                                        'link': {
-                                            'url': link_info['url']
+                            # Get list item text length for link validation
+                            item_text_length = insertion_index + len(item_text) + 1  # +1 for newline
+                            
+                            # Apply safety checks to link positions
+                            start_idx = min(insertion_index + start_pos, item_text_length - 1)
+                            end_idx = min(insertion_index + end_pos, item_text_length)
+                            
+                            # Only apply link if range is valid
+                            if start_idx < end_idx:
+                                # Create hyperlink in the slide
+                                text_requests.append({
+                                    'updateTextStyle': {
+                                        'objectId': body_id,
+                                        'textRange': {
+                                            'type': 'FIXED_RANGE',
+                                            'startIndex': start_idx,
+                                            'endIndex': end_idx
                                         },
-                                        'foregroundColor': {
-                                            'opaqueColor': {
-                                                'rgbColor': {
-                                                    'red': 0.0,
-                                                    'green': 0.0,
-                                                    'blue': 0.8
+                                        'style': {
+                                            'link': {
+                                                'url': link_info['url']
+                                            },
+                                            'foregroundColor': {
+                                                'opaqueColor': {
+                                                    'rgbColor': {
+                                                        'red': 0.0,
+                                                        'green': 0.0,
+                                                        'blue': 0.8
+                                                    }
                                                 }
-                                            }
+                                            },
+                                            'underline': True
                                         },
-                                        'underline': True
-                                    },
-                                    'fields': 'link,foregroundColor,underline'
-                                }
-                            })
-                            self.logger.info(
-                                f"Applied link to list item from {insertion_index + start_pos} to {insertion_index + end_pos}")
+                                        'fields': 'link,foregroundColor,underline'
+                                    }
+                                })
+                                self.logger.info(f"Applied link to list item from {start_idx} to {end_idx}")
+                            else:
+                                self.logger.warning(f"Skipping invalid link range for list item: {start_idx}-{end_idx}")
 
                         # Update insertion index after adding the text
                         insertion_index += len(item_text) + 1
@@ -1161,25 +1512,155 @@ class SlidesService:
                         # Apply bullet formatting for all list types
                         # We'll use standard bullet formatting for all items
                         # and prefix numbered items with "1. ", "2. ", etc. manually
-                        bullet_request = {
-                            'createParagraphBullets': {
-                                'objectId': body_id,
-                                'textRange': {
-                                    'type': 'FIXED_RANGE',
-                                    'startIndex': start_index,
-                                    'endIndex': end_index
-                                },
-                                'bulletPreset': 'BULLET_DISC_CIRCLE_SQUARE'
+                        
+                        # Determine if this item should be formatted as a heading or as a bullet point
+                        is_heading = False
+                        original_item_text = item_text
+                        
+                        # Add more verbose logging
+                        self.logger.info(f"HEADING CHECK - Item text: '{item_text[:40]}...'")
+                        
+                        # Check if the text is a string
+                        if isinstance(item_text, str):
+                            stripped_text = item_text.lstrip()
+                            
+                            # First check: Explicit markdown heading pattern with # symbols
+                            if stripped_text.startswith('#') or '\n#' in item_text or '\r\n#' in item_text:
+                                is_heading = True
+                                self.logger.info(f"EXPLICIT HEADING FOUND - Text contains # pattern: '{stripped_text[:40]}...'")
+                                
+                                # For text that starts with #, remove the # symbols for display
+                                if stripped_text.startswith('#'):
+                                    # Count the heading level and remove the # symbols
+                                    heading_chars = 0
+                                    for char in stripped_text:
+                                        if char == '#':
+                                            heading_chars += 1
+                                        else:
+                                            break
+                                    
+                                    self.logger.info(f"HEADING LEVEL - Found {heading_chars} # symbols")
+                                    
+                                    if heading_chars > 0:
+                                        # Remove the # symbols from the displayed text
+                                        item_text = stripped_text[heading_chars:].strip()
+                                        self.logger.info(f"HEADING CLEANED - Text after removing #: '{item_text[:40]}...'")
+                            
+                            # Second check: Infer heading status based on structural position and format
+                            elif item_level == 0 and (
+                                # 1. Top-level items that are short (likely section headers)
+                                (len(item_text.strip().split()) <= 4) or
+                                
+                                # 2. Items ending with colon (often headers introducing a section)
+                                item_text.strip().endswith(':') or
+                                
+                                # 3. Items without ending punctuation (likely headings not sentences)
+                                (not any(item_text.strip().endswith(p) for p in ['.', '!', '?', ',', ';'])) or
+                                
+                                # 4. Items that are self-contained (no subordinate clauses/phrases)
+                                (len(item_text.strip()) < 40 and ',' not in item_text)
+                            ):
+                                is_heading = True
+                                self.logger.info(f"INFERRED HEADING - Based on structure and format: '{item_text[:40]}...'")
+                            else:
+                                self.logger.info(f"NOT A HEADING - Text does not match heading patterns")
+                                
+                            # Apply specific treatment for headings
+                            if is_heading:
+                                self.logger.info(f"HEADING PROCESSING - Will NOT apply bullet formatting to this heading")
+                        else:
+                            self.logger.info(f"NOT A HEADING - Item text is not a string type")
+                        
+                        if not is_heading:
+                            bullet_request = {
+                                'createParagraphBullets': {
+                                    'objectId': body_id,
+                                    'textRange': {
+                                        'type': 'FIXED_RANGE',
+                                        'startIndex': start_index,
+                                        'endIndex': end_index
+                                    },
+                                    'bulletPreset': 'BULLET_DISC_CIRCLE_SQUARE'
+                                }
                             }
-                        }
+                        else:
+                            # For headings, don't create a bullet request
+                            bullet_request = None
 
-                        # Add nesting level
-                        if item_level > 0:
-                            bullet_request['createParagraphBullets']['nestingLevel'] = item_level
-                            self.logger.info(f"Set nesting level {item_level} for bullet")
+                        # Apply indentation using text styling instead of bullet nesting
+                        if item_level > 0 and not is_heading:
+                            # Calculate the indentation based on level (20pts per level)
+                            indent_size = item_level * 20
+                            
+                            # Add indentation to the bullet through paragraph style
+                            text_requests.append({
+                                'updateParagraphStyle': {
+                                    'objectId': body_id,
+                                    'textRange': {
+                                        'type': 'FIXED_RANGE',
+                                        'startIndex': start_index,
+                                        'endIndex': end_index
+                                    },
+                                    'style': {
+                                        'indentStart': {
+                                            'magnitude': indent_size,
+                                            'unit': 'PT'
+                                        }
+                                    },
+                                    'fields': 'indentStart'
+                                }
+                            })
+                            
+                            self.logger.info(f"Applied indentation of {indent_size}pt for level {item_level} bullet")
 
-                        text_requests.append(bullet_request)
-                        self.logger.info(f"Added bullet formatting request for range {start_index}-{end_index}")
+                        # Apply heading formatting if this is a heading
+                        if is_heading:
+                            # Make headings bold always
+                            heading_level = 1  # Default to H1
+                            
+                            # Count # symbols to determine heading level
+                            if isinstance(item_text, str):
+                                heading_chars = 0
+                                for char in item_text.lstrip():
+                                    if char == '#':
+                                        heading_chars += 1
+                                    else:
+                                        break
+                                        
+                                if heading_chars > 0 and heading_chars <= 3:
+                                    heading_level = heading_chars
+                            
+                            # Apply heading style (bold + size based on level)
+                            text_requests.append({
+                                'updateTextStyle': {
+                                    'objectId': body_id,
+                                    'textRange': {
+                                        'type': 'FIXED_RANGE',
+                                        'startIndex': start_index,
+                                        'endIndex': end_index
+                                    },
+                                    'style': {
+                                        'bold': True,
+                                        'fontSize': {
+                                            'magnitude': 18 - (heading_level * 1),  # H1=18pt, H2=17pt, H3=16pt
+                                            'unit': 'PT'
+                                        }
+                                    },
+                                    'fields': 'bold,fontSize'
+                                }
+                            })
+                            
+                            self.logger.info(f"Applied heading style to item: {item_text[:30]}...")
+                        
+                        # Only add bullet request if it's not a heading and the request exists
+                        if bullet_request is not None:
+                            text_requests.append(bullet_request)
+                            self.logger.info(f"BULLET ADDED - Added bullet formatting request for range {start_index}-{end_index}")
+                        else:
+                            if is_heading:
+                                self.logger.info(f"BULLET SKIPPED - Not applying bullet format to heading: '{item_text[:40]}...'")
+                            else:
+                                self.logger.info(f"BULLET SKIPPED - Request was None (unexpected)")
 
                     # Add extra newline after lists
                     text_requests.append({
@@ -1231,41 +1712,53 @@ class SlidesService:
                             self.logger.info(
                                 f"Applying format {fmt_idx} to mixed list item: type={format_info['type']}, start={start_pos}, end={end_pos}")
 
-                            # Apply formatting
-                            if format_info['type'] == 'bold':
-                                text_requests.append({
-                                    'updateTextStyle': {
-                                        'objectId': body_id,
-                                        'textRange': {
-                                            'type': 'FIXED_RANGE',
-                                            'startIndex': insertion_index + start_pos,
-                                            'endIndex': insertion_index + end_pos
-                                        },
-                                        'style': {
-                                            'bold': True
-                                        },
-                                        'fields': 'bold'
-                                    }
-                                })
-                                self.logger.info(
-                                    f"Applied bold formatting to mixed list item from {insertion_index + start_pos} to {insertion_index + end_pos}")
-                            elif format_info['type'] == 'italic':
-                                text_requests.append({
-                                    'updateTextStyle': {
-                                        'objectId': body_id,
-                                        'textRange': {
-                                            'type': 'FIXED_RANGE',
-                                            'startIndex': insertion_index + start_pos,
-                                            'endIndex': insertion_index + end_pos
-                                        },
-                                        'style': {
-                                            'italic': True
-                                        },
-                                        'fields': 'italic'
-                                    }
-                                })
-                                self.logger.info(
-                                    f"Applied italic formatting to mixed list item from {insertion_index + start_pos} to {insertion_index + end_pos}")
+                            # Get mixed list item text length for validation
+                            item_text_length = insertion_index + len(item['text']) + 1  # +1 for newline
+                            
+                            # Apply safety checks to formatting positions
+                            start_idx = min(insertion_index + start_pos, item_text_length - 1)
+                            end_idx = min(insertion_index + end_pos, item_text_length)
+                            
+                            # Only apply formatting if range is valid
+                            if start_idx < end_idx:
+                                # Apply formatting
+                                if format_info['type'] == 'bold':
+                                    text_requests.append({
+                                        'updateTextStyle': {
+                                            'objectId': body_id,
+                                            'textRange': {
+                                                'type': 'FIXED_RANGE',
+                                                'startIndex': start_idx,
+                                                'endIndex': end_idx
+                                            },
+                                            'style': {
+                                                'bold': True
+                                            },
+                                            'fields': 'bold'
+                                        }
+                                    })
+                                    self.logger.info(
+                                        f"Applied bold formatting to mixed list item from {start_idx} to {end_idx}")
+                                elif format_info['type'] == 'italic':
+                                    text_requests.append({
+                                        'updateTextStyle': {
+                                            'objectId': body_id,
+                                            'textRange': {
+                                                'type': 'FIXED_RANGE',
+                                                'startIndex': start_idx,
+                                                'endIndex': end_idx
+                                            },
+                                            'style': {
+                                                'italic': True
+                                            },
+                                            'fields': 'italic'
+                                        }
+                                    })
+                                    self.logger.info(
+                                        f"Applied italic formatting to mixed list item from {start_idx} to {end_idx}")
+                            else:
+                                self.logger.warning(
+                                    f"Skipping invalid {format_info['type']} formatting for mixed list item: {start_idx}-{end_idx}")
 
                         # Apply links in mixed list items
                         for link_idx, link_info in enumerate(item_links):
@@ -1276,35 +1769,45 @@ class SlidesService:
                             self.logger.info(
                                 f"Applying link {link_idx} to mixed list item: url={link_info['url']}, start={start_pos}, end={end_pos}")
 
-                            # Create hyperlink in the slide
-                            text_requests.append({
-                                'updateTextStyle': {
-                                    'objectId': body_id,
-                                    'textRange': {
-                                        'type': 'FIXED_RANGE',
-                                        'startIndex': insertion_index + start_pos,
-                                        'endIndex': insertion_index + end_pos
-                                    },
-                                    'style': {
-                                        'link': {
-                                            'url': link_info['url']
+                            # Get mixed list item text length for link validation
+                            item_text_length = insertion_index + len(item['text']) + 1  # +1 for newline
+                            
+                            # Apply safety checks to link positions
+                            start_idx = min(insertion_index + start_pos, item_text_length - 1)
+                            end_idx = min(insertion_index + end_pos, item_text_length)
+                            
+                            # Only apply link if range is valid
+                            if start_idx < end_idx:
+                                # Create hyperlink in the slide
+                                text_requests.append({
+                                    'updateTextStyle': {
+                                        'objectId': body_id,
+                                        'textRange': {
+                                            'type': 'FIXED_RANGE',
+                                            'startIndex': start_idx,
+                                            'endIndex': end_idx
                                         },
-                                        'foregroundColor': {
-                                            'opaqueColor': {
-                                                'rgbColor': {
-                                                    'red': 0.0,
-                                                    'green': 0.0,
-                                                    'blue': 0.8
+                                        'style': {
+                                            'link': {
+                                                'url': link_info['url']
+                                            },
+                                            'foregroundColor': {
+                                                'opaqueColor': {
+                                                    'rgbColor': {
+                                                        'red': 0.0,
+                                                        'green': 0.0,
+                                                        'blue': 0.8
+                                                    }
                                                 }
-                                            }
+                                            },
+                                            'underline': True
                                         },
-                                        'underline': True
-                                    },
-                                    'fields': 'link,foregroundColor,underline'
-                                }
-                            })
-                            self.logger.info(
-                                f"Applied link to mixed list item from {insertion_index + start_pos} to {insertion_index + end_pos}")
+                                        'fields': 'link,foregroundColor,underline'
+                                    }
+                                })
+                                self.logger.info(f"Applied link to mixed list item from {start_idx} to {end_idx}")
+                            else:
+                                self.logger.warning(f"Skipping invalid link range for mixed list item: {start_idx}-{end_idx}")
 
                         # Update insertion index after adding the text
                         insertion_index += len(item['text']) + 1
@@ -1312,26 +1815,121 @@ class SlidesService:
 
                         # Apply bullet formatting for all list types
                         # We'll use standard bullet formatting for all items
-                        bullet_request = {
-                            'createParagraphBullets': {
-                                'objectId': body_id,
-                                'textRange': {
-                                    'type': 'FIXED_RANGE',
-                                    'startIndex': start_index,
-                                    'endIndex': end_index
-                                },
-                                'bulletPreset': 'BULLET_DISC_CIRCLE_SQUARE'
+                        
+                        # Check if the item is a heading (starts with #)
+                        is_heading = False
+                        item_content = item.get('text', '') if isinstance(item, dict) else ''
+                        original_item_content = item_content
+                        
+                        if item_content.lstrip().startswith('#'):
+                            is_heading = True
+                            
+                            # Count the heading level and remove the # symbols from displayed text
+                            heading_chars = 0
+                            for char in item_content.lstrip():
+                                if char == '#':
+                                    heading_chars += 1
+                                else:
+                                    break
+                            
+                            if heading_chars > 0:
+                                # Remove the # symbols from the displayed text
+                                clean_text = item_content.lstrip()[heading_chars:].strip()
+                                
+                                # Update the item text to remove the # symbols
+                                if isinstance(item, dict):
+                                    item['text'] = clean_text
+                                
+                                # Also update our local variable
+                                item_content = clean_text
+                            
+                            self.logger.info(f"Detected heading in mixed list - will not apply bullet formatting: {original_item_content[:30]}...")
+                        
+                        if not is_heading:
+                            bullet_request = {
+                                'createParagraphBullets': {
+                                    'objectId': body_id,
+                                    'textRange': {
+                                        'type': 'FIXED_RANGE',
+                                        'startIndex': start_index,
+                                        'endIndex': end_index
+                                    },
+                                    'bulletPreset': 'BULLET_DISC_CIRCLE_SQUARE'
+                                }
                             }
-                        }
+                        else:
+                            # For headings, don't create a bullet request
+                            bullet_request = None
 
-                        # Add nesting level if specified
-                        if item_level > 0:
-                            bullet_request['createParagraphBullets']['nestingLevel'] = item_level
-                            self.logger.info(f"Set nesting level {item_level} for mixed list bullet")
+                        # Apply indentation using text styling instead of bullet nesting
+                        if item_level > 0 and not is_heading:
+                            # Calculate the indentation based on level (20pts per level)
+                            indent_size = item_level * 20
+                            
+                            # Add indentation to the bullet through paragraph style
+                            text_requests.append({
+                                'updateParagraphStyle': {
+                                    'objectId': body_id,
+                                    'textRange': {
+                                        'type': 'FIXED_RANGE',
+                                        'startIndex': start_index,
+                                        'endIndex': end_index
+                                    },
+                                    'style': {
+                                        'indentStart': {
+                                            'magnitude': indent_size,
+                                            'unit': 'PT'
+                                        }
+                                    },
+                                    'fields': 'indentStart'
+                                }
+                            })
+                            
+                            self.logger.info(f"Applied indentation of {indent_size}pt for level {item_level} mixed list bullet")
 
-                        text_requests.append(bullet_request)
-                        self.logger.info(
-                            f"Added bullet formatting request for mixed list item range {start_index}-{end_index}")
+                        # Apply heading formatting if this is a heading
+                        if is_heading:
+                            # Make headings bold always
+                            heading_level = 1  # Default to H1
+                            
+                            # Count # symbols to determine heading level
+                            heading_chars = 0
+                            for char in item_content.lstrip():
+                                if char == '#':
+                                    heading_chars += 1
+                                else:
+                                    break
+                                    
+                            if heading_chars > 0 and heading_chars <= 3:
+                                heading_level = heading_chars
+                            
+                            # Apply heading style (bold + size based on level)
+                            text_requests.append({
+                                'updateTextStyle': {
+                                    'objectId': body_id,
+                                    'textRange': {
+                                        'type': 'FIXED_RANGE',
+                                        'startIndex': start_index,
+                                        'endIndex': end_index
+                                    },
+                                    'style': {
+                                        'bold': True,
+                                        'fontSize': {
+                                            'magnitude': 18 - (heading_level * 1),  # H1=18pt, H2=17pt, H3=16pt
+                                            'unit': 'PT'
+                                        }
+                                    },
+                                    'fields': 'bold,fontSize'
+                                }
+                            })
+                            
+                            self.logger.info(f"Applied heading style to mixed list item: {item_content[:30]}...")
+                        
+                        # Only add bullet request if it's not a heading and the request exists
+                        if bullet_request is not None:
+                            text_requests.append(bullet_request)
+                            self.logger.info(
+                                f"Added bullet formatting request for mixed list item range {start_index}-{end_index}")
 
                     # Add extra newline after mixed lists
                     text_requests.append({
@@ -1344,7 +1942,7 @@ class SlidesService:
                     insertion_index += 1
                     self.logger.info(f"Added extra newline after mixed list, insertion index now at {insertion_index}")
 
-            # Apply gray color and size 16pt to the body text
+            # Apply gray color and size 14pt to the body text
             text_requests.append({
                 'updateTextStyle': {
                     'objectId': body_id,
@@ -1353,7 +1951,7 @@ class SlidesService:
                     },
                     'style': {
                         'fontSize': {
-                            'magnitude': 16,
+                            'magnitude': 14,
                             'unit': 'PT'
                         },
                         'foregroundColor': {

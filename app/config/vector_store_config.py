@@ -51,12 +51,13 @@ class PineconeConfig(VectorStoreConfig):
     """
     PineconeConfig stores the configuration for PINECONE
     """
-    def __init__(self, api_key: str, index_name: str, cloud: str, region: str):
+    def __init__(self, api_key: str, index_name: str, cloud: str, region: str, namespace: str = "default"):
         super().__init__(VectorStoreType.PINECONE)
         self._api_key = api_key
         self._index_name = index_name
         self._cloud = cloud
         self._region = region
+        self._namespace = namespace
 
     @property
     def api_key(self)->str:
@@ -65,6 +66,16 @@ class PineconeConfig(VectorStoreConfig):
     @property
     def index_name(self)->str:
         return self._index_name
+        
+    @property
+    def namespace(self)->str:
+        """
+        Get the namespace for this Pinecone configuration.
+        
+        Returns:
+            The namespace for the Pinecone index
+        """
+        return self._namespace
 
     @property
     def cloud(self)->str:

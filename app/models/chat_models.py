@@ -13,7 +13,18 @@ class ChatHistory(BaseChatMessageHistory):
         self.messages = []
 
     def add_user_message(self, message: str):
-        self.messages.append(HumanMessage(content=message))
+        # Check if the exact same message already exists in the history
+        # This prevents duplicate message issues when forwarding to LLM
+        
+        # First check if this exact message already exists in history
+        for existing_msg in self.messages:
+            if isinstance(existing_msg, HumanMessage) and existing_msg.content == message:
+                # Message already exists in history, don't add again
+                return
+                
+        # Message doesn't exist in history, add it (making sure not to add right after another user message)
+        if not self.messages or not isinstance(self.messages[-1], HumanMessage):
+            self.messages.append(HumanMessage(content=message))
 
     def add_ai_message(self, message: str):
         self.messages.append(AIMessage(content=message))
@@ -32,6 +43,7 @@ class Message(BaseModel):
     mode: str = "rag"  # "rag", "no_rag", or "both"
     system_prompt: Optional[str] = None
     prompt_style: Optional[str] = "default"  # "default", "detailed", or "concise"
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)  # Additional metadata for processing
 
 class ResponseContent(BaseModel):
     """Model for the content of a response."""

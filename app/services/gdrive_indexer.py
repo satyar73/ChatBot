@@ -292,7 +292,21 @@ class GoogleDriveIndexer:
                     # Check if we should use the enhanced slide extraction
                     if hasattr(self.config, 'USE_ENHANCED_SLIDES') and self.config.USE_ENHANCED_SLIDES:
                         # Use the enhanced slide extraction with GPT-4 Vision
-                        return self._extract_slides_with_vision(file_id, file_name)
+                        # This now returns a list of slide dictionaries
+                        slides = self._extract_slides_with_vision(file_id, file_name)
+                        
+                        # For backward compatibility, join all slides if needed
+                        # The caller should check the return type and handle appropriately
+                        if isinstance(slides, list):
+                            # Return the first slide content for compatibility
+                            # Our preprocessing step will handle the full list later
+                            if slides and 'markdown' in slides[0]:
+                                return slides[0]['markdown']
+                            else:
+                                return ""
+                        else:
+                            # Should not happen with the new implementation, but handle just in case
+                            return slides
                     else:
                         # Fallback to basic text extraction
                         request = self.drive_service.files().export_media(fileId=file_id, mimeType='text/plain')
@@ -408,7 +422,7 @@ class GoogleDriveIndexer:
             presentation_name: The name of the presentation
             
         Returns:
-            A markdown string containing the enhanced slide content
+            A list of dictionaries containing individual slide content and metadata
         """
         self.logger.info(f"Extracting slides with vision for {presentation_name} ({presentation_id})")
         
@@ -430,8 +444,18 @@ class GoogleDriveIndexer:
             slides = presentation.get('slides', [])
             self.logger.info(f"Processing {len(slides)} slides from {presentation_name}")
             
-            # Final markdown content
-            full_content = f"# {presentation_name}\n\n"
+            # Store individual slide content
+            slide_contents = []
+            
+            # Add presentation info as the first item
+            presentation_info = {
+                'title': f"{presentation_name} - Overview",
+                'markdown': f"# {presentation_name}\n\nThis presentation contains {len(slides)} slides.",
+                'slide_number': 0,
+                'is_slide': True,
+                'slide_title': presentation_name
+            }
+            slide_contents.append(presentation_info)
             
             # Limit number of slides to process if specified in config
             max_slides = getattr(self.config, 'MAX_SLIDES_TO_PROCESS', len(slides))
@@ -491,10 +515,19 @@ class GoogleDriveIndexer:
                         if not slide_title:
                             slide_title = "Untitled Slide"
                         
-                        # Format the content with separate slide number and title
-                        full_content += f"## Slide {slide_number}\n\n"
-                        full_content += f"### {slide_title}\n\n"
-                        full_content += f"{slide_markdown}\n\n---\n\n"
+                        # Format the content with slide number and title
+                        formatted_content = f"## Slide {slide_number}\n\n"
+                        formatted_content += f"### {slide_title}\n\n"
+                        formatted_content += slide_markdown
+                        
+                        # Store as individual slide
+                        slide_contents.append({
+                            'title': f"{presentation_name} - Slide {slide_number}",
+                            'markdown': formatted_content,
+                            'slide_number': slide_number,
+                            'is_slide': True,
+                            'slide_title': slide_title
+                        })
                     else:
                         # Fallback to basic extraction if vision analysis fails
                         slide_title = None
@@ -522,26 +555,37 @@ class GoogleDriveIndexer:
                         if not slide_title:
                             slide_title = "Untitled Slide"
                         
-                        # Format as markdown with separate slide number and title
-                        full_content += f"## Slide {slide_number}\n\n"
-                        full_content += f"### {slide_title}\n\n"
+                        # Format as markdown with slide number and title
+                        formatted_content = f"## Slide {slide_number}\n\n"
+                        formatted_content += f"### {slide_title}\n\n"
                         for item in slide_content:
-                            full_content += f"{item}\n\n"
+                            formatted_content += f"{item}\n\n"
                             
-                        full_content += "---\n\n"
+                        # Store as individual slide
+                        slide_contents.append({
+                            'title': f"{presentation_name} - Slide {slide_number}",
+                            'markdown': formatted_content,
+                            'slide_number': slide_number,
+                            'is_slide': True,
+                            'slide_title': slide_title
+                        })
                 
                 except Exception as e:
                     self.logger.error(f"Error processing slide {slide_number}: {str(e)}")
                     continue
             
-            return full_content
+            return slide_contents
             
         except Exception as e:
             self.logger.error(f"Error extracting slides with vision: {str(e)}")
-            # Fall back to plain text extraction
+            # Fall back to plain text extraction and let the caller handle it
             request = self.drive_service.files().export_media(fileId=presentation_id, mimeType='text/plain')
             content = self._download_file(request)
-            return content.decode('utf-8')
+            return [{
+                'title': presentation_name,
+                'markdown': content.decode('utf-8'),
+                'is_slide': False
+            }]
     
     def _analyze_slide_with_llm(self, image_content, slide_number):
         """
@@ -574,6 +618,84 @@ class GoogleDriveIndexer:
 
         return markdown_text
 
+    def _preprocess_slide_content(self, content: str, file_name: str) -> List[Dict[str, Any]]:
+        """
+        Preprocess slide content to preserve slide boundaries.
+        Splits the content at slide boundaries (marked by "## Slide X" or "---") and
+        creates separate records for each slide.
+        
+        Args:
+            content: The slide content as markdown
+            file_name: The name of the slide presentation
+            
+        Returns:
+            List of records, one for each slide
+        """
+        self.logger.info(f"Preprocessing slides for {file_name}")
+        
+        # Check if this is slide content (has slide markers)
+        if "## Slide " not in content and "---" not in content:
+            # Not slide content or no clear slide boundaries
+            return [{
+                'title': file_name,
+                'markdown': content,
+                'is_slide': False
+            }]
+            
+        # Split the content at slide boundaries
+        # We can use either "## Slide X" markers or "---" horizontal rule markers
+        slide_records = []
+        
+        # First look for slide markers
+        if "## Slide " in content:
+            # Split by slide headers
+            parts = content.split("## Slide ")
+            
+            # The first part might be presentation title or intro
+            if parts[0].strip():
+                intro = parts[0].strip()
+                slide_records.append({
+                    'title': f"{file_name} - Introduction",
+                    'markdown': intro,
+                    'is_slide': True,
+                    'slide_number': 0
+                })
+            
+            # Process each slide part
+            for i, part in enumerate(parts[1:], 1):
+                # Split at first newline to separate slide number from content
+                slide_parts = part.split('\n', 1)
+                if len(slide_parts) > 1:
+                    slide_number = slide_parts[0].strip()
+                    slide_content = slide_parts[1].strip()
+                    
+                    # Clean up the content by removing horizontal rules at the end
+                    if slide_content.endswith("---"):
+                        slide_content = slide_content.rsplit("---", 1)[0].strip()
+                    
+                    slide_records.append({
+                        'title': f"{file_name} - Slide {slide_number}",
+                        'markdown': f"## Slide {slide_number}\n\n{slide_content}",
+                        'is_slide': True,
+                        'slide_number': i
+                    })
+        else:
+            # Use horizontal rules as slide separators
+            parts = content.split("---")
+            
+            for i, part in enumerate(parts):
+                part = part.strip()
+                if part:
+                    slide_records.append({
+                        'title': f"{file_name} - Slide {i+1}",
+                        'markdown': part,
+                        'is_slide': True,
+                        'slide_number': i+1
+                    })
+        
+        self.logger.info(f"Split presentation into {len(slide_records)} slides")
+        return slide_records
+
     def prepare_drive_documents(self):
         """Process all supported files from Google Drive"""
         self.logger.info("Fetching and processing Google Drive documents...")
@@ -589,7 +711,42 @@ class GoogleDriveIndexer:
             try:
                 self.logger.info(f"Processing {file['name']}...")
 
-                # Download and extract content
+                # Check if this is a presentation with enhanced vision processing
+                is_presentation = (file['mimeType'] == 'application/vnd.google-apps.presentation' or 
+                                  file['mimeType'] == 'application/vnd.openxmlformats-officedocument.presentationml.presentation')
+                use_enhanced_slides = hasattr(self.config, 'USE_ENHANCED_SLIDES') and self.config.USE_ENHANCED_SLIDES
+                
+                # Special handling for presentations with enhanced vision extraction
+                if is_presentation and use_enhanced_slides:
+                    try:
+                        # Extract slide content using vision
+                        slide_contents = self._extract_slides_with_vision(file['id'], file['name'])
+                        
+                        # Process each slide individually
+                        if isinstance(slide_contents, list) and len(slide_contents) > 0:
+                            self.logger.info(f"Processing {len(slide_contents)} slides from vision extraction")
+                            
+                            for slide_content in slide_contents:
+                                # Create record for each slide
+                                record = {
+                                    'title': slide_content['title'],
+                                    'url': file.get('webViewLink', ''),
+                                    'source': 'Google Drive',
+                                    'type': file['folder_type'],  # Preserve original folder type (e.g., "client")
+                                    'document_type': 'presentation_slide',  # Add document type as additional metadata
+                                    'client': file['potential_client'],
+                                    'markdown': slide_content['markdown'],
+                                    'parent_presentation': file['name'],
+                                    'slide_number': slide_content.get('slide_number', 0)
+                                }
+                                records.append(record)
+                            
+                            # Skip the regular content processing
+                            continue
+                    except Exception as e:
+                        self.logger.error(f"Error processing enhanced slides, falling back to standard processing: {str(e)}")
+                
+                # Standard processing for non-presentations or if enhanced processing failed
                 content = self.download_and_extract_content(file)
 
                 # Skip if content extraction failed
@@ -604,17 +761,37 @@ class GoogleDriveIndexer:
                 # Summarize if needed
                 if self.config.SUMMARIZE_CONTENT:
                     content = self.condense_content_using_llm(content)
-
-                # Create record
-                record = {
-                    'title': file['name'],
-                    'url': file.get('webViewLink', ''),
-                    'source': 'Google Drive',
-                    'type': file['folder_type'],
-                    'client': file['potential_client'],
-                    'markdown': content
-                }
-                records.append(record)
+                
+                # Standard presentation processing (without enhanced vision)
+                if is_presentation and not use_enhanced_slides:
+                    # Process slides individually to preserve boundaries
+                    slide_records = self._preprocess_slide_content(content, file['name'])
+                    
+                    for slide_record in slide_records:
+                        # Create record for each slide
+                        record = {
+                            'title': slide_record['title'],
+                            'url': file.get('webViewLink', ''),
+                            'source': 'Google Drive',
+                            'type': file['folder_type'],  # Preserve original folder type (e.g., "client")
+                            'document_type': 'presentation_slide',  # Add document type as additional metadata
+                            'client': file['potential_client'],
+                            'markdown': slide_record['markdown'],
+                            'parent_presentation': file['name'],
+                            'slide_number': slide_record.get('slide_number', 0)
+                        }
+                        records.append(record)
+                else:
+                    # Regular document processing
+                    record = {
+                        'title': file['name'],
+                        'url': file.get('webViewLink', ''),
+                        'source': 'Google Drive',
+                        'type': file['folder_type'],
+                        'client': file['potential_client'],
+                        'markdown': content
+                    }
+                    records.append(record)
 
             except Exception as ex:
                 self.logger.error(f"Could not process {file['name']} due to: {ex}")

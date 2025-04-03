@@ -118,8 +118,26 @@ class ResponseStrategy:
         # Note: We use the agent configured with the original query's filter,
         # but send the rewritten queries to the LLM
         async def process_query(q):
+            # Create a clean input to the agent without duplicating history
+            # This is critical to avoid message duplication
+            
+            # Check if the query is already in the history to avoid duplication
+            # This happens with document service requests where the full formatting template
+            # is both sent as input and added to history
+            is_query_in_history = False
+            if history:
+                for msg in history:
+                    # Check if this message is from the human and contains the identical query
+                    # We use exact matching instead of containment to be more precise
+                    if hasattr(msg, 'type') and msg.type == 'human' and msg.content.strip() == q.strip():
+                        is_query_in_history = True
+                        self.logger.debug(f"Identical query already in history, using empty history to prevent duplication")
+                        break
+            
+            # If the query is already in history, don't pass the history again
+            # This prevents duplication in the prompt
             return await rag_agent.ainvoke(
-                {"input": q, "history": history},
+                {"input": q, "history": [] if is_query_in_history else history},
                 include_run_info=True
             )
 
@@ -372,6 +390,7 @@ class RAGResponseStrategy(ResponseStrategy):
             Tuple of (rag_response, no_rag_response, queries_tried)
             Either rag_response or no_rag_response may be None depending on strategy
         """
+        
         rag_response, queries_tried = await self.execute_rag_with_retry(
                                                         chat_model_config=chat_model_config,
                                                         query=query,

@@ -137,11 +137,28 @@ class ChatService:
         # Cache miss or force refresh - generate a new response
         self.logger.info(f"Cache miss or force refresh for query_hash={query_hash}, generating new response")
         
-        # Add user message to history
-        chat_history.add_user_message(user_input)
+        # Special handling for document service to avoid duplication
+        # Only add the user message to history if this isn't a document service request
+        # or if the history is empty (we want at least one message)
+        is_document_service = hasattr(data, 'metadata') and data.metadata and 'document_question' in data.metadata
         
+        if not is_document_service or not chat_history.get_messages():
+            # Add user message to history only if not from document service or empty history
+            self.logger.debug(f"Adding user message to history (length: {len(chat_history.get_messages())})")
+            chat_history.add_user_message(user_input)
+        else:
+            # For document service requests, we don't add the message to history
+            # this prevents duplication since the full message will be sent as input
+            self.logger.debug("Document service request - not adding user message to history to prevent duplication")
+            
         # Get a temporary chat service instance to pass to the strategy
         chat_service = ChatService()
+        
+        # Check if this is a document service request
+        document_question = None
+        if hasattr(data, 'metadata') and data.metadata and 'document_question' in data.metadata:
+            document_question = data.metadata['document_question']
+            self.logger.info(f"Document question found in metadata: {document_question}")
         
         # Determine which mode/strategy to use
         mode = "both" if mode == "both" else ("rag" if mode == "rag" else "no_rag")
@@ -150,11 +167,30 @@ class ChatService:
         strategy = ResponseStrategy.get_strategy(actual_query, mode, chat_service, chat_service.agent_manager)
         
         # Execute the strategy
+        # If we have a document question, pass it separately for expected answer lookup
+        if document_question:
+            self.logger.info(f"Passing document question to strategy: {document_question}")
+            
+            # Check if this document question has an expected answer
+            expected_answer_match = self.enhancement_service.get_answer(document_question)
+            if expected_answer_match:
+                self.logger.info(f"Found expected answer for document question")
+                expected_answer = expected_answer_match.get("answer")
+                
+                # If we have a custom system prompt already, enhance it with the expected answer
+                if custom_system_prompt:
+                    custom_system_prompt = self.enhancement_service.enhance_prompt_with_expected_answer(
+                        base_prompt=custom_system_prompt,
+                        expected_answer=expected_answer
+                    )
+                    self.logger.info("Enhanced custom system prompt with expected answer")
+        
+        # Execute the strategy - we don't need to pass document_question since we've processed it already
         rag_response, no_rag_response, queries_tried = await strategy.execute(
             chat_model_config,
             actual_query, 
             chat_history,
-            custom_system_prompt=None,  # Pass None as the default system prompt
+            custom_system_prompt=custom_system_prompt,  # Pass through the custom_system_prompt value
             prompt_style=prompt_style
         )
         

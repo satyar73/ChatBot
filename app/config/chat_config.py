@@ -12,9 +12,12 @@ class ChatConfig:
     def __init__(self):
         # Load environment variables
         load_dotenv()
-        
+
         # Load feature flags
         self.CHAT_FEATURE_FLAGS = load_feature_flags("chat")
+
+        # Company information
+        self.COMPANY_NAME = os.getenv("COMPANY_NAME", "SVV")
 
         self.OUTPUT_DIR = "data"
 
@@ -22,7 +25,7 @@ class ChatConfig:
         self.GOOGLE_DRIVE_CREDENTIALS_FILE = os.getenv("GOOGLE_DRIVE_CREDENTIALS_FILE")
         self.GOOGLE_DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", None)  # Optional, can be None to use root
         self.GOOGLE_DRIVE_RECURSIVE = True  # Process subfolders recursively
-        
+
         # Google Slides Enhanced Processing
         self.USE_ENHANCED_SLIDES = os.getenv("USE_ENHANCED_SLIDES", "false").lower() == "true"
         self.OPENAI_VISION_MODEL = os.getenv("OPENAI_VISION_MODEL", "gpt-4o")
@@ -79,7 +82,7 @@ class ChatConfig:
         self.BLOGS_PROCESSED_FILE = os.path.join(self.OUTPUT_DIR, "blogs_processed.json")
         self.PRODUCTS_FILE = os.path.join(self.OUTPUT_DIR, "products.json")
         self.PRODUCTS_PROCESSED_FILE = os.path.join(self.OUTPUT_DIR, "products_processed.json")
-        self.COMBINED_FILE = os.path.join(self.OUTPUT_DIR, "msquare_combined.json")
+        self.COMBINED_FILE = os.path.join(self.OUTPUT_DIR, f"{self.COMPANY_NAME.lower()}_combined.json")
 
         # API Settings
         self.API_HOST = "0.0.0.0"
@@ -104,10 +107,10 @@ class ChatConfig:
         }
 
         # System Prompts
-        self.RAG_SYSTEM_PROMPT = """
-            You are a chatbot answering questions about MSquared, a community of analytics and marketing
+        self.RAG_SYSTEM_PROMPT = f"""
+            You are a chatbot answering questions about {self.COMPANY_NAME}, a community of analytics and marketing
             professionals focused on making marketing attribution accessible, affordable, and effective.
-            
+
             Response Guidelines
                 - Answer Directly & Clearly
                     - Begin with a direct answer before adding context.
@@ -127,7 +130,7 @@ class ChatConfig:
                     - Always provide a relevant source link: Learn more: Title.
                     - Do not generate links that aren't in the source material.
                 - Content Boundaries
-                    - Share only MSquared-specific data.
+                    - Share only {self.COMPANY_NAME}-specific data.
                     - Do not explain or generate code.
                     - For pricing, direct users to the product page.
                     - For time-sensitive info, direct users to the masterclass page.
@@ -138,7 +141,7 @@ class ChatConfig:
                     - Highlight biases in platform-specific attribution when relevant.
                 - Special Cases
                     - For budget allocation, include this disclaimer:
-                            "For optimal results, we recommend consulting with MSquared experts to discuss your
+                            "For optimal results, we recommend consulting with {self.COMPANY_NAME} experts to discuss your
                              specific needs before making allocation decisions."
                     - If a term is not in the source, provide the best explanation based on related concepts.
                 - Final Principles
@@ -150,27 +153,27 @@ class ChatConfig:
         self.NON_RAG_SYSTEM_PROMPT = """
         You are a helpful website chatbot who is tasked with answering questions about marketing and attribution.
         You should answer based only on your general knowledge without using any specific document retrieval.
-        Keep you answers short and accurate.
+        Keep your answers short and accurate.
         """
-        
-        self.DATABASE_SYSTEM_PROMPT = """
+
+        self.DATABASE_SYSTEM_PROMPT = f"""
         You are a data analysis assistant specialized in marketing analytics.
-        Your primary responsibility is to help users analyze marketing data, understand metrics, 
+        Your primary responsibility is to help users analyze marketing data, understand metrics,
         and extract insights from the database.
-        
+
         When a user asks a question about data:
         1. Analyze what metrics or KPIs they're interested in
         2. Use the query_database tool to retrieve relevant data
         3. Explain the results in a clear, concise manner
         4. Provide insights based on the data, focusing on actionable information
         5. Format tables neatly using markdown
-        
-        For marketing-specific questions that don't require database access, 
+
+        For marketing-specific questions that don't require database access,
         direct the user to ask the question in a way that would make use of the RAG agent,
-        which has access to MSquared's knowledge base.
-        
-        Keep your responses focused on the data and insights, avoiding speculation 
-        beyond what the data shows. When appropriate, suggest further analyses that 
+        which has access to {self.COMPANY_NAME}'s knowledge base.
+
+        Keep your responses focused on the data and insights, avoiding speculation
+        beyond what the data shows. When appropriate, suggest further analyses that
         might be valuable.
         """
 
@@ -192,15 +195,27 @@ class ChatConfig:
 
         Do NOT add any meta-commentary (like "This slide contains") - just transcribe the content directly using proper markdown formatting.
         Do NOT summarize or paraphrase - transcribe EVERYTHING exactly as it appears.
-        Format your response as a clean, properly structured markdown document that could be used as-is. 
+        Format your response as a clean, properly structured markdown document that could be used as-is.
         """
 
-        # Retriever Tool Configuration
+        # Retriever Tool Configuration with expanded parameters
         self.RETRIEVER_TOOL_CONFIG = {
             "name": "search_rag_docs",
-            "description": "Searches and returns docs, products and blogs from RAG."
-                           " You do not know anything about MSquared, so if you are"
-                           " ever asked about MSquared, you should use this tool."
+            "description": f"""Searches and returns docs, products and blogs from RAG.
+            You do not know anything about {self.COMPANY_NAME}, so if you are
+            ever asked about {self.COMPANY_NAME}, you should use this tool.
+            
+            To get more relevant results, you should specify:
+            1. query: The main search terms or question
+            2. content_type (optional): Specify the type of content to search ("article", "blog", "product", "client_case_study")
+            3. client_name (optional): If the query is about a specific client (e.g., "LaserAway"), specify the client name
+            4. topic (optional): The specific topic of interest ("attribution", "incrementality", "geo_testing", "mmm", "facebook", "tiktok")
+            
+            Example: For "What were the results of LaserAway's Facebook geo tests?", you would provide:
+            query: "LaserAway Facebook geo tests results"
+            client_name: "LaserAway" 
+            topic: "geo_testing"
+            """
         }
 
         # Document prompt template
@@ -243,15 +258,15 @@ class ChatConfig:
             missing_settings.append("OPENAI_API_KEY")
 
         return missing_settings
-    
+
     def _get_model_configs(self) -> Dict[str, ChatModelConfig]:
         llm_proxy_config = None
         portkey_api_key = os.getenv("PORTKEY_API_KEY")
         if portkey_api_key is not None:
             llm_proxy_config = LlmProxyConfig(
                 proxy_type = LlmProxyType.PORTKEY,
-                url = "https://api.portkey.ai/v1/proxy", 
-                api_key = portkey_api_key, 
+                url = "https://api.portkey.ai/v1/proxy",
+                api_key = portkey_api_key,
                 cache_ttl = int(os.getenv("PORTKEY_CACHE_TTL", "3600"))
             )
 
@@ -260,13 +275,17 @@ class ChatConfig:
             if self.PINECONE_INDEX_NAME is None:
                 # we do need a vector store; if not found throw error
                 raise ValueError(f"Pinecone index name not found for OpenAI model '{self.PINECONE_INDEX_NAME}'")
+
+            # Use a namespace from environment or default based on index
+            pinecone_namespace = os.getenv("PINECONE_NAMESPACE", "default")
             
             vector_store_config = PineconeConfig(
                 api_key = self.PINECONE_API_KEY,
                 index_name = self.PINECONE_INDEX_NAME,
                 cloud = self.PINECONE_CLOUD,
-                region = self.PINECONE_REGION)
-            
+                region = self.PINECONE_REGION,
+                namespace = pinecone_namespace)
+
             chat_model_configs[self.OPENAI_EMBEDDING_MODEL] = ChatModelConfig(
                 cloud_provider=CloudProvider.OpenAI,
                 model = self.OPENAI_EMBEDDING_MODEL,
@@ -279,14 +298,18 @@ class ChatConfig:
             if self.OLLAMA_PINECONE_INDEX_NAME is None:
                 # we do need a vector store; if not found throw error
                 raise ValueError(f"Pinecone index name not found for Ollama model '{self.PINECONE_INDEX_NAME}'")
+
+            # Use a namespace from environment or default based on index for Ollama
+            ollama_namespace = os.getenv("OLLAMA_PINECONE_NAMESPACE", "ollama")
             
             vector_store_config = PineconeConfig(
                 api_key = self.PINECONE_API_KEY,
                 index_name = self.OLLAMA_PINECONE_INDEX_NAME,
                 cloud = self.PINECONE_CLOUD,
-                region = self.PINECONE_REGION)
-            
-            chat_model_configs[self.OPENAI_EMBEDDING_MODEL] = ChatModelConfig(
+                region = self.PINECONE_REGION,
+                namespace = ollama_namespace)
+
+            chat_model_configs["ollama_embedding"] = ChatModelConfig(
                 cloud_provider=CloudProvider.Local,
                 model = self.OLLAMA_EMBEDDING_MODEL,
                 vector_store_config = vector_store_config,

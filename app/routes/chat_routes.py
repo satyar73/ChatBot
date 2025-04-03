@@ -252,31 +252,70 @@ async def clear_cache(older_than_days: Optional[int] = None):
             "entries_cleared": entries_cleared
         }
 
-@router.post("/create-slides")
+@router.post("/create-slides", deprecated=True)
 async def create_slides(
     file: UploadFile = File(...),
     title: str = Form("Q&A Presentation"),
-    owner_email: Optional[str] = Form(None, description="Email address to transfer ownership to"),
-    author_name: Optional[str] = Form(None, description="Name of the author to display on the title slide"),
-    use_rag: bool = Form(True, description="Whether to use RAG to generate answers (defaults to True)")
+    owner_email: Optional[str] = Form(None, description="Email address to share the presentation with"),
+    author_name: Optional[str] = Form(None, description="Name of the author to display on the title slide")
 ):
     """
-    Create a Google Slides presentation from a CSV file containing questions.
-    If use_rag is True (default), answers will be generated using the RAG system.
-    Otherwise, answers from the CSV file will be used.
+    Legacy endpoint for creating slides (maintained for backward compatibility).
+    Please use /create-document endpoint instead.
+    
+    Creates a Google Slides presentation from a CSV file containing questions and format templates.
     
     Args:
-        file: CSV file with questions (and optional answers as fallback)
+        file: CSV file with questions and format templates
         title: Title for the presentation
-        owner_email: Email address to transfer ownership to
-        author_name: Name of the author to display on the title slide
-        use_rag: Whether to generate answers using RAG (True) or use answers from CSV (False)
+        owner_email: Email address to share with
+        author_name: Name of the author for the title slide
         
     Returns:
         dict: Contains the presentation ID and URL
     """
+    # Forward to the create_document endpoint with slides document_type
+    return await create_document(
+        file=file,
+        title=title,
+        owner_email=owner_email,
+        author_name=author_name,
+        document_type="slides"
+    )
+
+@router.post("/create-document")
+async def create_document(
+    file: UploadFile = File(...),
+    title: str = Form("Generated Document"),
+    owner_email: Optional[str] = Form(None, description="Email address to share the document with"),
+    author_name: Optional[str] = Form(None, description="Name of the author (for slides title page)"),
+    document_type: str = Form("slides", description="Type of document to create: 'slides' or 'docs'")
+):
+    """
+    Create a Google document (Slides or Docs) from a CSV file containing questions and format templates.
+    Content will be generated using the RAG system with the specified format templates.
+    
+    The CSV file should contain two columns:
+    - 'question': The question to ask
+    - 'format': The format template to use
+        For slides: "Title: Overview\nBody: [bullets]"
+        For docs: "# Main Title\n## Section\n- Bullet points"
+    
+    Args:
+        file: CSV file with questions and format templates
+        title: Title for the document
+        owner_email: Email address to share the document with
+        author_name: Name of the author (for slides title page)
+        document_type: Type of document to create ('slides' or 'docs')
+        
+    Returns:
+        dict: Contains the document ID and URL
+    """
     if not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="File must be a CSV file")
+    
+    if document_type not in ["slides", "docs"]:
+        raise HTTPException(status_code=400, detail="document_type must be 'slides' or 'docs'")
     
     try:
         # Save the uploaded file temporarily
@@ -285,69 +324,45 @@ async def create_slides(
             temp_file.write(content)
             temp_file_path = temp_file.name
         
-        # Create slides
-        slides_service = SlidesService()
-        presentation_id = await slides_service.create_presentation_from_csv(
-            csv_path=temp_file_path,
-            title=title,
-            author_name=author_name,
-            use_rag=use_rag
-        )
+        document_id = ""
+        document_url = ""
         
-        # Get the Drive service
-        drive_service = slides_service._get_drive_service()
-        
-        # Make the document accessible with a link
-        anyone_permission = {
-            'type': 'anyone',
-            'role': 'writer',
-            'allowFileDiscovery': False
-        }
-        
-        # Add the public permission
-        drive_service.permissions().create(
-            fileId=presentation_id,
-            body=anyone_permission,
-            fields='id'
-        ).execute()
-        
-        # Share with editor access if email is provided
-        # Note: We can't transfer ownership directly due to Google API limitations
-        # requiring user consent. Instead, we'll grant editor access.
-        if owner_email:
-            try:
-                # First try with editor role instead of owner
-                editor_permission = {
-                    'type': 'user',
-                    'role': 'writer',  # 'writer' provides edit access
-                    'emailAddress': owner_email
-                }
-                
-                # Add the permission to the file
-                drive_service.permissions().create(
-                    fileId=presentation_id,
-                    body=editor_permission,
-                    fields='id',
-                    sendNotificationEmail=True
-                ).execute()
-                
-                # Log the action
-                logger.info(f"Granted editor access to {owner_email} for presentation {presentation_id}")
-            except Exception as share_error:
-                # If sharing fails, log it but continue
-                logger.error(f"Error sharing presentation with {owner_email}: {str(share_error)}")
-                # Don't re-raise, as we want to return the presentation even if sharing fails
+        # Create the appropriate document type
+        if document_type == "slides":
+            # Create slides
+            from app.services.slides_service import SlidesService
+            service = SlidesService()
+            document_id = await service.create_presentation_from_csv(
+                csv_path=temp_file_path,
+                title=title,
+                author_name=author_name,
+                owner_email=owner_email  # Sharing handled in the service
+            )
+            document_url = f"https://docs.google.com/presentation/d/{document_id}"
+            document_type_name = "presentation"
+        else:
+            # Create docs
+            from app.services.docs_service import DocsService
+            service = DocsService()
+            document_id = await service.create_document_from_csv(
+                csv_path=temp_file_path,
+                title=title,
+                owner_email=owner_email  # Sharing handled in the service
+            )
+            document_url = f"https://docs.google.com/document/d/{document_id}"
+            document_type_name = "document"
         
         # Clean up the temporary file
         os.unlink(temp_file_path)
         
         return {
-            "presentation_id": presentation_id,
-            "url": f"https://docs.google.com/presentation/d/{presentation_id}",
-            "shared_with": owner_email if owner_email else None,  # Changed from owner to shared_with
-            "author": author_name if author_name else None,
-            "used_rag": use_rag,
-            "note": "The presentation is shared with anyone who has the link. If an email was provided, they've been granted editor access."
+            "document_id": document_id,
+            "document_type": document_type_name,
+            "url": document_url,
+            "shared_with": owner_email if owner_email else None,
+            "title": title,
+            "author": author_name if author_name and document_type == "slides" else None,
+            "note": f"The {document_type_name} is shared with anyone who has the link. If an email was provided, they've been granted editor access."
         }
         
     except Exception as e:

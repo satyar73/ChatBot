@@ -11,10 +11,12 @@ import SpeedIcon from '@mui/icons-material/Speed';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import SlideshowIcon from '@mui/icons-material/Slideshow';
+import CreateIcon from '@mui/icons-material/Create';
 import NetworkCheckIcon from '@mui/icons-material/NetworkCheck';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
+import config from '../config/config.js';
 
 // Width of the side bar, change if the length of the menu items become too
 // big
@@ -44,7 +46,7 @@ function AppLayout() {
   // User-facing menu items (first section)
   const userMenuItems = [
     { text: 'Chat', icon: <ChatIcon />, path: '/' },
-    { text: 'Create Google Slides', icon: <SlideshowIcon />, path: '/create-slides' },
+    { text: 'Create Documents', icon: <CreateIcon />, path: '/create-document' },
   ];
 
   // Admin menu items (second section)
@@ -52,8 +54,7 @@ function AppLayout() {
     { text: 'Test Chat', icon: <SpeedIcon />, path: '/testing' },
     { text: 'Google Drive Indexing', icon: <InsertDriveFileIcon />, path: '/gdrive-indexing' },
     { text: 'Shopify Indexing', icon: <ShoppingCartIcon />, path: '/shopify-indexing' },
-    { text: 'Network Test', icon: <NetworkCheckIcon />, path: '/network-test' },
-    { text: 'Simple Test', icon: <SpeedIcon />, path: '/simple-test' },
+    { text: 'System Diagnostics', icon: <NetworkCheckIcon />, path: '/diagnostics' },
   ];
 
   // Drawer component containing the list of menu items
@@ -63,7 +64,7 @@ function AppLayout() {
       <Toolbar sx={{ justifyContent: 'space-between' }}>
         {drawerExpanded ? (
           <Typography variant="h6" noWrap component="div">
-            MSquared Marketing
+            {config.COMPANY_NAME} Marketing
           </Typography>
         ) : null}
         <IconButton onClick={toggleDrawerExpanded}>
@@ -144,7 +145,7 @@ function AppLayout() {
 
   // Find current page title from all menu items
   const allMenuItems = [...userMenuItems, ...adminMenuItems];
-  const currentPageTitle = allMenuItems.find(item => item.path === location.pathname)?.text || 'MSquared Chat';
+  const currentPageTitle = allMenuItems.find(item => item.path === location.pathname)?.text || `${config.COMPANY_NAME} Chat`;
 
   return (
     <Box sx={{ display: 'flex' }}>
