@@ -14,6 +14,10 @@ from openai import OpenAI
 from portkey_ai import Portkey
 from dotenv import load_dotenv
 
+from app.config.chat_model_config import ChatModelConfig
+from app.config.llm_proxy_config import LlmProxyType
+from app.config.vector_store_config import PineconeConfig
+
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -37,8 +41,10 @@ class LLMClientManager:
     _response_cache: Dict[str, Any] = {}
 
     @classmethod
-    def _get_portkey_client(cls) -> Optional[Portkey]:
+    def _get_portkey_client_old(cls) -> Optional[Portkey]:
         """
+        Deprecated. Use _get_portkey_client()
+
         Initialize and return the Portkey client.
 
         Returns:
@@ -53,6 +59,30 @@ class LLMClientManager:
             # Initialize Portkey client
             cls._portkey_client = Portkey(
                 api_key=api_key,
+                environment="prod" if os.getenv("ENVIRONMENT", "dev").lower() in ["prod", "production"] else "dev"
+            )
+            logger.info("Portkey client initialized")
+
+        return cls._portkey_client
+
+    @classmethod
+    def _get_portkey_client(cls, chat_model_config: ChatModelConfig) -> Optional[Portkey]:
+        """
+        Initialize and return the Portkey client.
+
+        Returns:
+            Portkey client instance or None if not configured
+        """
+        # TODO using class level not adviceable as user may configure more than one OpenAI instances one with Portkey and the other without
+        if cls._portkey_client is None:
+            api_key = os.getenv("PORTKEY_API_KEY")
+            if not chat_model_config.llm_proxy_config or chat_model_config.llm_proxy_config.proxy_type != LlmProxyType.PORTKEY:
+                logger.warning("PORTKEY_API_KEY not found in environment variables. Using default LLM clients.")
+                return None
+
+            # Initialize Portkey client
+            cls._portkey_client = Portkey(
+                api_key=chat_model_config.llm_proxy_config.api_key,
                 environment="prod" if os.getenv("ENVIRONMENT", "dev").lower() in ["prod", "production"] else "dev"
             )
             logger.info("Portkey client initialized")
@@ -120,7 +150,7 @@ class LLMClientManager:
             return cls._llm_instances[cache_key]
 
         # Get Portkey client
-        portkey_client = cls._get_portkey_client()
+        portkey_client = cls._get_portkey_client_old()
 
         # Create LLM instance
         if portkey_client:
@@ -179,8 +209,7 @@ class LLMClientManager:
     @classmethod
     def get_embeddings(
             cls,
-            model: str = None,
-            dimensions: int = None,
+            chat_model_config: ChatModelConfig,
             cache_key: str = None,
             enable_cache: bool = True
     ) -> OpenAIEmbeddings:
@@ -188,8 +217,7 @@ class LLMClientManager:
         Get or create an OpenAIEmbeddings instance with the specified parameters.
 
         Args:
-            model: Embedding model name (defaults to config value)
-            dimensions: Embedding dimensions (defaults to config value)
+            chat_model_config: ChatModelConfig with details of the OpenAI config
             cache_key: Optional key to cache and reuse embedding instances
             enable_cache: Whether to enable Portkey caching
 
@@ -197,8 +225,8 @@ class LLMClientManager:
             OpenAIEmbeddings instance
         """
         # Get default values from environment or config
-        model = model or os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
-        dimensions = dimensions or int(os.getenv("EMBEDDING_DIMENSIONS", "1536"))
+        model = chat_model_config.embedding_model
+        dimensions = chat_model_config.get_embedding_dimensions()
 
         # Create a cache key if none provided
         if not cache_key:
@@ -209,16 +237,12 @@ class LLMClientManager:
             return cls._embeddings_instances[cache_key]
 
         # Get Portkey client
-        portkey_client = cls._get_portkey_client()
+        portkey_client = cls._get_portkey_client(chat_model_config)
 
         # Create embeddings instance
         if portkey_client:
             try:
-                # Get cache settings
-                cache_ttl = int(os.getenv("PORTKEY_CACHE_TTL", "3600"))
-
-                # Use Portkey as a proxy for OpenAI
-                portkey_base_url = "https://api.portkey.ai/v1/proxy"
+                portkey_config = chat_model_config.llm_proxy_config
 
                 # Prepare headers with Portkey API key and cache settings
                 portkey_headers = {
@@ -227,14 +251,14 @@ class LLMClientManager:
                     "x-portkey-provider": "openai",
                     # Explicit cache settings in headers
                     "x-portkey-cache": "true" if enable_cache else "false",
-                    "x-portkey-cache-ttl": str(cache_ttl)
+                    "x-portkey-cache-ttl": str(portkey_config.cache_ttl) # Get cache settings
                 }
 
                 # Configure embeddings with Portkey
                 embeddings = OpenAIEmbeddings(
                     model=model,
                     dimensions=dimensions,
-                    openai_api_base=portkey_base_url,
+                    openai_api_base=portkey_config.url, # Use Portkey as a proxy for OpenAI
                     headers=portkey_headers
                 )
 
@@ -251,8 +275,8 @@ class LLMClientManager:
         else:
             # Use standard OpenAI client
             embeddings = OpenAIEmbeddings(
-                model=model,
-                dimensions=dimensions
+                model=chat_model_config.embedding_model,
+                dimensions=chat_model_config.get_embedding_dimensions()
             )
             logger.info(f"Created standard embeddings: {model}")
 
@@ -301,7 +325,7 @@ class LLMClientManager:
             Raw completion response from Portkey
         """
         # Get base Portkey client
-        base_portkey_client = cls._get_portkey_client()
+        base_portkey_client = cls._get_portkey_client_old()
         if not base_portkey_client:
             raise ValueError("Portkey client not configured")
 
@@ -416,7 +440,7 @@ class LLMClientManager:
             base64_image = base64.b64encode(image_bytes).decode('utf-8')
             
             # Get Portkey client
-            portkey_client = cls._get_portkey_client()
+            portkey_client = cls._get_portkey_client_old()
             
             # If Portkey is available, use it as a proxy
             if portkey_client:

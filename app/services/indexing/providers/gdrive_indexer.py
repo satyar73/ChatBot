@@ -67,7 +67,7 @@ class GoogleDriveIndexer:
         self.last_chunks = []  # Store chunks for reporting
 
         # Validate configuration
-        missing_settings = self.config.validate_settings()
+        missing_settings = self.validate_settings()
         if missing_settings:
             raise ValueError(f"Missing required settings: {', '.join(missing_settings)}")
 
@@ -83,6 +83,16 @@ class GoogleDriveIndexer:
 
         # Initialize Google Drive API
         self._initialize_drive_api()
+
+    def validate_settings(self):
+        """Validate that essential settings are present"""
+        missing_settings = []
+
+        # Google Drive validation
+        if self.config.GOOGLE_DRIVE_CREDENTIALS_FILE is None:
+                missing_settings.append("GOOGLE_DRIVE_CREDENTIALS_FILE")
+
+        return missing_settings
 
     def _initialize_drive_api(self):
         """Initialize the Google Drive API client"""
@@ -852,15 +862,6 @@ class GoogleDriveIndexer:
                 json.dump(all_records, f, indent=2)
 
         return all_records
-
-    def get_embedding_dimensions(self, model_name: str) -> int:
-        """Get the embedding dimensions for a given model"""
-        model_dimensions = {
-            "text-embedding-3-small": 1536,
-            "text-embedding-3-large": 3072,
-            "text-embedding-ada-002": 1536
-        }
-        return model_dimensions.get(model_name, 1536)  # Default to 1536 if unknown
 
     def _get_file_type(self, mime_type: str) -> str:
         """

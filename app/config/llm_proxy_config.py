@@ -23,19 +23,19 @@ class LlmProxyConfig:
         self._cache_ttl = cache_ttl #cache settings; used by PORTKEY
 
     @property
-    def proxy_type(self):
+    def proxy_type(self) -> LlmProxyType:
         return self._proxy_type
 
     @property
-    def url(self):
+    def url(self) -> str:
         return self._url
 
     @property
-    def api_key(self):
+    def api_key(self) -> str:
         return self.api_key
 
     @property
-    def cache_ttl(self):
+    def cache_ttl(self) -> int:
         return self.cache_ttl
 
 

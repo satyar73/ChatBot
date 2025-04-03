@@ -9,10 +9,11 @@ from langchain_pinecone import PineconeVectorStore
 from langchain.schema import Document
 
 from app.config.chat_config import chat_config
-from app.config.chat_model_config import ChatModelConfig
+from app.config.chat_model_config import ChatModelConfig, CloudProvider
 from app.config.vector_store_config import NeonConfig, PineconeConfig, VectorStoreConfig
 from app.services.common.enhancement_service import enhancement_service
 from app.utils.logging_utils import get_logger
+from app.utils.ollama_client import OllamaClientManager
 
 
 class VectorStoreClient:
@@ -131,11 +132,14 @@ class PineconeClient(VectorStoreClient):
             pc = Pinecone(api_key=self._pinecone_config.api_key)
             
             # Initialize embeddings
-            embeddings = OpenAIEmbeddings(
-                model=chat_model_config.model,
-                dimensions=self._pinecone_config.get_embedding_dimensions(chat_model_config.model)
-            )
-
+            match chat_model_config.cloud_provider:
+                case CloudProvider.OpenAI:
+                    embeddings = LLMClientManager.get_embeddings(chat_model_config)
+                case CloudProvider.Ollama:
+                    embeddings = OllamaClientManager.get_embeddings(chat_model_config)
+                case _:
+                    pass
+            
             # Check if index exists
             existing_indexes = pc.list_indexes().names()
 
@@ -143,9 +147,15 @@ class PineconeClient(VectorStoreClient):
             if self._pinecone_config.index_name not in existing_indexes:
                 self.logger.info(f"Creating new Pinecone index: {self._pinecone_config.index_name}")
 
+                if self._pinecone_config.cloud is None:
+                    raise ValueError(f"Pinecone cloud setting not found. Unable to create index.")
+
+                if self._pinecone_config.region is None:
+                    raise ValueError(f"Pinecone region setting not found. Unable to create index.")
+
                 pc.create_index(
                     name=self._pinecone_config.index_name,
-                    dimension=self._pinecone_config.get_embedding_dimensions(chat_model_config.model),
+                    dimension=chat_model_config.get_embedding_dimensions(),
                     metric="cosine",
                     spec=ServerlessSpec(
                         cloud=self._pinecone_config.cloud,
@@ -177,7 +187,7 @@ class PineconeClient(VectorStoreClient):
             return True
 
         except Exception as e:
-            self.logger.error(f"Error indexing to Pinecone", e, exc_info=True)
+            self.logger.error(f"Error indexing to Pinecone. str({e})")
             return False
 
     def get_index_info(self) -> Dict:

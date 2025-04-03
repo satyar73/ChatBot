@@ -37,13 +37,6 @@ class ChatEvaluationService:
         if not hasattr(self.config, 'ENHANCE_EVALUATION'):
             self.config.ENHANCE_EVALUATION = "enhance_evaluation"
 
-    def get_llm(self):
-        """Create LLM instance using LLMClientManager"""
-        return LLMClientManager.get_chat_llm(
-            model=self.config.LLM_MODEL,
-            temperature=self.config.LLM_TEMPERATURE
-        )
-
     # Helper method get the chat responses
 
     async def _get_chat_response_rag_no_rag(self,

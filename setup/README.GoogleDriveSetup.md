@@ -40,7 +40,6 @@
 Add these variables to your .env file:
 
 ```
-USE_GOOGLE_DRIVE=true
 GOOGLE_DRIVE_CREDENTIALS_FILE=/path/to/your-credentials.json
 GOOGLE_DRIVE_FOLDER_ID=optional-folder-id-to-start-from
 ```

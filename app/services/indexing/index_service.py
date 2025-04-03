@@ -1,5 +1,7 @@
 import asyncio
-from typing import Dict, Optional, Any
+from typing import Dict, List, Optional, Any
+
+from langchain.schema import Document
 
 from app.config.chat_config import chat_config
 from app.services.indexing.providers.shopify_indexer import ShopifyIndexer
@@ -125,14 +127,17 @@ class IndexService:
                     "message": "No records found in Google Drive"
                 }
             
-            # Prepare documents for indexing
-            self.logger.debug("Preparing documents for indexing")
-            docs = self.content_processor.prepare_documents_for_indexing(records)
-            self.logger.info(f"Prepared {len(docs)} documents for indexing")
-            
-            # Index the documents in vector store
-            self.logger.debug("Indexing documents in vector store")
-            success = self.content_processor.index_to_vector_store(docs)
+            docs = List[Document]
+            success = True
+            for chat_model_config in chat_config.chat_model_configs.values():
+                # Prepare documents for indexing
+                self.logger.debug("Preparing documents for indexing")
+                docs.append(self.content_processor.prepare_documents_for_indexing(chat_model_config, records))
+                self.logger.info(f"Prepared {len(docs)} documents for indexing")
+                
+                # Index the documents in vector store
+                self.logger.debug("Indexing documents in vector store")
+                success &= self.content_processor.index_to_vector_store(docs)
             
             if success:
                 namespace_info = ""
@@ -142,6 +147,7 @@ class IndexService:
                         break
                 
                 return {
+
                     "status": "success",
                     "message": f"Successfully indexed {len(docs)} documents from Google Drive{namespace_info}"
                 }

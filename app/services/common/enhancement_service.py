@@ -5,9 +5,11 @@ Service layer for query enhancement and content enrichment.
 import re
 from typing import Dict, List, Any, Optional
 
-from app.config.chat_config import ChatConfig
+from app.config.chat_config import ChatConfig, chat_config
+from app.config.chat_model_config import CloudProvider
 from app.utils.llm_client import LLMClientManager
 from app.utils.logging_utils import get_logger
+from app.utils.ollama_client import OllamaClientManager
 from app.utils.other_utlis import load_json
 from app.utils.semantic_filtering import SemanticFilter
 
@@ -938,15 +940,24 @@ class EnhancementService:
             Summarized content
         """
         try:
-            # Use the centralized LLM client
-            llm = LLMClientManager.get_chat_llm(
-                model=self.config.OPENAI_SUMMARY_MODEL,
-                temperature=0
-            )
-            
             prompt = f"<markdown>\n{content}\n</markdown>\nYou should shorten the above markdown text to MAXIMUM OF {max_chars} characters while making sure ALL THE HEADINGS AND HYPERLINKS are retained so that the users can refer to those links later. In your response, don't include <markdown> tags."
             
-            response = llm.invoke(prompt)
+            for chat_model_config in chat_config.chat_model_configs.values():
+                match chat_model_config.cloud_provider:
+                    case CloudProvider.OpenAI:
+                        # Use the centralized LLM client
+                        llm = LLMClientManager.get_chat_llm(
+                            model=self.config.OPENAI_SUMMARY_MODEL,
+                            temperature=0
+                        )
+                        response = llm.invoke(prompt)
+                    case CloudProvider.Ollama:
+                        embeddings = OllamaClientManager.get_embeddings(chat_model_config)
+                    case _:
+                        pass
+            
+                break # TODO today we will only support 1st (one) configured model (either OpenAI or Ollama)
+
             return response.content
         except Exception as e:
             self.logger.error(f"Error condensing content: {str(e)}")
