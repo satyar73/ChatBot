@@ -54,15 +54,22 @@ class ChatConfig:
 
         # Ollama Settings
         self.OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
-        self.OLLAMA_MODEL = os.getenv("OLLAMA_MODEL")
-        self.OLLAMA_EMBEDDING_MODEL = os.getenv("OLLAMA_MODEL")
+        self.OLLAMA_EMBEDDING_MODEL = os.getenv("OLLAMA_EMBEDDING_MODEL")
         self.OLLAMA_PINECONE_INDEX_NAME = os.getenv("OLLAMA_PINECONE_INDEX_NAME")
 
         # OpenAI Settings
         self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-        self.OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+        self.OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL") # we should default to "text-embedding-3-small"
         self.OPENAI_SUMMARY_MODEL = "gpt-3.5-turbo"
         self.EMBEDDING_CONTEXT_LENGTH = 8192
+
+        # Configuration settings for chat functionality
+        # LLM Configuration
+        self.LLM_CONFIG_4o = {
+            "temperature": 0,
+            "streaming": True,
+            "model": "gpt-4o"
+        }
 
         # Processing Settings
         self.SUMMARIZE_CONTENT = False  # Set to True if you want to summarize content
@@ -84,14 +91,6 @@ class ChatConfig:
         # API Settings
         self.API_HOST = "0.0.0.0"
         self.API_PORT = 8000
-
-        # Configuration settings for chat functionality
-        # LLM Configuration
-        self.LLM_CONFIG_4o = {
-            "temperature": 0,
-            "streaming": True,
-            "model": "gpt-4o"
-        }
 
         self.chat_model_configs: Dict[str, ChatModelConfig] = self._get_model_configs()
 
@@ -221,29 +220,6 @@ class ChatConfig:
         """Get all settings as a dictionary (excluding private attributes)"""
         return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
 
-    def validate_settings(self):
-        """Validate that essential settings are present"""
-        missing_settings = []
-
-        # Check which indexer we're using
-        if os.environ.get("USE_GOOGLE_DRIVE", "false").lower() == "true":
-            # Google Drive validation
-            if not getattr(self, "GOOGLE_DRIVE_CREDENTIALS_FILE", None):
-                    missing_settings.append("GOOGLE_DRIVE_CREDENTIALS_FILE")
-        else:
-            # Shopify validation
-            if not getattr(self, "SHOPIFY_API_KEY", None):
-                missing_settings.append("SHOPIFY_API_KEY")
-
-        # Common validations
-        if not getattr(self, "PINECONE_API_KEY", None):
-            missing_settings.append("PINECONE_API_KEY")
-
-        if not getattr(self, "OPENAI_API_KEY", None):
-            missing_settings.append("OPENAI_API_KEY")
-
-        return missing_settings
-    
     def _get_model_configs(self) -> Dict[str, ChatModelConfig]:
         llm_proxy_config = None
         portkey_api_key = os.getenv("PORTKEY_API_KEY")
@@ -269,7 +245,7 @@ class ChatConfig:
             
             chat_model_configs[self.OPENAI_EMBEDDING_MODEL] = ChatModelConfig(
                 cloud_provider=CloudProvider.OpenAI,
-                model = self.OPENAI_EMBEDDING_MODEL,
+                embedding_model = self.OPENAI_EMBEDDING_MODEL,
                 vector_store_config = vector_store_config,
                 cloud_api_key = self.OPENAI_API_KEY,
                 llm_proxy_config = llm_proxy_config,
@@ -278,7 +254,7 @@ class ChatConfig:
         if self.OLLAMA_EMBEDDING_MODEL is not None:
             if self.OLLAMA_PINECONE_INDEX_NAME is None:
                 # we do need a vector store; if not found throw error
-                raise ValueError(f"Pinecone index name not found for Ollama model '{self.PINECONE_INDEX_NAME}'")
+                raise ValueError(f"Pinecone index name not found for Ollama model '{self.OLLAMA_EMBEDDING_MODEL}'")
             
             vector_store_config = PineconeConfig(
                 api_key = self.PINECONE_API_KEY,
@@ -287,8 +263,8 @@ class ChatConfig:
                 region = self.PINECONE_REGION)
             
             chat_model_configs[self.OPENAI_EMBEDDING_MODEL] = ChatModelConfig(
-                cloud_provider=CloudProvider.Local,
-                model = self.OLLAMA_EMBEDDING_MODEL,
+                cloud_provider=CloudProvider.Ollama,
+                embedding_model = self.OLLAMA_EMBEDDING_MODEL,
                 vector_store_config = vector_store_config,
                 cloud_api_key = None,
                 llm_proxy_config = llm_proxy_config,

@@ -87,8 +87,8 @@ class ToolManager:
             vector_store_config = chat_model_config.vector_store_config
 
             embeddings = OpenAIEmbeddings(
-                model=chat_model_config.model,
-                dimensions=vector_store_config.get_embedding_dimensions(model_name=chat_model_config.model)
+                model=chat_model_config.embedding_model,
+                dimensions=chat_model_config.get_embedding_dimensions()
             )
 
             vectorstore = PineconeVectorStore(
@@ -98,7 +98,8 @@ class ToolManager:
 
             # Set up metadata filters based on query content
             search_kwargs: Dict[str, Any] = {
-                "k": cls.config.RETRIEVER_CONFIG["k"],
+                "k": cls.config.
+                RETRIEVER_CONFIG["k"],
                 "fetch_k": cls.config.RETRIEVER_CONFIG["fetch_k"],
                 "lambda_mult": cls.config.RETRIEVER_CONFIG["lambda_mult"]
             }

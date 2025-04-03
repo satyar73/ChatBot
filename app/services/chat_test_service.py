@@ -69,13 +69,6 @@ class ChatTestService:
         if not hasattr(self.config, 'ENHANCE_EVALUATION'):
             self.config.ENHANCE_EVALUATION = "enhance_evaluation"
 
-    def get_llm(self):
-        """Create LLM instance using LLMClientManager"""
-        return LLMClientManager.get_chat_llm(
-            model=self.config.LLM_MODEL,
-            temperature=self.config.LLM_TEMPERATURE
-        )
-
     async def start_get_chat_response_node(self, state: DualState) -> DualState:
         """Node that calls Chatbot API to get both RAG and non-RAG responses"""
         self.logger.debug(f"Starting start_node with prompt: {state['prompt'][:50]}...")

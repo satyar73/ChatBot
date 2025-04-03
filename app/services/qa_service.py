@@ -371,32 +371,6 @@ class QAService:
             self.logger.error(f"Error analyzing image with LLM: {str(e)}")
             return None
     
-    def condense_content_using_llm(self, content: str, max_chars: int = 800) -> str:
-        """
-        Summarize content using the OpenAI API.
-        
-        Args:
-            content: The content to summarize
-            max_chars: Maximum characters for the summary
-            
-        Returns:
-            Summarized content
-        """
-        try:
-            # Use the centralized LLM client
-            llm = LLMClientManager.get_chat_llm(
-                model=self.config.OPENAI_SUMMARY_MODEL,
-                temperature=0
-            )
-            
-            prompt = f"<markdown>\n{content}\n</markdown>\nYou should shorten the above markdown text to MAXIMUM OF {max_chars} characters while making sure ALL THE HEADINGS AND HYPERLINKS are retained so that the users can refer to those links later. In your response, don't include <markdown> tags."
-            
-            response = llm.invoke(prompt)
-            return response.content
-        except Exception as e:
-            self.logger.error(f"Error condensing content: {str(e)}")
-            return content[:max_chars] + "..." if len(content) > max_chars else content
-
 
 # Create a singleton instance
 qa_service = QAService()

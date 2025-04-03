@@ -6,17 +6,17 @@ from app.config.vector_store_config import VectorStoreConfig
 
 class CloudProvider(Enum):
     OpenAI = 1 #cloud provider
-    Local = 2 #e.g. downloaded to the server
+    Ollama = 2 #e.g. downloaded to the server
 
 
 class ChatModelConfig:
     """Class to manage list of models and its vector store needs to be used configuration settings for the application"""
 
-    def __init__(self, cloud_provider: CloudProvider, model: str, vector_store_config: VectorStoreConfig, 
+    def __init__(self, cloud_provider: CloudProvider, embedding_model: str, vector_store_config: VectorStoreConfig, 
                  cloud_api_key: str = None, llm_proxy_config: LlmProxyConfig = None,
                  embedding_context_length: int = 8192):
         self._cloud_provider = cloud_provider
-        self._model = model
+        self._embedding_model = embedding_model
         self._vector_store_config = vector_store_config
         self._cloud_api_key = cloud_api_key
         self._llm_proxy_config = llm_proxy_config
@@ -27,8 +27,8 @@ class ChatModelConfig:
         return self._cloud_provider
 
     @property
-    def model(self)->str:
-        return self._model
+    def embedding_model(self)->str:
+        return self._embedding_model
 
     @property
     def vector_store_config(self)->VectorStoreConfig:
@@ -46,3 +46,6 @@ class ChatModelConfig:
     def embedding_context_length(self)->int:
         return self._embedding_context_length
         
+    def get_embedding_dimensions(self)->int:
+        """Get the dimensions for a specific embedding model"""
+        return self.vector_store_config.get_embedding_dimensions(self.embedding_model)
