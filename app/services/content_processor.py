@@ -2,6 +2,7 @@
 Content processor service for document processing and vector store indexing.
 """
 import os
+import copy
 from typing import List, Dict, Any, Optional
 
 from app.utils.logging_utils import get_logger
@@ -27,7 +28,7 @@ class ContentProcessor:
         """
         self.config = config or ChatConfig()
         self.logger = get_logger(__name__, "DEBUG")
-        self.logger.debug("ContentProcessor initialized")
+        self.logger.info("ContentProcessor initialized")
         self.enhancement_service = enhancement_service
         
         # Create output directory if needed
@@ -232,6 +233,10 @@ class ContentProcessor:
                         metadata["document_type"] = "presentation_slide"
                         metadata["parent_presentation"] = record.get('parent_presentation', '')
                         metadata["slide_number"] = record.get('slide_number', 0)
+                        
+                    # Add namespace information if present in the record
+                    if 'namespace' in record:
+                        metadata["namespace"] = record.get('namespace')
 
                 # Create embedding prompt. This is one that is used for semantic search
                 optimized_text = self.enhancement_service.create_embedding_prompt(chunk, metadata)
@@ -260,12 +265,54 @@ class ContentProcessor:
 
     def index_to_vector_store(self, docs: List[Document]) -> bool:
         """
-        Go through each configured vector store (e.g. Pinecone, Neon, etc.) and index the documents
+        Go through each configured vector store (e.g. Pinecone, Neon, etc.) and index the documents.
+        If documents have namespace information, they will be indexed in their specific namespaces.
         """
-        success = True
-        for chat_model_config in chat_config.chat_model_configs.values():
-            vector_store_config = chat_model_config.vector_store_config
-            vector_store_client: VectorStoreClient = VectorStoreClient.get_vector_store_client(vector_store_config)
-            success &= vector_store_client.index_to_vector_store(chat_model_config, docs)
+        # First, check if we have namespace information in the documents
+        has_namespace_info = any("namespace" in doc.metadata for doc in docs)
+        
+        if has_namespace_info:
+            self.logger.info("Documents contain namespace information - using namespace-aware indexing")
+            
+            # Group documents by namespace
+            namespace_groups = {}
+            for doc in docs:
+                namespace = doc.metadata.get("namespace", "default")
+                if namespace not in namespace_groups:
+                    namespace_groups[namespace] = []
+                namespace_groups[namespace].append(doc)
+                
+            # Log namespace distribution
+            for namespace, docs_list in namespace_groups.items():
+                self.logger.info(f"Namespace '{namespace}' has {len(docs_list)} documents to index")
+                
+            # Index each namespace group separately
+            success = True
+            for namespace, docs_list in namespace_groups.items():
+                self.logger.info(f"Indexing {len(docs_list)} documents in namespace '{namespace}'...")
+                
+                for chat_model_config in chat_config.chat_model_configs.values():
+                    # Create a copy of the config to modify the namespace
+                    config_copy = copy.deepcopy(chat_model_config)
+                    
+                    # Update namespace in the config copy
+                    if hasattr(config_copy.vector_store_config, 'namespace'):
+                        original_ns = config_copy.vector_store_config.namespace
+                        config_copy.vector_store_config._namespace = namespace
+                        self.logger.info(f"Changed namespace from '{original_ns}' to '{namespace}' for indexing")
+                    
+                    # Get vector store client and index documents
+                    vector_store_client = VectorStoreClient.get_vector_store_client(config_copy.vector_store_config)
+                    success &= vector_store_client.index_to_vector_store(config_copy, docs_list)
+            
+            return success
+        else:
+            # Legacy mode - no namespace information in documents
+            self.logger.info("No namespace information in documents - using standard indexing")
+            success = True
+            for chat_model_config in chat_config.chat_model_configs.values():
+                vector_store_config = chat_model_config.vector_store_config
+                vector_store_client = VectorStoreClient.get_vector_store_client(vector_store_config)
+                success &= vector_store_client.index_to_vector_store(chat_model_config, docs)
 
-        return success
+            return success

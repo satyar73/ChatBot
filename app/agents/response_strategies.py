@@ -4,7 +4,6 @@ Response strategies for handling different types of chat queries.
 from typing import Dict, List, Tuple, Any, Optional, Union, TYPE_CHECKING
 import re
 
-from app.config import prompt_config
 from app.config.chat_model_config import ChatModelConfig
 from app.models.chat_models import ChatHistory, Source
 from langchain.agents import AgentExecutor
@@ -56,7 +55,8 @@ class ResponseStrategy:
                     query: str, 
                     chat_history: ChatHistory, 
                     custom_system_prompt: str = None, 
-                    prompt_style: str = "default") -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], List[str]]:
+                    prompt_style: str = "default",
+                    client_name: str = None) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], List[str]]:
         """
         Execute the strategy to generate a response.
         
@@ -66,6 +66,7 @@ class ResponseStrategy:
             chat_history: The chat history
             custom_system_prompt: Optional custom system prompt
             prompt_style: The prompt style to use
+            client_name: Optional client name for namespace-specific retrieval
             
         Returns:
             Tuple of (rag_response, no_rag_response, queries_tried)
@@ -80,7 +81,8 @@ class ResponseStrategy:
                                 max_attempts: int = 3,
                                 custom_system_prompt: str = None,
                                 rag_agent=None,
-                                prompt_style: str = "default") -> Tuple[Dict[str, Any], List[str]]:
+                                prompt_style: str = "default",
+                                client_name: str = None) -> Tuple[Dict[str, Any], List[str]]:
         """
         Execute RAG with multiple query formulations and retry logic.
         
@@ -92,6 +94,7 @@ class ResponseStrategy:
             custom_system_prompt: Optional custom system prompt
             rag_agent: Optional RAG agent object to use for execution
             prompt_style: The prompt style to use
+            client_name: Optional client name for namespace-specific retrieval
             
         Returns:
             Tuple of (best_response, queries_tried)
@@ -106,7 +109,8 @@ class ResponseStrategy:
                 custom_system_prompt=custom_system_prompt,
                 query=query,
                 chat_model_config=chat_model_config,
-                prompt_style=prompt_style
+                prompt_style=prompt_style,
+                client_name=client_name
             )
             self.logger.debug(
                 f"QUERY REWRITING: Using RAG agent with custom system prompt: {custom_system_prompt is not None}")
@@ -309,7 +313,8 @@ class ResponseStrategy:
                       custom_system_prompt: str = None,
                       query: str = None,
                       chat_model_config: ChatModelConfig = None,
-                      prompt_style: str = "default") -> "AgentExecutor":
+                      prompt_style: str = "default",
+                      client_name: str = None) -> "AgentExecutor":
         """
         Get a RAG agent with the specified configuration.
         
@@ -319,6 +324,7 @@ class ResponseStrategy:
             query: Optional query to use for agent configuration
             chat_model_config: Optional chat model configuration
             prompt_style: The prompt style to use
+            client_name: Optional client name for namespace-specific retrieval
             
         Returns:
             An AgentExecutor instance configured for RAG
@@ -336,7 +342,8 @@ class ResponseStrategy:
             query=query,
             agent_type="rag",
             custom_system_prompt=custom_system_prompt,
-            prompt_style=prompt_style
+            prompt_style=prompt_style,
+            client_name=client_name
         )
 
     async def _get_rag_response(self,
@@ -375,7 +382,8 @@ class RAGResponseStrategy(ResponseStrategy):
                     query: str, 
                     chat_history: ChatHistory, 
                     custom_system_prompt: str = None,
-                    prompt_style: str = "default") -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], List[str]]:
+                    prompt_style: str = "default",
+                    client_name: str = None) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], List[str]]:
         """
         Execute the RAG response strategy.
         
@@ -385,6 +393,7 @@ class RAGResponseStrategy(ResponseStrategy):
             chat_history: Chat history
             custom_system_prompt: Optional custom system prompt
             prompt_style: The prompt style to use
+            client_name: Optional client name for namespace-specific retrieval
             
         Returns:
             Tuple of (rag_response, no_rag_response, queries_tried)
@@ -396,7 +405,8 @@ class RAGResponseStrategy(ResponseStrategy):
                                                         query=query,
                                                         history=chat_history.get_messages(),
                                                         custom_system_prompt=custom_system_prompt,
-                                                        prompt_style=prompt_style
+                                                        prompt_style=prompt_style,
+                                                        client_name=client_name
                                                     )
         return rag_response, None, queries_tried
 
@@ -408,7 +418,8 @@ class NonRAGResponseStrategy(ResponseStrategy):
                     query: str, 
                     chat_history: ChatHistory, 
                     custom_system_prompt: str = None,
-                    prompt_style: str = "default") -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], List[str]]:
+                    prompt_style: str = "default",
+                    client_name: str = None) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], List[str]]:
         """
         Execute the non-RAG response strategy.
         
@@ -418,6 +429,7 @@ class NonRAGResponseStrategy(ResponseStrategy):
             chat_history: Chat history
             custom_system_prompt: Optional custom system prompt
             prompt_style: The prompt style to use
+            client_name: Optional client name (not used in non-RAG strategy)
             
         Returns:
             Tuple of (rag_response, no_rag_response, queries_tried)
@@ -446,7 +458,8 @@ class DualResponseStrategy(ResponseStrategy):
                     query: str, 
                     chat_history: ChatHistory, 
                     custom_system_prompt: str = None,
-                    prompt_style: str = "default") -> Tuple[Dict[str, Any], Dict[str, Any], List[str]]:
+                    prompt_style: str = "default",
+                    client_name: str = None) -> Tuple[Dict[str, Any], Dict[str, Any], List[str]]:
         """
         Execute both RAG and non-RAG response strategies.
         
@@ -456,6 +469,7 @@ class DualResponseStrategy(ResponseStrategy):
             chat_history: Chat history
             custom_system_prompt: Optional custom system prompt
             prompt_style: The prompt style to use
+            client_name: Optional client name for namespace-specific retrieval
             
         Returns:
             Tuple of (rag_response, no_rag_response, queries_tried)
@@ -466,7 +480,8 @@ class DualResponseStrategy(ResponseStrategy):
             query=query,
             history=chat_history.get_messages(),
             custom_system_prompt=custom_system_prompt,
-            prompt_style=prompt_style
+            prompt_style=prompt_style,
+            client_name=client_name
         )
         
         # Create a temporary strategy just to format sources
@@ -495,7 +510,8 @@ class DatabaseResponseStrategy(ResponseStrategy):
                     query: str, 
                     chat_history: ChatHistory, 
                     custom_system_prompt: str = None,
-                    prompt_style: str = "default") -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], List[str]]:
+                    prompt_style: str = "default",
+                    client_name: str = None) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], List[str]]:
         """
         Execute the database response strategy.
         
@@ -505,6 +521,7 @@ class DatabaseResponseStrategy(ResponseStrategy):
             chat_history: Chat history
             custom_system_prompt: Optional custom system prompt
             prompt_style: The prompt style to use
+            client_name: Optional client name (not used in database strategy)
             
         Returns:
             Tuple of (rag_response, no_rag_response, queries_tried)

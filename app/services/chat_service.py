@@ -66,25 +66,28 @@ class ChatService:
             self.chat_histories[session_id] = ChatHistory()
         chat_history = self.chat_histories[session_id]
 
-        # Check for special testing flags in the query
-        force_refresh = user_input.strip().lower().startswith("test_routing:")
-
-        # Extract the actual query if in test mode
-        actual_query = user_input
+        # Extract directives including test mode and client name
+        query_directives = self.enhancement_service.extract_query_directives(user_input)
+        force_refresh = query_directives["force_refresh"]
+        actual_query = query_directives["actual_query"]
+        client_name = query_directives["client_name"]
+        
         if force_refresh:
             self.logger.info(f"TEST MODE: Force refresh detected, bypassing cache")
-            # Extract the actual query after the test_routing: prefix
-            actual_query = user_input.split("test_routing:", 1)[1].strip()
             self.logger.info(f"TEST MODE: Using test query: {actual_query}")
+            
+        if client_name:
+            self.logger.info(f"CLIENT SPECIFIED: Using client '{client_name}' for query")
 
-        # Generate query hash for cache lookup
+        # Generate query hash for cache lookup - include client name if specified
         query_hash = chat_cache.generate_query_hash(
                                         query=user_input,
                                         history=chat_history.get_messages(),
                                         session_id=session_id,
                                         system_prompt=custom_system_prompt,
                                         prompt_style=prompt_style,
-                                        mode=mode  # Include mode in hash to differentiate between different mode requests
+                                        mode=mode,  # Include mode in hash to differentiate between different mode requests
+                                        client_name=client_name  # Include client name in hash if specified
                                     )
 
         # Check cache if not in force refresh mode
@@ -185,13 +188,14 @@ class ChatService:
                     )
                     self.logger.info("Enhanced custom system prompt with expected answer")
         
-        # Execute the strategy - we don't need to pass document_question since we've processed it already
+        # Execute the strategy - pass client_name and processed query
         rag_response, no_rag_response, queries_tried = await strategy.execute(
             chat_model_config,
             actual_query, 
             chat_history,
             custom_system_prompt=custom_system_prompt,  # Pass through the custom_system_prompt value
-            prompt_style=prompt_style
+            prompt_style=prompt_style,
+            client_name=client_name  # Pass client name to strategy for namespace-specific retrieval
         )
         
         # Create a temporary strategy just to format sources

@@ -4,15 +4,13 @@ This handles common functionality shared between Slides and Docs services.
 """
 import csv
 import uuid
-from typing import List, Dict, Any, Optional, Tuple, Literal
+from typing import List, Dict, Any, Tuple, Literal
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from app.config.chat_config import ChatConfig
 from app.utils.logging_utils import get_logger
 from app.services.chat_service import ChatService
 from app.models.chat_models import Message
-from app.config.prompt_config import prompt_config
-from app.services.enhancement_service import enhancement_service
 
 class DocumentService:
     """Base service for generating content and handling document operations."""
@@ -144,7 +142,7 @@ Format template to follow:
 {format_template}
 """
             
-            # If we have a question and it's not already in the format template, add it to the format template directly
+            # If we have a question, and it's not already in the format template, add it to the format template directly
             if question and question not in format_template:
                 # Insert the question at the beginning of the message as metadata rather than in the format template
                 # This helps prevent duplication while keeping the question context available

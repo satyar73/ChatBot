@@ -60,6 +60,42 @@ class PineconeClient(VectorStoreClient):
         super().__init__()
         self._pinecone_config: PineconeConfig = pinecone_config
 
+    def _clean_metadata_for_pinecone(self, docs: List[Document]) -> List[Document]:
+        """
+        Clean document metadata to make it compatible with Pinecone requirements.
+        Removes null values and ensures all values are strings, numbers, booleans or lists of strings.
+        
+        Args:
+            docs: List of Document objects
+            
+        Returns:
+            Cleaned list of Document objects
+        """
+        cleaned_docs = []
+        
+        for doc in docs:
+            # Create a new clean metadata dict
+            clean_metadata = {}
+            
+            # Only keep non-null values
+            for key, value in doc.metadata.items():
+                if value is not None:
+                    # Ensure value is a supported type
+                    if isinstance(value, (str, int, float, bool)):
+                        clean_metadata[key] = value
+                    elif isinstance(value, list) and all(isinstance(item, str) for item in value):
+                        clean_metadata[key] = value
+                    else:
+                        # Convert other types to string
+                        clean_metadata[key] = str(value)
+            
+            # Create a new document with the cleaned metadata
+            cleaned_doc = Document(page_content=doc.page_content, metadata=clean_metadata)
+            cleaned_docs.append(cleaned_doc)
+            
+        self.logger.debug(f"Cleaned metadata for {len(cleaned_docs)} documents to comply with Pinecone requirements")
+        return cleaned_docs
+        
     def index_to_vector_store(self, 
                               chat_model_config: ChatModelConfig, 
                               docs: List[Document]) -> bool:
@@ -79,8 +115,17 @@ class PineconeClient(VectorStoreClient):
                 self.logger.warning("No documents to index")
                 return True
 
-            self.logger.info(f"Indexing {len(docs)} document chunks to Pinecone index "
-                             f"'{self._pinecone_config.index_name}' in namespace '{self._pinecone_config.namespace}'")
+            # Clean document metadata to comply with Pinecone requirements
+            cleaned_docs = self._clean_metadata_for_pinecone(docs)
+            self.logger.debug(f"Cleaned {len(cleaned_docs)} documents for Pinecone compatibility")
+
+            namespace_used = self._pinecone_config.namespace
+            self.logger.debug(f"Indexing {len(cleaned_docs)} document chunks to Pinecone index "
+                             f"'{self._pinecone_config.index_name}' in namespace '{namespace_used}'")
+            self.logger.debug(f"NAMESPACE TRACKING (INDEXING): Using namespace '{namespace_used}'")
+            
+            pinecone_namespace_env = os.getenv("PINECONE_NAMESPACE", "Not set")
+            self.logger.debug(f"NAMESPACE TRACKING (ENV): PINECONE_NAMESPACE environment variable is '{pinecone_namespace_env}'")
 
             # Initialize Pinecone
             pc = Pinecone(api_key=self._pinecone_config.api_key)
@@ -115,11 +160,11 @@ class PineconeClient(VectorStoreClient):
                 self.logger.info(f"Using existing Pinecone index: {self._pinecone_config.index_name}")
 
             # Index documents
-            self.logger.info(f"Indexing {len(docs)} document chunks to Pinecone...")
+            self.logger.info(f"Indexing {len(cleaned_docs)} document chunks to Pinecone...")
 
             # Store in Pinecone with namespace support
             vectorstore = PineconeVectorStore.from_documents(
-                docs,
+                cleaned_docs,
                 index_name=self._pinecone_config.index_name,
                 pinecone_api_key=self._pinecone_config.api_key,
                 embedding=embeddings,
@@ -127,7 +172,7 @@ class PineconeClient(VectorStoreClient):
             )
 
             self.logger.info(
-                f"Successfully indexed {len(docs)} document chunks to "
+                f"Successfully indexed {len(cleaned_docs)} document chunks to "
                 f"Pinecone index '{self._pinecone_config.index_name}' in namespace '{self._pinecone_config.namespace}'.")
             return True
 

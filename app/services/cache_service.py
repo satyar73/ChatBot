@@ -45,6 +45,7 @@ class ChatCacheService:
                 system_prompt TEXT,
                 prompt_style TEXT DEFAULT 'default',
                 mode TEXT DEFAULT 'rag',
+                client_name TEXT,
                 timestamp REAL,
                 hit_count INTEGER DEFAULT 1
             )
@@ -80,7 +81,7 @@ class ChatCacheService:
             required_columns = [
                 "query_hash", "user_input", "rag_response", 
                 "no_rag_response", "sources", "system_prompt", 
-                "prompt_style", "timestamp", "hit_count", "mode"
+                "prompt_style", "mode", "client_name", "timestamp", "hit_count"
             ]
             
             # Check which columns exist in the current schema
@@ -112,7 +113,7 @@ class ChatCacheService:
     @staticmethod
     def generate_query_hash(query: str, history: List = None, session_id: str = None, 
                            system_prompt: str = None, prompt_style: str = "default",
-                           mode: str = "rag") -> str:
+                           mode: str = "rag", client_name: str = None) -> str:
         """
         Generate a hash to uniquely identify a query with its context.
         
@@ -123,6 +124,7 @@ class ChatCacheService:
             system_prompt: Optional custom system prompt
             prompt_style: The prompt style (default, detailed, concise)
             mode: The response mode (rag, no_rag, both)
+            client_name: Optional client name for namespace-specific caching
             
         Returns:
             String hash that uniquely identifies this query in its context
@@ -151,6 +153,10 @@ class ChatCacheService:
         
         # Always include mode in hash (critical for proper caching with different modes)
         hash_content += "mode:" + (mode or "rag").strip().lower()
+        
+        # Include client name in hash if provided (critical for namespace-specific caching)
+        if client_name:
+            hash_content += "client:" + client_name
             
         # Generate hash
         query_hash = hashlib.md5(hash_content.encode('utf-8')).hexdigest()
@@ -177,7 +183,7 @@ class ChatCacheService:
             # Get cached response
             cursor.execute(
                 "SELECT rag_response, no_rag_response, sources, timestamp,"
-                            " hit_count, system_prompt, prompt_style, mode"
+                            " hit_count, system_prompt, prompt_style, mode, client_name"
                             " FROM chat_cache"
                             " WHERE query_hash = ?",
                 (query_hash,)
@@ -186,7 +192,7 @@ class ChatCacheService:
             
             if result:
                 (rag_response, no_rag_response, sources_json, timestamp,
-                 hit_count, system_prompt, prompt_style, mode) = result
+                 hit_count, system_prompt, prompt_style, mode, client_name) = result
                 
                 # Check if cache entry has expired
                 age_in_seconds = time.time() - timestamp
@@ -238,6 +244,7 @@ class ChatCacheService:
                       sources: List = None,
                       system_prompt: str = None,
                       prompt_style: str = "default",
+                      client_name: str = None,
                       mode: str = "rag") -> bool:
         """
         Cache a response for future retrieval.
@@ -251,7 +258,7 @@ class ChatCacheService:
             system_prompt: Optional custom system prompt
             prompt_style: Optional prompt style (default, detailed, concise)
             mode: Optional response mode (rag, no_rag, both)
-            
+            client_name: Optional client name for namespace-specific caching
         Returns:
             Boolean indicating success/failure
         """
@@ -272,11 +279,11 @@ class ChatCacheService:
                     INTO
                 chat_cache 
                 (query_hash, user_input, rag_response, no_rag_response, sources,
-                system_prompt, prompt_style, mode, timestamp, hit_count) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                system_prompt, prompt_style, mode, client_name, timestamp, hit_count) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 """, 
                 (query_hash, user_input, rag_response, no_rag_response,
-                 sources_json, system_prompt, prompt_style, mode, time.time())
+                 sources_json, system_prompt, prompt_style, mode, client_name, time.time())
             )
             
             # Ensure cache size doesn't exceed limit

@@ -447,7 +447,8 @@ class AgentManager:
                  agent_type: str,
                  custom_system_prompt: str = None,
                  prompt_style: str = "default",
-                 query: str = None) -> AgentExecutor:
+                 query: str = None,
+                 client_name: str = None) -> AgentExecutor:
         """
         Get an agent of the specified type with the given configuration.
         
@@ -457,6 +458,7 @@ class AgentManager:
             custom_system_prompt: Optional custom system prompt
             prompt_style: The prompt style to use
             query: Optional query string for metadata filtering (RAG only)
+            client_name: Optional client name for namespace-specific retrieval (RAG only)
             
         Returns:
             Configured agent executor
@@ -479,7 +481,8 @@ class AgentManager:
             return self._configure_rag_agent(
                 chat_model_config=chat_model_config,
                 custom_system_prompt=system_prompt,
-                query=query
+                query=query,
+                client_name=client_name
             )
         elif agent_type == "standard":
             return self._configure_standard_agent(
@@ -586,7 +589,7 @@ class AgentManager:
         return self._database_agent
 
     def _configure_rag_agent(self, chat_model_config: ChatModelConfig, custom_system_prompt=None,
-                            query=None) -> AgentExecutor:
+                            query=None, client_name=None) -> AgentExecutor:
         """
         Configure and return a RAG-enabled agent.
         
@@ -594,6 +597,7 @@ class AgentManager:
             chat_model_config: Configuration for the chat model and vector store
             custom_system_prompt: Optional custom system prompt
             query: Optional query string for metadata filtering
+            client_name: Optional client name for namespace-specific retrieval
             
         Returns:
             Configured RAG agent
@@ -601,25 +605,30 @@ class AgentManager:
         self.logger.debug("Configuring RAG agent with prompt")
         llm = AgentFactory.create_llm()
         
-        # If we have a query, configure retriever with query-specific filters
-        if query:
-            self.logger.info(f"Configuring retriever with query-specific filters for: {query}")
-            retriever_tool = ToolManager.get_retriever_tool(
-                chat_model_config=chat_model_config, 
-                query=query
-                # No additional parameters here - we'll let the LLM specify them
-                # in its tool calls for more specific filtering
-            )
-            tools = [retriever_tool, ToolManager.get_current_time]
-        else:
-            tools = ToolManager.get_rag_tools(chat_model_config=chat_model_config)
-            
+        self.logger.info(f"Configuring retriever with query-specific filters for: {query}")
+        
+        content_type = None
+
+        # Get the current tools
+        tools = [ToolManager.get_current_time]
+        topic = enhancement_service.get_topic_from_query(query)
+        retriever_tool = ToolManager.get_retriever_tool(
+                                chat_model_config=chat_model_config,
+                                query=query,
+                                content_type=content_type,
+                                client_name=client_name,
+                                topic=topic
+        )
+        if retriever_tool is not None:
+            tools.insert(0, retriever_tool)
+
         for tool in tools:
             if not hasattr(tool, "callbacks") or tool.callbacks is None:
                 tool.callbacks = []
             if AgentFactory.prompt_capture not in tool.callbacks:
                 tool.callbacks.append(AgentFactory.prompt_capture)
                 self.logger.debug(f"Added callback to tool: {tool.name}")
+
 
         # Use custom system prompt if provided, otherwise use default
         system_prompt = custom_system_prompt or self.config.RAG_SYSTEM_PROMPT

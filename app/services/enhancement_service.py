@@ -19,7 +19,7 @@ class EnhancementService:
         """Initialize the enhancement service."""
         self.config = ChatConfig()
         self.logger = get_logger(__name__, "DEBUG")
-        self.logger.debug("EnhancementService initialized")
+        self.logger.info("EnhancementService initialized")
         
         # Initialize the QA data
         self.qa_data = {}
@@ -79,7 +79,7 @@ class EnhancementService:
         if hasattr(self.config, 'QA_SOURCE_FILE_JSON') and self.config.QA_SOURCE_FILE_JSON:
             json_file = self.config.QA_SOURCE_FILE_JSON
             self.qa_data = load_json(json_file)
-            self.logger.info(f"Loaded {len(self.qa_data)} QA pairs from {json_file}")
+            self.logger.debug(f"Loaded {len(self.qa_data)} QA pairs from {json_file}")
 
     def get_answer(self, question: str) -> Optional[Dict[str, Any]]:
         """
@@ -111,7 +111,7 @@ class EnhancementService:
                     # Extract to the end if no newline found
                     extracted_question = question[marker_index + len(doc_service_marker):].strip()
                 
-                self.logger.info(f"Extracted document service question from marker: '{extracted_question}'")
+                self.logger.debug(f"Extracted document service question from marker: '{extracted_question}'")
                 question = extracted_question
 
             # Look for exact match
@@ -603,7 +603,7 @@ class EnhancementService:
         for question, answer in q_a:
             question = question.strip()
             answer = answer.strip()
-            self.logger.info(f"Processing Q&A pair: {question} - {answer}")
+            self.logger.debug(f"Processing Q&A pair: {question} - {answer}")
 
             if "tracking" in question.lower() and "web and app" in question.lower():
                 # Add special metadata for tracking questions
@@ -628,18 +628,33 @@ class EnhancementService:
     
     def enhance_chunk_with_keywords(self, chunk: str) -> List[str]:
         """
-        Enhance a single chunk of text with relevant keywords.
+        Enhance a single chunk of text with relevant keywords in priority order.
+        
+        This method is used for both indexing documents and analyzing queries to ensure
+        consistent topic extraction across the system.
         
         Args:
             chunk: Text chunk to analyze
-            keyword_map: Dictionary mapping keywords to related terms
             
         Returns:
-            List of relevant keywords for the chunk
+            List of relevant keywords for the chunk, sorted by relevance score
         """
 
+        # Priority weights for different categories (higher = more important for retrieval)
+        category_priority = {
+            "causal_attribution": 10,
+            "incrementality": 9,
+            "market_mix_modeling": 8,
+            "measurement": 7,
+            "optimization": 6,
+            "marketing_funnel": 5,
+            "tracking": 4,
+            "channels": 3
+        }
+
+        # Category names and their related terms
         keyword_map = {
-            "causal attribution": ["attribution", "base attribution", "advanced attribution",
+            "causal_attribution": ["attribution", "base attribution", "advanced attribution",
                                    "self-attribution", "self-attributed", "attribution multiplier",
                                    "advanced attribution multiplier", "causal attribution",
                                    "multi-touch attribution", "mta", "multi touch", "touchpoints"],
@@ -661,33 +676,65 @@ class EnhancementService:
         try:
             chunk_lower = chunk.lower()
 
-            # Count frequency of keywords in questions
-            keyword_frequency = {}
+            # Dictionary to store relevance scores for each category
+            category_scores = {}
+            
+            # Check each category and calculate a relevance score
             for category, terms in keyword_map.items():
+                base_score = 0
+                matched_terms = []
+                
+                # Check for direct category mention
+                if category.lower().replace('_', ' ') in chunk_lower:
+                    base_score += 3
+                    matched_terms.append(category)
+                
+                # Check for each term
                 for term in terms:
                     if term.lower() in chunk_lower:
-                        if category not in keyword_frequency:
-                            keyword_frequency[category] = 0
-                            keyword_frequency[category] += 1
+                        # Add term to matched list
+                        matched_terms.append(term)
+                        
+                        # Term at beginning of chunk gets higher score (likely main topic)
+                        if chunk_lower.startswith(term.lower()) or f" {term.lower()} " in chunk_lower[:30]:
+                            base_score += 2
+                        else:
+                            base_score += 1
+                            
+                        # Bonus for longer terms (more specific)
+                        if len(term) > 8:
+                            base_score += 1
+                
+                # Only add categories with matches
+                if base_score > 0:
+                    # Apply category priority weight
+                    weighted_score = base_score * category_priority.get(category, 1)
+                    category_scores[category] = {
+                        'score': weighted_score,
+                        'matched_terms': matched_terms,
+                        'raw_score': base_score
+                    }
 
-                # Sort by frequency for each category
-            sorted_keywords = {k: v for k, v in sorted(
-                keyword_frequency.items(), key=lambda item: item[1], reverse=True)}
-
-            self.logger.info(f"Extracted keywords with frequencies: {sorted_keywords}")
-
-            # Initialize set to store unique keywords
-            chunk_keywords = set()
+            # Sort categories by weighted score
+            sorted_categories = sorted(
+                category_scores.items(), 
+                key=lambda x: x[1]['score'], 
+                reverse=True
+            )
             
-            # Check each keyword and its related terms
-            for keyword, related_terms in keyword_map.items():
-                # Check if keyword or any related term appears in the chunk
-                if (keyword.lower() in chunk_lower or 
-                    any(term.lower() in chunk_lower for term in related_terms)):
-                    chunk_keywords.add(keyword)
+            # Extract just the category names in priority order
+            prioritized_keywords = [category for category, _ in sorted_categories]
             
-            # Convert set to sorted list for consistent output
-            return sorted(list(chunk_keywords))
+            # Log detailed scoring information for debugging
+            if prioritized_keywords:
+                self.logger.debug(f"Keyword extraction results for: {chunk[:50]}...")
+                for category, details in sorted_categories:
+                    self.logger.debug(f"  {category}: score={details['score']} (raw={details['raw_score']}),"
+                                      f" matches={details['matched_terms']}")
+            else:
+                self.logger.debug(f"No keywords extracted from: {chunk[:50]}...")
+            
+            return prioritized_keywords
             
         except Exception as e:
             self.logger.error(f"Error enhancing chunk with keywords: {str(e)}")
@@ -920,6 +967,127 @@ class EnhancementService:
             if term.lower() in query.lower():
                 return term
         return None
+        
+    def get_topic_from_query(self, query: str) -> Optional[str]:
+        """
+        Extract the primary topic from a query for use in retriever filtering.
+        
+        Uses the enhanced_chunk_with_keywords method for consistency between
+        indexing and querying pipelines.
+        
+        Args:
+            query: The query to analyze
+            
+        Returns:
+            Optional[str]: The highest priority topic if found, None otherwise
+        """
+        if not query:
+            self.logger.debug("get_topic_from_query received empty query")
+            return None
+            
+        self.logger.debug(f"Analyzing query for topic extraction: '{query}'")
+        
+        # Use the keyword extraction method that's also used during indexing
+        keywords = self.enhance_chunk_with_keywords(query)
+        
+        if not keywords:
+            self.logger.debug(f"No topic identified in query: '{query}'")
+            return None
+        
+        # First keyword is the highest priority one based on our scoring algorithm
+        self.logger.debug(f"Selected highest priority topic '{keywords[0]}' for query")
+        return keywords[0]
+    
+    def get_client_from_query(self, query: str) -> Optional[str]:
+        """
+        Extract client name from a query using the patterns "client: ClientName" or "for the client: ClientName"
+        
+        This method detects if a query contains a client specification and extracts 
+        the client name, preserving the original case for namespace matching.
+        
+        Args:
+            query: The query to analyze
+            
+        Returns:
+            Optional[str]: The client name if found, None otherwise
+        """
+        if not query:
+            self.logger.debug("get_client_from_query received empty query")
+            return None
+            
+        # Two patterns to detect:
+        # 1. Simple "client: ClientName" pattern (legacy/shorthand)
+        # 2. "for the client: ClientName" pattern (more explicit)
+        patterns = [
+            r'client\s*:\s*([^\s.,?!;]+)',
+            r'for\s+the\s+client\s*:\s*([^\s.,?!;]+)'
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, query, re.IGNORECASE)
+            if match:
+                client_name = match.group(1).strip()
+                self.logger.debug(f"Found client name in query: '{client_name}'")
+                return client_name
+            
+        self.logger.debug(f"No client name found in query: '{query}'")
+        return None
+    
+    def extract_query_directives(self, query: str) -> Dict[str, Any]:
+        """
+        Extract special directives and context from a query.
+        
+        This method processes the query string to identify:
+        - Test mode directives (test_routing)
+        - Client specifications
+        - Other potential directives
+        
+        Args:
+            query: The query to analyze
+            
+        Returns:
+            Dict containing:
+            - actual_query: The cleaned query without directives
+            - force_refresh: Whether to force refresh the cache
+            - client_name: Client name if specified
+            - original_query: The original unmodified query
+            - directives: Dict of all directives found
+        """
+        result = {
+            "original_query": query,
+            "actual_query": query,
+            "force_refresh": False,
+            "client_name": None,
+            "directives": {}
+        }
+        
+        # Check for test_routing directive
+        if query.strip().lower().startswith("test_routing:"):
+            result["force_refresh"] = True
+            result["directives"]["test_mode"] = True
+            # Extract the actual query after the test_routing: prefix
+            result["actual_query"] = query.split("test_routing:", 1)[1].strip()
+            self.logger.debug(f"TEST MODE: Extracted query: {result['actual_query']}")
+        
+        # Check for client directive
+        client_name = self.get_client_from_query(result["actual_query"])
+        if client_name:
+            result["client_name"] = client_name
+            result["directives"]["client"] = client_name
+            
+            # Remove the client directive from the query if it's either pattern
+            patterns = [
+                r'client\s*:\s*([^\s.,?!;]+)',
+                r'for\s+the\s+client\s*:\s*([^\s.,?!;]+)'
+            ]
+            
+            for pattern in patterns:
+                if re.search(pattern, result["actual_query"], re.IGNORECASE):
+                    result["actual_query"] = re.sub(pattern, '', result["actual_query"], flags=re.IGNORECASE).strip()
+                    self.logger.debug(f"Removed client directive from query: '{result['actual_query']}'")
+                    break
+        
+        return result
 
 
 # Create a singleton instance

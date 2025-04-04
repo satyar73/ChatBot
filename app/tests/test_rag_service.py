@@ -279,7 +279,7 @@ Choosing the right attribution model depends on your business goals, sales cycle
         original_query = "for the client LaserAway What are the studies that have been done so far?"
         
         # Simplified query (what LLM might extract - seen in logs)
-        llm_simplified_query = "Marketing attribution context: LaserAway activities completed timeline chronology"
+        llm_simplified_query = "LaserAway studies"
 
         # Let's use the simplified query that the LLM would actually pass to the tool
         query_to_use = llm_simplified_query
@@ -356,6 +356,7 @@ Choosing the right attribution model depends on your business goals, sales cycle
 
             # Match exactly how the main app sets up search kwargs in ToolManager.configure_retriever
             search_kwargs: Dict[str, Any] = {
+                "search_type": self.config.RETRIEVER_CONFIG["search_type"],
                 "k": self.config.RETRIEVER_CONFIG["k"],
                 "fetch_k": self.config.RETRIEVER_CONFIG["fetch_k"],
                 "lambda_mult": self.config.RETRIEVER_CONFIG["lambda_mult"]

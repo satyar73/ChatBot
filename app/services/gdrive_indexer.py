@@ -173,20 +173,24 @@ class GoogleDriveIndexer:
             query = "trashed = false"
             folder_path = "My Drive"
             folder_name = "My Drive"
-            folder_type = "Root"
+            folder_type = "general"  # Simplified type
+            potential_client = None
         else:
             query = f"'{folder_id}' in parents and trashed = false"
             folder_info = self.get_file_info(folder_id)
             folder_name = folder_info["name"]
             folder_path = folder_info["full_path"]
-            if (folder_name == "Domain Knowledge"
-                or folder_name == "MSquared - Curriculum - v3.0"):
-                folder_type = "Domain Knowledge"
-            elif folder_name == "Case Studies":
-                folder_type = "General Resources.Case Studies"
-            else:
+            
+            # Check for Client: prefix in folder name
+            if folder_name.startswith("Client:"):
+                # Extract client name - preserve case sensitivity
+                potential_client = folder_name[7:].strip()  # Skip "Client:" prefix
                 folder_type = "client"
-                potential_client = folder_name
+                self.logger.info(f"Detected client folder: {folder_name}, client name: {potential_client}")
+            else:
+                # All other folders are general type
+                folder_type = "general"
+                potential_client = None
 
         try:
             results = []
@@ -705,106 +709,149 @@ class GoogleDriveIndexer:
         recursive = getattr(self.config, 'GOOGLE_DRIVE_RECURSIVE', True)
 
         files = self.get_supported_files(folder_id, recursive)
-        records = []
-
-        for file in tqdm(files):
-            try:
-                self.logger.info(f"Processing {file['name']}...")
-
-                # Check if this is a presentation with enhanced vision processing
-                is_presentation = (file['mimeType'] == 'application/vnd.google-apps.presentation' or 
-                                  file['mimeType'] == 'application/vnd.openxmlformats-officedocument.presentationml.presentation')
-                use_enhanced_slides = hasattr(self.config, 'USE_ENHANCED_SLIDES') and self.config.USE_ENHANCED_SLIDES
-                
-                # Special handling for presentations with enhanced vision extraction
-                if is_presentation and use_enhanced_slides:
-                    try:
-                        # Extract slide content using vision
-                        slide_contents = self._extract_slides_with_vision(file['id'], file['name'])
-                        
-                        # Process each slide individually
-                        if isinstance(slide_contents, list) and len(slide_contents) > 0:
-                            self.logger.info(f"Processing {len(slide_contents)} slides from vision extraction")
-                            
-                            for slide_content in slide_contents:
-                                # Create record for each slide
-                                record = {
-                                    'title': slide_content['title'],
-                                    'url': file.get('webViewLink', ''),
-                                    'source': 'Google Drive',
-                                    'type': file['folder_type'],  # Preserve original folder type (e.g., "client")
-                                    'document_type': 'presentation_slide',  # Add document type as additional metadata
-                                    'client': file['potential_client'],
-                                    'markdown': slide_content['markdown'],
-                                    'parent_presentation': file['name'],
-                                    'slide_number': slide_content.get('slide_number', 0)
-                                }
-                                records.append(record)
-                            
-                            # Skip the regular content processing
-                            continue
-                    except Exception as e:
-                        self.logger.error(f"Error processing enhanced slides, falling back to standard processing: {str(e)}")
-                
-                # Standard processing for non-presentations or if enhanced processing failed
-                content = self.download_and_extract_content(file)
-
-                # Skip if content extraction failed
-                if not content.strip():
-                    self.logger.warning(f"Empty content for file: {file['name']}")
-                    continue
-
-                # Add file title if not in content
-                if file['name'] not in content:
-                    content = f"# {file['name']}\n\n{content}"
-
-                # Summarize if needed
-                if self.config.SUMMARIZE_CONTENT:
-                    content = self.condense_content_using_llm(content)
-                
-                # Standard presentation processing (without enhanced vision)
-                if is_presentation and not use_enhanced_slides:
-                    # Process slides individually to preserve boundaries
-                    slide_records = self._preprocess_slide_content(content, file['name'])
+        
+        # Group files by namespace (client name or default)
+        namespace_groups = {}
+        
+        # First pass: group files by namespace
+        for file in files:
+            # Determine namespace from file metadata
+            folder_type = file.get('folder_type', 'general')
+            potential_client = file.get('potential_client')
+            
+            # Get namespace for this file
+            namespace = self.determine_namespace(folder_type, potential_client)
+            
+            # Add file to corresponding namespace group
+            if namespace not in namespace_groups:
+                namespace_groups[namespace] = []
+            
+            namespace_groups[namespace].append(file)
+        
+        # Log namespace distribution
+        for namespace, files_list in namespace_groups.items():
+            self.logger.info(f"Namespace '{namespace}' has {len(files_list)} files")
+            
+        # Process each namespace group
+        all_records = []
+        
+        for namespace, files_list in namespace_groups.items():
+            self.logger.info(f"Processing {len(files_list)} files in namespace '{namespace}'...")
+            records = []
+            
+            for file in tqdm(files_list):
+                try:
+                    self.logger.info(f"Processing {file['name']}...")
+    
+                    # Check if this is a presentation with enhanced vision processing
+                    is_presentation = (file['mimeType'] == 'application/vnd.google-apps.presentation' or 
+                                      file['mimeType'] == 'application/vnd.openxmlformats-officedocument.presentationml.presentation')
+                    use_enhanced_slides = hasattr(self.config, 'USE_ENHANCED_SLIDES') and self.config.USE_ENHANCED_SLIDES
                     
-                    for slide_record in slide_records:
-                        # Create record for each slide
+                    # Special handling for presentations with enhanced vision extraction
+                    if is_presentation and use_enhanced_slides:
+                        try:
+                            # Extract slide content using vision
+                            slide_contents = self._extract_slides_with_vision(file['id'], file['name'])
+                            
+                            # Process each slide individually
+                            if isinstance(slide_contents, list) and len(slide_contents) > 0:
+                                self.logger.info(f"Processing {len(slide_contents)} slides from vision extraction")
+                                
+                                for slide_content in slide_contents:
+                                    # Create record for each slide
+                                    record = {
+                                        'title': slide_content['title'],
+                                        'url': file.get('webViewLink', ''),
+                                        'source': 'Google Drive',
+                                        'type': file['folder_type'],  # Preserve folder type (client or general)
+                                        'document_type': 'presentation_slide',  # Add document type
+                                        'client': file['potential_client'],
+                                        'markdown': slide_content['markdown'],
+                                        'parent_presentation': file['name'],
+                                        'slide_number': slide_content.get('slide_number', 0),
+                                        'namespace': namespace  # Add namespace to record
+                                    }
+                                    records.append(record)
+                                
+                                # Skip the regular content processing
+                                continue
+                        except Exception as e:
+                            self.logger.error(f"Error processing enhanced slides, falling back to standard processing: {str(e)}")
+                    
+                    # Standard processing for non-presentations or if enhanced processing failed
+                    content = self.download_and_extract_content(file)
+    
+                    # Skip if content extraction failed
+                    if not content.strip():
+                        self.logger.warning(f"Empty content for file: {file['name']}")
+                        continue
+    
+                    # Add file title if not in content
+                    if file['name'] not in content:
+                        content = f"# {file['name']}\n\n{content}"
+    
+                    # Summarize if needed
+                    if self.config.SUMMARIZE_CONTENT:
+                        content = self.condense_content_using_llm(content)
+                    
+                    # Standard presentation processing (without enhanced vision)
+                    if is_presentation and not use_enhanced_slides:
+                        # Process slides individually to preserve boundaries
+                        slide_records = self._preprocess_slide_content(content, file['name'])
+                        
+                        for slide_record in slide_records:
+                            # Create record for each slide
+                            record = {
+                                'title': slide_record['title'],
+                                'url': file.get('webViewLink', ''),
+                                'source': 'Google Drive',
+                                'type': file['folder_type'],  # Folder type (client or general)
+                                'document_type': 'presentation_slide',  # Document type
+                                'client': file['potential_client'],
+                                'markdown': slide_record['markdown'],
+                                'parent_presentation': file['name'],
+                                'slide_number': slide_record.get('slide_number', 0),
+                                'namespace': namespace  # Add namespace to record
+                            }
+                            records.append(record)
+                    else:
+                        # Regular document processing
                         record = {
-                            'title': slide_record['title'],
+                            'title': file['name'],
                             'url': file.get('webViewLink', ''),
                             'source': 'Google Drive',
-                            'type': file['folder_type'],  # Preserve original folder type (e.g., "client")
-                            'document_type': 'presentation_slide',  # Add document type as additional metadata
+                            'type': file['folder_type'],
                             'client': file['potential_client'],
-                            'markdown': slide_record['markdown'],
-                            'parent_presentation': file['name'],
-                            'slide_number': slide_record.get('slide_number', 0)
+                            'markdown': content,
+                            'namespace': namespace  # Add namespace to record
                         }
                         records.append(record)
-                else:
-                    # Regular document processing
-                    record = {
-                        'title': file['name'],
-                        'url': file.get('webViewLink', ''),
-                        'source': 'Google Drive',
-                        'type': file['folder_type'],
-                        'client': file['potential_client'],
-                        'markdown': content
-                    }
-                    records.append(record)
+    
+                except Exception as ex:
+                    self.logger.error(f"Could not process {file['name']} due to: {ex}")
+    
+            self.logger.info(f"Prepared {len(records)} document records for namespace '{namespace}'")
+            
+            # Append records for this namespace to all records
+            all_records.extend(records)
+            
+            # Save intermediate file for namespace if needed
+            if self.config.SAVE_INTERMEDIATE_FILES:
+                namespace_safe = namespace.replace(" ", "_").replace("/", "_")
+                processed_file = os.path.join(self.config.OUTPUT_DIR, f"drive_processed_{namespace_safe}.json")
+                with open(processed_file, 'w') as f:
+                    json.dump(records, f, indent=2)
 
-            except Exception as ex:
-                self.logger.error(f"Could not process {file['name']} due to: {ex}")
+        self.logger.info(f"Prepared {len(all_records)} total document records across all namespaces!")
 
-        self.logger.info(f"Prepared {len(records)} document records!")
-
-        # Save intermediate file if needed
+        # Save all records to the main intermediate file
         if self.config.SAVE_INTERMEDIATE_FILES:
             processed_file = os.path.join(self.config.OUTPUT_DIR, "drive_processed.json")
             with open(processed_file, 'w') as f:
-                json.dump(records, f, indent=2)
+                json.dump(all_records, f, indent=2)
 
-        return records
+        return all_records
 
     def get_embedding_dimensions(self, model_name: str) -> int:
         """Get the embedding dimensions for a given model"""
@@ -835,6 +882,26 @@ class GoogleDriveIndexer:
             'text/plain': 'text'
         }
         return mime_to_type.get(mime_type, 'unknown')
+        
+    def determine_namespace(self, folder_type: str, client_name: str = None) -> str:
+        """
+        Determine the appropriate namespace based on folder information.
+        
+        Args:
+            folder_type: Type of the folder (client or general)
+            client_name: Client name if available
+            
+        Returns:
+            Namespace string to use for documents in this folder
+        """
+        # For client folders, use the client name as namespace (with case preserved)
+        if folder_type == "client" and client_name:
+            self.logger.info(f"Using client name '{client_name}' as namespace for client folder")
+            return client_name
+        
+        # For all other folders, use default namespace
+        self.logger.info(f"Using 'default' namespace for general folder")
+        return "default"
 
     def process_drive(self, folder_id: str = None) -> List[Dict[str, Any]]:
         """Process all supported files from Google Drive"""
