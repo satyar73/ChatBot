@@ -16,7 +16,7 @@ class ChatCacheService:
 
     def __init__(self):
         """Initialize the cache service."""
-        self.logger = get_logger(f"{__name__}.ChatCacheService")
+        self.logger = get_logger(__name__)
         self.logger.info("Initializing ChatCacheService")
         self._initialize_db()
         

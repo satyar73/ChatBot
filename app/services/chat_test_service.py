@@ -2,7 +2,8 @@ from app.models.chat_test_models import (
     ChatTestRequest,
     ChatTestResponse,
     ChatBatchTestResponse,
-    ChatLLMTestOutput
+    ChatLLMTestOutput,
+    DualState
 )
 from app.config.chat_test_config import ChatTestConfig
 from app.utils.chatbot_client import ChatBotClient
@@ -12,44 +13,13 @@ from app.utils.logging_utils import get_logger
 import logging
 import os
 import pandas as pd
-from typing import Dict, List, Optional, TypedDict, Tuple, Literal
+from typing import Dict, List, Optional, Tuple, Literal
 from datetime import datetime
 from uuid import uuid4
 
 from langchain_core.messages import SystemMessage
 
 from langgraph.graph import StateGraph, START, END
-
-# Set up logger at the top of the file
-# Determine the environment
-environment = os.getenv("ENVIRONMENT", "development").lower()  # Default to "development"
-# Set the logging level based on the environment
-log_level = logging.INFO if environment == "production" else logging.DEBUG
-logger = get_logger(__name__, log_level=log_level)
-
-# Define a dual response state
-class DualState(TypedDict):
-    prompt: str
-    expected_result: str
-    # RAG response data
-    rag_response: Optional[str]
-    rag_test_results: Optional[Dict]
-    rag_llm_results: Optional[Dict]
-    rag_passed: Optional[bool]
-    # Enhanced evaluation data
-    rag_enhanced_results: Optional[Dict]
-    # Non-RAG response data
-    no_rag_response: Optional[str]
-    no_rag_test_results: Optional[Dict]
-    no_rag_llm_results: Optional[Dict]
-    no_rag_passed: Optional[bool]
-    no_rag_enhanced_results: Optional[Dict]
-    # Combined reasoning and next steps
-    similarity_threshold: float
-    reasoning: Optional[str]
-    comparison: Optional[Dict]
-    next: Optional[Literal["evaluate_llm_rag", "evaluate_llm_no_rag", "enhance_evaluation", "compare", "END"]]
-
 
 class ChatTestService:
     def __init__(self, chatbot_api_url: str = "http://localhost:8005"):

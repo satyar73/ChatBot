@@ -13,23 +13,21 @@ from app.services.cache_service import chat_cache
 from app.services.enhancement_service import enhancement_service
 from app.utils.logging_utils import get_logger
 
-
 class ChatService:
     """Service for managing chat interactions with agents."""
 
     def __init__(self):
         # Create a dictionary to store chat histories for different sessions
         self.chat_histories = {}
-        self.logger = get_logger(f"{__name__}.ChatService", "DEBUG")
-        self.logger.debug("ChatService initialized")
+        self.logger = get_logger(__name__)
+        self.logger.info("ChatService initialized")
         # Explicit print to check if output is working at all
-        print("ChatService initialized", file=sys.stderr)
 
+        # Using singletons
         self.config = chat_config
-        self.agent_manager = AgentManager()
-
-        # Use the enhancement service for query enhancement and QA
         self.enhancement_service = enhancement_service
+
+        self.agent_manager = AgentManager()
 
     async def chat(self, data: Message) -> ResponseMessage:
         """
@@ -163,9 +161,9 @@ class ChatService:
             document_question = data.metadata['document_question']
             self.logger.info(f"Document question found in metadata: {document_question}")
         
-        # Determine which mode/strategy to use
-        mode = "both" if mode == "both" else ("rag" if mode == "rag" else "no_rag")
-        
+        # Determine which mode/strategy to use, for now handling only three modes
+        mode = "no_rag" if mode != "both" and mode != "rag" else mode
+
         # Get the appropriate strategy
         strategy = ResponseStrategy.get_strategy(actual_query, mode, chat_service, chat_service.agent_manager)
         
@@ -197,15 +195,52 @@ class ChatService:
             prompt_style=prompt_style,
             client_name=client_name  # Pass client name to strategy for namespace-specific retrieval
         )
-        
+
+        self.logger.debug(f"Creating final response - Mode: {mode}")
+        self.logger.debug(f"Selecting primary response - mode: {mode}, "
+                          f"rag_response: {type(rag_response)}, "
+                          f"no_rag_response: {type(no_rag_response)}, "
+                          f"queries_tried: {type(queries_tried)}")
+
+        # Get the principal outputs
+        if rag_response is None:
+            rag_output = None
+            self.logger.debug("rag_response is None")
+        elif isinstance(rag_response, dict):
+            rag_output = rag_response.get('output', "No output available in RAG response")
+            self.logger.debug(f"rag_response is dict, extracted output: {rag_output[:30]}...")
+        else:
+            rag_output = str(rag_response)
+            self.logger.debug(f"rag_response is {type(rag_response)}, converted to string: {rag_output[:30]}...")
+
+        if no_rag_response is None:
+            no_rag_output = None
+            self.logger.debug("no_rag_response is None")
+        elif isinstance(no_rag_response, dict):
+            no_rag_output = no_rag_response.get('output', "No output available in non-RAG response")
+            self.logger.debug(f"no_rag_response is dict, extracted output: {no_rag_output[:30]}...")
+        else:
+            no_rag_output = str(no_rag_response)
+            self.logger.debug(
+                f"no_rag_response is {type(no_rag_response)}, converted to string: {no_rag_output[:30]}...")
+
+
+        # Create the response content
+        primary_output = rag_output if mode != "no_rag" else no_rag_output
+        secondary_output = no_rag_output if mode != "rag" else None
+
+        self.logger.debug(
+            f"primary_output type: {type(primary_output)}, content: {primary_output[:50] if primary_output else 'None'}")
+        self.logger.debug(
+            f"secondary_output type: {type(secondary_output)}, content: {secondary_output[:50] if secondary_output else 'None'}")
+
         # Create a temporary strategy just to format sources
         temp_strategy = ResponseStrategy(self, self.agent_manager)
         # Extract sources from the RAG response if available
         sources = temp_strategy.format_sources(rag_response)
         
-        # Determine which response to add to the chat history based on mode
-        self.logger.debug(f"Selecting primary response - mode: {mode}, rag_response: {type(rag_response)}, no_rag_response: {type(no_rag_response)}")
-        
+        # Determine which response to add to the chat history based on mode.
+        # While redundant to the above, it is easier to have the logic separate
         if mode == "no_rag" and no_rag_response is not None:
             self.logger.debug("Using no_rag_response as primary response (mode=no_rag)")
             primary_response = no_rag_response
@@ -227,42 +262,12 @@ class ChatService:
         
         # Format message history for response
         formatted_history = self._format_history(chat_history.get_messages())
-        
-        # Extract the actual content from responses
-        self.logger.debug(f"Extracting response content - rag_response: {type(rag_response)}, no_rag_response: {type(no_rag_response)}")
-        
-        if rag_response is None:
-            rag_output = None
-            self.logger.debug("rag_response is None")
-        elif isinstance(rag_response, dict):
-            rag_output = rag_response.get('output', "No output available in RAG response")
-            self.logger.debug(f"rag_response is dict, extracted output: {rag_output[:30]}...")
-        else:
-            rag_output = str(rag_response)
-            self.logger.debug(f"rag_response is {type(rag_response)}, converted to string: {rag_output[:30]}...")
-            
-        if no_rag_response is None:
-            no_rag_output = None
-            self.logger.debug("no_rag_response is None")
-        elif isinstance(no_rag_response, dict):
-            no_rag_output = no_rag_response.get('output', "No output available in non-RAG response")
-            self.logger.debug(f"no_rag_response is dict, extracted output: {no_rag_output[:30]}...")
-        else:
-            no_rag_output = str(no_rag_response)
-            self.logger.debug(f"no_rag_response is {type(no_rag_response)}, converted to string: {no_rag_output[:30]}...")
+
         
         # Determine intermediate steps
         intermediate_steps = []
         if mode != "no_rag" and isinstance(rag_response, dict):
             intermediate_steps = rag_response.get('intermediate_steps', [])
-        
-        # Create the response content
-        primary_output = rag_output if mode != "no_rag" else no_rag_output
-        secondary_output = no_rag_output if mode != "rag" else None
-        
-        self.logger.debug(f"Creating final response - Mode: {mode}")
-        self.logger.debug(f"primary_output type: {type(primary_output)}, content: {primary_output[:50] if primary_output else 'None'}")
-        self.logger.debug(f"secondary_output type: {type(secondary_output)}, content: {secondary_output[:50] if secondary_output else 'None'}")
         
         response_content = ResponseContent(
                                     input=user_input,
@@ -332,7 +337,7 @@ class ChatService:
         Returns:
             True if deletion was successful, False otherwise
         """
-        self.logger.debug(f"delete_chat called with {session_id}")
+        self.logger.info(f"delete_chat called with {session_id}")
         if session_id == "ALL_CHATS":
             self.chat_histories = {}
             return True
@@ -351,7 +356,7 @@ class ChatService:
         Returns:
             Dictionary containing chat history or None if not found
         """
-        self.logger.debug(f"get_chat called with {session_id}")
+        self.logger.info(f"get_chat called with {session_id}")
         if session_id == "ALL_CHATS":
             return self.chat_histories
         if session_id in self.chat_histories:

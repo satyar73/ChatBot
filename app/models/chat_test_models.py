@@ -1,6 +1,29 @@
 from pydantic import BaseModel
 from typing import Dict, List, TypedDict, Literal, Union, Optional
 
+# Define a dual response state
+class DualState(TypedDict):
+    prompt: str
+    expected_result: str
+    # RAG response data
+    rag_response: Optional[str]
+    rag_test_results: Optional[Dict]
+    rag_llm_results: Optional[Dict]
+    rag_passed: Optional[bool]
+    # Enhanced evaluation data
+    rag_enhanced_results: Optional[Dict]
+    # Non-RAG response data
+    no_rag_response: Optional[str]
+    no_rag_test_results: Optional[Dict]
+    no_rag_llm_results: Optional[Dict]
+    no_rag_passed: Optional[bool]
+    no_rag_enhanced_results: Optional[Dict]
+    # Combined reasoning and next steps
+    similarity_threshold: float
+    reasoning: Optional[str]
+    comparison: Optional[Dict]
+    next: Optional[Literal["evaluate_llm_rag", "evaluate_llm_no_rag", "enhance_evaluation", "compare", "END"]]
+
 class ChatTestRequest(BaseModel):
     prompt: str
     expected_result: str
