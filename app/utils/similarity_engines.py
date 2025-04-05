@@ -13,6 +13,7 @@ from nltk.stem import WordNetLemmatizer
 # nltk.download('punkt')
 # nltk.download('stopwords')
 # nltk.download('wordnet')
+# nltk.download('averaged_perceptron_tagger')
 
 class SimilarityEngines:
     """Class containing comprehensive similarity testing methods for text comparison"""
@@ -139,6 +140,7 @@ class SimilarityEngines:
         # Extract key noun phrases using POS tagging (if nltk is available)
         try:
             tokens = nltk.word_tokenize(text)
+            # Use pos_tag directly without the '_eng' suffix which causes the error
             pos_tags = nltk.pos_tag(tokens)
             noun_phrases = []
             current_np = []
