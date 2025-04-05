@@ -266,7 +266,7 @@ Internal state model for the testing workflow.
 ### 5.1 Running a Single Test
 
 ```python
-from app.services.chat_test_service import ChatTestService
+from app.services.query_evaluation_service import ChatTestService
 from app.models.chat_test_models import ChatTestRequest
 
 # Initialize test service
@@ -274,9 +274,9 @@ test_service = ChatTestService(chatbot_api_url="http://localhost:8005")
 
 # Create a test request
 request = ChatTestRequest(
-   prompt="What is marketing attribution?",
-   expected_result="Marketing attribution is the process of identifying which marketing actions contribute to sales or conversions.",
-   similarity_threshold=0.7
+    prompt="What is marketing attribution?",
+    expected_result="Marketing attribution is the process of identifying which marketing actions contribute to sales or conversions.",
+    similarity_threshold=0.7
 )
 
 # Run the test
@@ -284,9 +284,9 @@ result = await test_service.run_test(request)
 
 # Check if the test passed
 if result.passed:
-   print("Test passed with similarity score:", result.similarity_score)
+    print("Test passed with similarity score:", result.similarity_score)
 else:
-   print("Test failed:", result.reasoning)
+    print("Test failed:", result.reasoning)
 
 # Access detailed analysis
 rag_score = result.detailed_analysis["rag_test"]["weighted_similarity"]
@@ -302,24 +302,24 @@ print(f"RAG value rating: {value_rating}")
 
 ```python
 import asyncio
-from app.services.chat_test_service import ChatTestService
+from app.services.query_evaluation_service import ChatTestService
 
 
 async def run_batch_tests():
-   # Initialize test service
-   test_service = ChatTestService(chatbot_api_url="http://localhost:8005")
+    # Initialize test service
+    test_service = ChatTestService(chatbot_api_url="http://localhost:8005")
 
-   # Run batch test
-   results = await test_service.run_batch_test(
-      csv_file="tests/test_cases.csv",
-      similarity_threshold=0.7
-   )
+    # Run batch test
+    results = await test_service.run_batch_test(
+        csv_file="tests/test_cases.csv",
+        similarity_threshold=0.7
+    )
 
-   # Print summary
-   print(f"Ran {results.total_tests} tests")
-   print(f"Passed: {results.passed} ({results.pass_rate:.2f}%)")
-   print(f"Failed: {results.failed}")
-   print(f"Results saved to: {results.output_file}")
+    # Print summary
+    print(f"Ran {results.total_tests} tests")
+    print(f"Passed: {results.passed} ({results.pass_rate:.2f}%)")
+    print(f"Failed: {results.failed}")
+    print(f"Results saved to: {results.output_file}")
 
 
 # Run the batch test

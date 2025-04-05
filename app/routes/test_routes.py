@@ -25,7 +25,7 @@ from app.models.chat_test_models import (
     ChatTestRequest,
     ChatTestResponse
 )
-from app.services.chat_test_service import ChatTestService
+from app.services.query_evaluation_service import ChatTestService
 from app.services.background_jobs import (
     start_background_job,
     get_job_status,
