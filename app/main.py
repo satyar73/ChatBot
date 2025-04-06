@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+from fastapi import APIRouter
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -85,10 +86,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
-app.include_router(chat_routes.router)
-app.include_router(index_routes.router)
-app.include_router(test_routes.router)
+# Include routers. All routers under the API prefix
+api_router = APIRouter(prefix="/api")
+
+api_router.include_router(chat_routes.router)
+api_router.include_router(index_routes.router)
+api_router.include_router(test_routes.router)
+
+app.include_router(api_router)
 
 @app.get("/health")
 async def health_endpoint():

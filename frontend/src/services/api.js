@@ -5,7 +5,7 @@ import axios from 'axios';
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8005';
 
 const api = axios.create({
-  baseURL: API_URL,
+  baseURL: `${API_URL}/api`,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -221,7 +221,8 @@ export const indexApi = {
   
   healthCheck: async () => {
     try {
-      const response = await api.get('/health');
+      // Health check endpoint is typically kept at the root level, not under /api
+      const response = await axios.get(`${API_URL}/health`);
       return response.data;
     } catch (error) {
       console.error('Health check failed:', error);
