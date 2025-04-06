@@ -161,6 +161,8 @@ class ChatService:
             self.logger.info(f"Document question found in metadata: {document_question}")
         
         # Determine which mode/strategy to use, for now handling only three modes
+        mode = "both" if mode == "dual" or mode == "compare" else mode
+
         mode = "no_rag" if mode != "both" and mode != "rag" else mode
 
         # Get the appropriate strategy
