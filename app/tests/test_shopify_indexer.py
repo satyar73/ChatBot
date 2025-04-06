@@ -1,10 +1,9 @@
 import unittest
 from unittest.mock import patch, MagicMock
 import json
-import requests
 import os
 from app.config.chat_config import ChatConfig
-from app.services.shopify_indexer import ShopifyIndexer  # Updated import path
+from app.services.indexing.providers.shopify_indexer import ShopifyIndexer  # Updated import path
 
 
 class TestShopifyIndexer(unittest.TestCase):

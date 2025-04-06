@@ -14,7 +14,7 @@ from typing import List, Dict, Any, Tuple
 import markdownify as md
 
 from app.config.chat_config import ChatConfig
-from app.services.enhancement_service import enhancement_service
+from app.services.common.enhancement_service import enhancement_service
 from app.utils.logging_utils import get_logger
 
 class ShopifyIndexer:

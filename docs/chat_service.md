@@ -335,8 +335,8 @@ Processes a user query through the appropriate agent(s).
 ### 6.1 Basic Chat Interaction
 
 ```python
-from app.services.chat_service import ChatService
-from app.services.enhancement_service import enhancement_service
+from app.services.chat.chat_service import ChatService
+from app.services.common.enhancement_service import enhancement_service
 from app.models.chat_models import Message
 
 # Initialize the chat service
@@ -344,9 +344,9 @@ chat_service = ChatService()
 
 # Create a message
 message = Message(
-    message="What is marketing attribution?",
-    session_id="user_123",
-    mode="rag"  # Use RAG mode
+  message="What is marketing attribution?",
+  session_id="user_123",
+  mode="rag"  # Use RAG mode
 )
 
 # Get response with enhanced query processing
@@ -398,7 +398,7 @@ no_rag_response = response.no_rag_response
 ### 6.4 Cache Management
 
 ```python
-from app.services.chat_cache_service import chat_cache
+from app.services.chat.chat_cache_service import chat_cache
 
 # Get cache statistics
 stats = chat_cache.get_cache_stats()

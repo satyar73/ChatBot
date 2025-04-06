@@ -25,8 +25,8 @@ from app.models.chat_test_models import (
     ChatTestRequest,
     ChatTestResponse
 )
-from app.services.chat_evaluation_service import ChatTestService
-from app.services.background_jobs import (
+from app.services.chat.chat_evaluation_service import ChatEvaluationService
+from app.services.common.background_jobs import (
     start_background_job,
     get_job_status,
     get_all_jobs,
@@ -44,14 +44,14 @@ def get_test_service():
     """Dependency to get a TestService instance."""
     # You could load configuration from environment variables here
     chatbot_api_url = os.getenv("CHATBOT_API_URL", "http://localhost:8005")
-    return ChatTestService(chatbot_api_url)
+    return ChatEvaluationService(chatbot_api_url)
 
 
 # Regular test route - for single, quick tests
 @router.post("/single", response_model=ChatTestResponse)
 async def run_test(
         request: ChatTestRequest,
-        test_service: ChatTestService = Depends(get_test_service)
+        test_service: ChatEvaluationService = Depends(get_test_service)
 ):
     """
     Run a test on a prompt/expected result pair through the testing workflow.
@@ -76,7 +76,7 @@ async def start_batch_test(
         background_tasks: BackgroundTasks,
         similarity_threshold: float = Query(0.7, description="Default threshold for similarity comparison"),
         csv_file: UploadFile = File(..., description="CSV file with test cases"),
-        test_service: ChatTestService = Depends(get_test_service)
+        test_service: ChatEvaluationService = Depends(get_test_service)
 ):
     """
     Start a batch test job in the background and return a job ID.

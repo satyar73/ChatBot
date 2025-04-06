@@ -12,7 +12,7 @@ from app.config.vector_store_config import PineconeConfig
 from app.tools.gpt_tools import ToolManager
 from app.config.chat_config import ChatConfig
 from app.config.prompt_config import prompt_config
-from app.services.enhancement_service import enhancement_service
+from app.services.common.enhancement_service import enhancement_service
 from app.utils.llm_client import LLMClientManager
 from app.utils.logging_utils import get_logger
 from app.utils.other_utlis import write_data_logfile

@@ -7,7 +7,7 @@ from typing import List, Dict, Any, Optional
 
 from app.utils.logging_utils import get_logger
 from app.config.chat_config import ChatConfig, chat_config
-from app.services.enhancement_service import enhancement_service
+from app.services.common.enhancement_service import enhancement_service
 from app.utils.text_splitters import TokenTextSplitter
 from app.utils.vectorstore_client import VectorStoreClient
 from langchain.schema import Document

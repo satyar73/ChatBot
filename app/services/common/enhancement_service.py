@@ -776,7 +776,7 @@ class EnhancementService:
         Returns:
             bool: True if the response is empty or inadequate, False otherwise
         """
-        output = response.get('output', '').lower()
+        output = response.get('../output', '').lower()
 
         # Check for standard "no information" phrases
         no_info_phrases = [

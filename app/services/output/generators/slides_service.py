@@ -1,10 +1,8 @@
 import re
-import asyncio
-import os
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
-from app.services.document_service import DocumentService
+from app.services.output.document_service import DocumentService
 
 class SlidesService(DocumentService):
     """Service for creating and managing Google Slides presentations."""

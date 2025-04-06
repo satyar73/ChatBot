@@ -2,9 +2,9 @@
 Tests for the enhancement service.
 """
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-from app.services.enhancement_service import EnhancementService
+from app.services.common.enhancement_service import EnhancementService
 
 
 class TestEnhancementService(unittest.TestCase):

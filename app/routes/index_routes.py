@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 from typing import Optional
-from app.services.index_service import IndexService
+from app.services.indexing.index_service import IndexService
 
 router = APIRouter(prefix="/index", tags=["index"])
 index_service = IndexService()

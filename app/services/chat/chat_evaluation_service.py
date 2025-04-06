@@ -19,7 +19,7 @@ from app.utils.similarity_engines import SimilarityEngines
 from app.utils.llm_client import LLMClientManager  # Import the LLMClientManager
 from app.utils.logging_utils import get_logger
 
-class ChatTestService:
+class ChatEvaluationService:
     def __init__(self, chatbot_api_url: str = "http://localhost:8005"):
         self.config = ChatTestConfig()
         self.chatbot_client = ChatBotClient(chatbot_api_url)

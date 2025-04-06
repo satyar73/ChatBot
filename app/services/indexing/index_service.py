@@ -2,9 +2,9 @@ import asyncio
 from typing import Dict, Optional, Any
 
 from app.config.chat_config import chat_config
-from app.services.shopify_indexer import ShopifyIndexer
-from app.services.gdrive_indexer import GoogleDriveIndexer
-from app.services.content_processor import ContentProcessor
+from app.services.indexing.providers.shopify_indexer import ShopifyIndexer
+from app.services.indexing.providers.gdrive_indexer import GoogleDriveIndexer
+from app.services.indexing.content_processor import ContentProcessor
 from app.utils.logging_utils import get_logger
 from app.utils.vectorstore_client import VectorStoreClient
 

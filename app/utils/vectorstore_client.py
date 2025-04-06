@@ -11,7 +11,7 @@ from langchain.schema import Document
 from app.config.chat_config import chat_config
 from app.config.chat_model_config import ChatModelConfig
 from app.config.vector_store_config import NeonConfig, PineconeConfig, VectorStoreConfig
-from app.services.enhancement_service import enhancement_service
+from app.services.common.enhancement_service import enhancement_service
 from app.utils.logging_utils import get_logger
 
 

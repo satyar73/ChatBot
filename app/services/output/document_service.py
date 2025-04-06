@@ -9,7 +9,7 @@ from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from app.config.chat_config import ChatConfig
 from app.utils.logging_utils import get_logger
-from app.services.chat_service import ChatService
+from app.services.chat.chat_service import ChatService
 from app.models.chat_models import Message
 
 class DocumentService:

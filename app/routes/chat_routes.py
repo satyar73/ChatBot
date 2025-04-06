@@ -27,10 +27,9 @@ from app.models.chat_test_models import (
     ChatTestResponse,
     ChatBatchTestResponse,
 )
-from app.services.chat_service import ChatService
-from app.services.chat_evaluation_service import ChatTestService
-from app.services.chat_cache_service import chat_cache
-from app.services.slides_service import SlidesService
+from app.services.chat.chat_service import ChatService
+from app.services.chat.chat_evaluation_service import ChatEvaluationService
+from app.services.chat.chat_cache_service import chat_cache
 
 # Initialize router
 router = APIRouter(prefix="/chat", tags=["chat", "cache"])
@@ -45,7 +44,7 @@ def get_test_service():
     """Dependency to get a TestService instance."""
     # You could load configuration from environment variables here
     chatbot_api_url = os.getenv("CHATBOT_API_URL", "http://localhost:8005")
-    return ChatTestService(chatbot_api_url)
+    return ChatEvaluationService(chatbot_api_url)
 
 
 # Chat routes
@@ -107,7 +106,7 @@ async def get_chat(session_id: str, chat_service: ChatService = Depends(get_chat
 @router.post("/test", response_model=ChatTestResponse)
 async def run_test(
         request: ChatTestRequest,
-        test_service: ChatTestService = Depends(get_test_service)
+        test_service: ChatEvaluationService = Depends(get_test_service)
 ):
     """
     Run a test on a prompt/expected result pair through the testing workflow.
@@ -130,7 +129,7 @@ async def run_test(
 async def run_batch_test(
         similarity_threshold: float = Query(0.7, description="Default threshold for similarity comparison"),
         csv_file: UploadFile = File(..., description="CSV file with test cases"),
-        test_service: ChatTestService = Depends(get_test_service)
+        test_service: ChatEvaluationService = Depends(get_test_service)
 ):
     """
     Run tests from a CSV file containing prompts and expected results.
@@ -330,7 +329,7 @@ async def create_document(
         # Create the appropriate document type
         if document_type == "slides":
             # Create slides
-            from app.services.slides_service import SlidesService
+            from app.services.output.generators.slides_service import SlidesService
             service = SlidesService()
             document_id = await service.create_presentation_from_csv(
                 csv_path=temp_file_path,
@@ -342,7 +341,7 @@ async def create_document(
             document_type_name = "presentation"
         else:
             # Create docs
-            from app.services.docs_service import DocsService
+            from app.services.output.generators.docs_service import DocsService
             service = DocsService()
             document_id = await service.create_document_from_csv(
                 csv_path=temp_file_path,

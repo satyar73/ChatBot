@@ -8,8 +8,8 @@ from app.agents.chat_agents import AgentManager
 from app.agents.response_strategies import ResponseStrategy
 from app.config.chat_config import chat_config
 from app.models.chat_models import ChatHistory, ResponseContent, ResponseMessage, Message
-from app.services.chat_cache_service import chat_cache
-from app.services.enhancement_service import enhancement_service
+from app.services.chat.chat_cache_service import chat_cache
+from app.services.common.enhancement_service import enhancement_service
 from app.utils.logging_utils import get_logger
 
 class ChatService:

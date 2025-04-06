@@ -2,10 +2,9 @@
 Service layer for creating and managing Google Docs documents with RAG-generated content.
 """
 import re
-from typing import List, Dict, Any, Optional, Tuple
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
-from app.services.document_service import DocumentService
+from app.services.output.document_service import DocumentService
 
 class DocsService(DocumentService):
     """Service for creating and managing Google Docs documents with RAG-generated content."""

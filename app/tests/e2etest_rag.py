@@ -138,8 +138,8 @@ class RAGEndToEndTest:
         """Initialize the test environment"""
         # Import here to avoid circular imports with app.main
         from app.config.chat_config import ChatConfig
-        from app.services.shopify_indexer import ShopifyIndexer
-        from app.services.chat_service import ChatService
+        from app.services.indexing.providers.shopify_indexer import ShopifyIndexer
+        from app.services.chat.chat_service import ChatService
         from app.models.chat_models import Message
         
         # These classes need to be available as instance variables

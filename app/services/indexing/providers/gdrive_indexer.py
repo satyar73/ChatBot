@@ -19,7 +19,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
 from app.config.chat_config import ChatConfig, chat_config
-from app.services.enhancement_service import enhancement_service
+from app.services.common.enhancement_service import enhancement_service
 from app.utils.vectorstore_client import VectorStoreClient
 
 # Define a type for the file/folder item

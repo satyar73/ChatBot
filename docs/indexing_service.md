@@ -398,7 +398,7 @@ GoogleDriveIndexer requires the following configuration:
 ### 6.1 Creating a Shopify Index
 
 ```python
-from app.services.index_service import IndexService
+from app.services.indexing.index_service import IndexService
 
 # Initialize the service
 index_service = IndexService()
@@ -419,23 +419,23 @@ else:
 ### 6.2 Creating a Google Drive Index
 
 ```python
-from app.services.index_service import IndexService
+from app.services.indexing.index_service import IndexService
 
 # Initialize the service
 index_service = IndexService()
 
 # Create an index from Google Drive
 result = await index_service.create_index_from_drive(
-  folder_id="your_folder_id",  # Optional - uses root folder if not specified
-  recursive=True,  # Process subfolders recursively
-  summarize=True   # Use AI to summarize long documents
+    folder_id="your_folder_id",  # Optional - uses root folder if not specified
+    recursive=True,  # Process subfolders recursively
+    summarize=True  # Use AI to summarize long documents
 )
 
 # Check the result
 if result["status"] == "success":
-  print(f"Google Drive content indexed successfully: {result['count']} documents processed")
+    print(f"Google Drive content indexed successfully: {result['count']} documents processed")
 else:
-  print(f"Indexing failed: {result['message']}")
+    print(f"Indexing failed: {result['message']}")
 ```
 
 ### 6.3 Complete Example with Feature Flags
@@ -443,50 +443,52 @@ else:
 ```python
 import asyncio
 import json
-from app.services.index_service import IndexService
+from app.services.indexing.index_service import IndexService
+
 
 async def run_indexer():
     # Load feature flags from config file
     with open('indexerfeatureflags.json', 'r') as f:
         feature_flags = json.load(f)
-    
+
     # Initialize the service with custom configuration
     index_service = IndexService(
         pinecone_api_key="your_pinecone_api_key",
         index_name="your_index_name",
         dimension=1536
     )
-    
+
     # First, check if index exists and delete if needed
     info = await index_service.get_index_info()
     if info["exists"]:
         print(f"Deleting existing index '{info['name']}'")
         await index_service.delete_index()
-    
+
     # Enable special features for image processing
     feature_flags["use_vision_api"] = True
     feature_flags["extract_slides_images"] = True
-    
+
     # Set the feature flags
     index_service.set_feature_flags(feature_flags)
-    
+
     # Index both Google Drive and Shopify content
     drive_result = await index_service.create_index_from_drive(
         folder_id="1ABC123XYZ",
         recursive=True
     )
-    
+
     shopify_result = await index_service.create_index(
         store="your-store.myshopify.com"
     )
-    
+
     # Show final results
     total_docs = drive_result.get('count', 0) + shopify_result.get('count', 0)
     print(f"Indexed {total_docs} total documents")
-    
+
     # Get final index information
     info = await index_service.get_index_info()
     print(f"Index contains {info['stats']['total_vector_count']} vectors")
+
 
 # Run the async function
 if __name__ == "__main__":
@@ -496,7 +498,7 @@ if __name__ == "__main__":
 ### 6.4 Getting Index Information
 
 ```python
-from app.services.index_service import IndexService
+from app.services.indexing.index_service import IndexService
 
 # Initialize the service
 index_service = IndexService()
@@ -507,7 +509,7 @@ info = await index_service.get_index_info()
 # Check if index exists
 if info["exists"]:
     print(f"Index '{info['name']}' exists with {info['stats']['total_vector_count']} vectors")
-    
+
     # Print namespaces
     for ns_name, ns_info in info["stats"]["namespaces"].items():
         print(f"Namespace '{ns_name}' has {ns_info['vector_count']} vectors")
@@ -518,7 +520,7 @@ else:
 ### 6.5 Deleting an Index
 
 ```python
-from app.services.index_service import IndexService
+from app.services.indexing.index_service import IndexService
 
 # Initialize the service
 index_service = IndexService()

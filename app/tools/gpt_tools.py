@@ -15,7 +15,7 @@ from langchain_openai import OpenAIEmbeddings
 from app.config.chat_config import chat_config
 from app.config.chat_model_config import ChatModelConfig
 from app.config.llm_proxy_config import LlmProxyType
-from app.services.enhancement_service import enhancement_service
+from app.services.common.enhancement_service import enhancement_service
 
 class ToolManager:
     """Manager for all tools used by the agent."""

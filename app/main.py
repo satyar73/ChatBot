@@ -32,7 +32,7 @@ if import_base:
         DEVELOPMENT_LOG_LEVELS,
         PRODUCTION_LOG_LEVELS
     )
-    from app.services.background_jobs import lifespan
+    from app.services.common.background_jobs import lifespan
 else:
     from routes import chat_routes, index_routes, test_routes
     from utils.logging_utils import configure_logging, update_logger_levels, get_logger
@@ -41,7 +41,7 @@ else:
         DEVELOPMENT_LOG_LEVELS,
         PRODUCTION_LOG_LEVELS
     )
-    from services.background_jobs import lifespan
+    from app.services.common.background_jobs import lifespan
 
 # Initialize logging first
 configure_logging()
