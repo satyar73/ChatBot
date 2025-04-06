@@ -25,16 +25,19 @@ from app.models.chat_test_models import (
     ChatTestRequest,
     ChatTestResponse
 )
-from app.services.query_evaluation_service import ChatTestService
+from app.services.chat_evaluation_service import ChatTestService
 from app.services.background_jobs import (
     start_background_job,
     get_job_status,
     get_all_jobs,
     update_job_progress
 )
+from app.utils.logging_utils import get_logger
 
 # Initialize router
 router = APIRouter(prefix="/test", tags=["testing", "diagnostics"])
+
+logger = get_logger(__name__)
 
 # Dependency to get the test service
 def get_test_service():
@@ -166,8 +169,8 @@ async def start_batch_test(
                     )
                     
                     # Add console output for debugging
-                    print(f"Updating progress: {progress}% - Test {test_count}/{total_tests}")
-                    print(f"Running test prompt: {prompt_text}")
+                    logger.debug(f"Updating progress: {progress}% - Test {test_count}/{total_tests}")
+                    logger.debug(f"Running test prompt: {prompt_text}")
                     
                     # Update job progress with the enhanced message
                     update_job_progress(job_id, progress, status_message)
@@ -237,7 +240,7 @@ async def start_batch_test(
                     os.unlink(file_path)
                 
                 # Log the error
-                print(f"Error in batch test: {str(e)}")
+                logger.error(f"Error in batch test: {str(e)}")
                 raise e
 
         # Start the background job

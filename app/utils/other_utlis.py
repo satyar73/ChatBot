@@ -1,6 +1,10 @@
 import json
 from typing import Dict
 
+from app.utils.logging_utils import get_logger
+
+logger = get_logger(__name__)
+
 
 # Load feature flags from a configuration file
 def load_feature_flags(flag_type="chat"):
@@ -12,18 +16,18 @@ def load_feature_flags(flag_type="chat"):
         else:
             return {}
         
-        print(f"Loading feature flags from {file_path}")    
+        logger.debug(f"Loading feature flags from {file_path}")
         with open(file_path, 'r') as file:
             content = file.read()
-            print(f"Feature flags file content: {content}")
+            logger.debug(f"Feature flags file content: {content}")
             flags = json.loads(content)
-            print(f"Parsed feature flags: {flags}")
+            logger.debug(f"Parsed feature flags: {flags}")
             return flags
     except FileNotFoundError as e:
-        print(f"Feature flags file not found: {e}")
+        logger.error(f"Feature flags file not found: {e}")
         return {}
     except json.JSONDecodeError as e:
-        print(f"JSON decode error in feature flags: {e}")
+        logger.error(f"JSON decode error in feature flags: {e}")
         return {}
 
 def load_json(json_file) -> Dict[str, str]:
@@ -42,15 +46,15 @@ def load_json(json_file) -> Dict[str, str]:
         for item in data:
             qa_data[item['Prompt']] = item['Expected Result']
 
-        print(f"Loaded {len(qa_data)} QA pairs into cache")
+        logger.debug(f"Loaded {len(qa_data)} QA pairs into cache")
     except Exception as e:
-        print(f"Error loading JSON file: {e}")
+        logger.error(f"Error loading JSON file: {e}")
 
     return qa_data
 
 def write_data_logfile (context, data, log_file):
     json_data = json.dumps(data)
-    print(f"DEBUG: Writing LLM {context} log to {log_file}, data length: {len(json_data)}")
+    logger.debug(f"DEBUG: Writing LLM {context} log to {log_file}, data length: {len(json_data)}")
 
     # Direct file write as a fallback mechanism
     with open(log_file, "a") as f:

@@ -27,7 +27,7 @@ class ContentProcessor:
             config: Configuration object with vector store parameters
         """
         self.config = config or ChatConfig()
-        self.logger = get_logger(__name__, "DEBUG")
+        self.logger = get_logger(__name__)
         self.logger.info("ContentProcessor initialized")
         self.enhancement_service = enhancement_service
         
@@ -122,11 +122,11 @@ class ContentProcessor:
                 chunks = [record['markdown']]
                 
                 if is_qa_pair:
-                    self.logger.info(f"QA Pair not split: {record['title']}")
+                    self.logger.debug(f"QA Pair not split: {record['title']}")
                     special_handling = "QA pair preserved as single chunk"
                     doc_type = "qa_pair"
                 else:
-                    self.logger.info(f"Presentation slide not split: {record['title']}")
+                    self.logger.debug(f"Presentation slide not split: {record['title']}")
                     special_handling = "Slide preserved as single chunk"
                     doc_type = record.get('type')  # Preserve original type (e.g., "client")
                 
@@ -168,7 +168,7 @@ class ContentProcessor:
                 # For technical content, use smaller chunks with more overlap
                 is_technical = any(term in record['markdown'].lower() for term in special_terms)
                 if is_technical:
-                    self.logger.info(f"Using smaller chunks for technical content: {record['title']}")
+                    self.logger.debug(f"Using smaller chunks for technical content: {record['title']}")
                     text_splitter = TokenTextSplitter(
                         chunk_size=self.config.CHUNK_SIZE // 2,  # Smaller chunks for technical content
                         chunk_overlap=self.config.CHUNK_OVERLAP * 2,  # More overlap
@@ -183,7 +183,7 @@ class ContentProcessor:
                 chunks = text_splitter.split_text(record['markdown'])
                 
                 # Log chunking information
-                self.logger.info(f"Split document '{record['title']}' into {len(chunks)} chunks")
+                self.logger.debug(f"Split document '{record['title']}' into {len(chunks)} chunks")
                 
                 # Save chunks with document info for debugging
                 for j, chunk in enumerate(chunks):
@@ -260,7 +260,8 @@ class ContentProcessor:
         # Save all chunks to file for analysis
         if all_chunks:
             self.save_chunks_to_file(all_chunks)
-            
+
+        self.logger.info(f"Returned {len(all_chunks)} chunks for indexing.")
         return docs
 
     def index_to_vector_store(self, docs: List[Document]) -> bool:
@@ -272,7 +273,7 @@ class ContentProcessor:
         has_namespace_info = any("namespace" in doc.metadata for doc in docs)
         
         if has_namespace_info:
-            self.logger.info("Documents contain namespace information - using namespace-aware indexing")
+            self.logger.debug("Documents contain namespace information - using namespace-aware indexing")
             
             # Group documents by namespace
             namespace_groups = {}
@@ -284,12 +285,12 @@ class ContentProcessor:
                 
             # Log namespace distribution
             for namespace, docs_list in namespace_groups.items():
-                self.logger.info(f"Namespace '{namespace}' has {len(docs_list)} documents to index")
+                self.logger.debug(f"Namespace '{namespace}' has {len(docs_list)} documents to index")
                 
             # Index each namespace group separately
             success = True
             for namespace, docs_list in namespace_groups.items():
-                self.logger.info(f"Indexing {len(docs_list)} documents in namespace '{namespace}'...")
+                self.logger.debug(f"Indexing {len(docs_list)} documents in namespace '{namespace}'...")
                 
                 for chat_model_config in chat_config.chat_model_configs.values():
                     # Create a copy of the config to modify the namespace
@@ -299,20 +300,24 @@ class ContentProcessor:
                     if hasattr(config_copy.vector_store_config, 'namespace'):
                         original_ns = config_copy.vector_store_config.namespace
                         config_copy.vector_store_config._namespace = namespace
-                        self.logger.info(f"Changed namespace from '{original_ns}' to '{namespace}' for indexing")
+                        self.logger.debug(f"Changed namespace from '{original_ns}' "
+                                          f"to '{namespace}' for indexing")
                     
                     # Get vector store client and index documents
                     vector_store_client = VectorStoreClient.get_vector_store_client(config_copy.vector_store_config)
                     success &= vector_store_client.index_to_vector_store(config_copy, docs_list)
-            
+
+                    self.logger.info(f"Finished Indexing {len(docs_list)} "
+                                     f"docs for namespace '{namespace}'.")
             return success
         else:
             # Legacy mode - no namespace information in documents
-            self.logger.info("No namespace information in documents - using standard indexing")
+            self.logger.debug("No namespace information in documents - using standard indexing")
             success = True
             for chat_model_config in chat_config.chat_model_configs.values():
                 vector_store_config = chat_model_config.vector_store_config
                 vector_store_client = VectorStoreClient.get_vector_store_client(vector_store_config)
                 success &= vector_store_client.index_to_vector_store(chat_model_config, docs)
 
+            self.logger.info(f"No namespace. Finished Indexing {len(docs)} docs.")
             return success

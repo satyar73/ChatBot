@@ -6,14 +6,14 @@ and tracking their status, results, and progress.
 """
 
 import asyncio
-import uuid
-from typing import Dict, Any, Callable, Awaitable, Optional, List
+from contextlib import asynccontextmanager
+from datetime import datetime
+from fastapi import BackgroundTasks
 import logging
 import time
-from datetime import datetime
 import traceback
-from contextlib import asynccontextmanager
-from fastapi import BackgroundTasks
+from typing import Dict, Any, Callable, Awaitable, Optional, List
+import uuid
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -53,6 +53,7 @@ async def cleanup_old_jobs():
 # Start the cleanup task
 cleanup_task = None
 
+# the argument needed for a system library
 @asynccontextmanager
 async def lifespan(app):
     """Context manager for FastAPI app startup/shutdown"""

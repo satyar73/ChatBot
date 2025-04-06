@@ -29,8 +29,8 @@ class ChatBotClient:
         """Get or create an HTTP session."""
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession(
-                # Add timeout to prevent session from hanging indefinitely
-                timeout=aiohttp.ClientTimeout(total=30)
+                # No timeout, allowing requests to run indefinitely
+                timeout=None
             )
         return self.session
 

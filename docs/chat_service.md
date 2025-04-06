@@ -398,7 +398,7 @@ no_rag_response = response.no_rag_response
 ### 6.4 Cache Management
 
 ```python
-from app.services.cache_service import chat_cache
+from app.services.chat_cache_service import chat_cache
 
 # Get cache statistics
 stats = chat_cache.get_cache_stats()

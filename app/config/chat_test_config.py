@@ -112,7 +112,6 @@ class ChatTestConfig:
             6. overall_assessment: Overall assessment of the value added by RAG for this query
             """
 
-
     def update_setting(self, setting_name, value) -> bool:
         """Update a setting value if it exists
         @param setting_name:

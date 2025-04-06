@@ -92,3 +92,12 @@ class ChatAdvancedTestOutput(TypedDict):
     specific_errors: List[str]
     overall_assessment: str
     final_verdict: str
+  # Define the output structure
+
+class ComparisonOutput(TypedDict):
+    rag_strengths: List[str]
+    rag_weaknesses: List[str]
+    no_rag_strengths: List[str]
+    no_rag_weaknesses: List[str]
+    value_rating: Literal["None", "Low", "Medium", "High"]
+    overall_assessment: str

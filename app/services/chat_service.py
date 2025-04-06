@@ -1,7 +1,6 @@
 """
 Service layer for handling agent queries and responses with enhanced RAG query rewriting.
 """
-import sys
 import time
 from typing import List, Any
 
@@ -9,7 +8,7 @@ from app.agents.chat_agents import AgentManager
 from app.agents.response_strategies import ResponseStrategy
 from app.config.chat_config import chat_config
 from app.models.chat_models import ChatHistory, ResponseContent, ResponseMessage, Message
-from app.services.cache_service import chat_cache
+from app.services.chat_cache_service import chat_cache
 from app.services.enhancement_service import enhancement_service
 from app.utils.logging_utils import get_logger
 

@@ -43,7 +43,7 @@ class ResponseStrategy:
         """
         if mode == "no_rag":
             return NonRAGResponseStrategy(chat_service, agent_manager)
-        elif mode == "dual":
+        elif mode == "dual" or mode == "both":
             return DualResponseStrategy(chat_service, agent_manager)
         elif query.lower().startswith("database:"):
             return DatabaseResponseStrategy(chat_service, agent_manager)

@@ -28,8 +28,8 @@ from app.models.chat_test_models import (
     ChatBatchTestResponse,
 )
 from app.services.chat_service import ChatService
-from app.services.query_evaluation_service import ChatTestService
-from app.services.cache_service import chat_cache
+from app.services.chat_evaluation_service import ChatTestService
+from app.services.chat_cache_service import chat_cache
 from app.services.slides_service import SlidesService
 
 # Initialize router
