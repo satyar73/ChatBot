@@ -12,6 +12,7 @@ class VectorStoreConfig:
     def __init__(self, vector_store_type: VectorStoreType):
         self._vector_store_type = VectorStoreType.PINECONE
         self._index_name = ""  # Default empty index name
+        self._namespace = "default"  # Default namespace
 
     @property
     def vector_store_type(self)->VectorStoreType:
@@ -26,6 +27,16 @@ class VectorStoreConfig:
             Name of the index
         """
         return self._index_name
+        
+    @property
+    def namespace(self) -> str:
+        """
+        Get the namespace for this vector store configuration.
+        
+        Returns:
+            The namespace for organizing content
+        """
+        return self._namespace
 
     def get_embedding_dimensions(self, model_name: str) -> int:
         """
@@ -99,7 +110,8 @@ class PineconeConfig(VectorStoreConfig):
 
 class NeonConfig(VectorStoreConfig):
     """
-    PineconeConfig stores the configuration for PINECONE
+    NeonConfig stores the configuration for NEON vector store
     """
-    def __init__(self):
+    def __init__(self, namespace: str = "default"):
         super().__init__(VectorStoreType.NEON)
+        self._namespace = namespace

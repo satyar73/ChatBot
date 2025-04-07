@@ -7,13 +7,25 @@ The Indexing Service is responsible for:
 - Fetching content from various sources (Shopify, Google Drive --> supported now)
 - Processing and transforming content to embeddings
 - Indexing content to a vector database (Right now only Pinecone is supported)
-- Managing vector indexes
+- Managing vector indexes with namespace organization
+- Providing a RESTful API for content indexing operations
 
-The service consists of four main components:
+The service consists of several key components:
+- **RESTful API**: Standardized endpoints for indexing operations using source parameters
 - **IndexService**: The primary service interface that coordinates indexing
 - **ContentProcessor**: Base class for processing and indexing document content
 - **ShopifyIndexer**: Fetches and processes Shopify content
 - **GoogleDriveIndexer**: Fetches and processes Google Drive content
+- **API Models**: Pydantic models for request/response validation and documentation
+
+### 1.1 Key Features
+- **Unified RESTful API**: Consistent API design with standardized endpoints and parameters
+- **Source Parameter Pattern**: Single set of endpoints handling multiple content sources
+- **Namespace Support**: Content organization and isolation for multi-tenant scenarios
+- **Enhanced Documentation**: Comprehensive Swagger documentation with examples
+- **Adaptive Chunking**: Specialized content processing for different document types
+- **Vision API Integration**: Extracts and processes content from images and slides
+- **Enhanced Embedding**: Creates optimized embedding prompts for better retrieval
 
 ## 2. IndexService
 
@@ -268,6 +280,7 @@ ShopifyIndexer requires the following configuration:
 - `OPENAI_API_KEY`: OpenAI API key
 - `OPENAI_EMBEDDING_MODEL`: OpenAI embedding model name (default "text-embedding-3-small")
 - `OPENAI_VISION_MODEL`: OpenAI vision model for image analysis (default "gpt-4o")
+- `DEFAULT_NAMESPACE`: Default namespace for indexed content (default "default")
 - `INDEXER_FEATURE_FLAGS`: Feature flags controlling special indexing behaviors (see indexerfeatureflags.json)
 
 ## 5. GoogleDriveIndexer
@@ -387,152 +400,707 @@ GoogleDriveIndexer requires the following configuration:
 - `OPENAI_SUMMARY_MODEL`: Model to use for summarization (default "gpt-4o")
 - `OPENAI_VISION_MODEL`: OpenAI vision model for image analysis (default "gpt-4o")
 - `VISION_MAX_TOKENS`: Maximum tokens for vision response (default 4000)
+- `DEFAULT_NAMESPACE`: Default namespace for indexed content (default "default")
 - `INDEXER_FEATURE_FLAGS`: Feature flags controlling special indexing behaviors:
   - `use_vision_api`: Whether to analyze images in documents and presentations
   - `extract_slides_images`: Whether to extract and process images from slides
   - `enhance_with_keywords`: Whether to enhance documents with extracted keywords
   - `use_enhanced_embeddings`: Whether to use specialized embedding prompts
+  - `use_namespaces`: Whether to enable namespace support for content organization
 
-## 6. Usage Examples
+## 6. REST API
 
-### 6.1 Creating a Shopify Index
+The Indexing Service provides a RESTful API for managing content indexes. All endpoints follow a standardized approach using a `source` parameter to determine the content source.
 
-```python
-from app.services.indexing.index_service import IndexService
+### 6.1 API Endpoints
 
-# Initialize the service
-index_service = IndexService()
+#### `POST /api/index/`
+Creates a new index for the specified source.
 
-# Create an index with all Shopify content
-result = await index_service.create_index(
-    store="your-store.myshopify.com",
-    summarize=True
-)
-
-# Check the result
-if result["status"] == "success":
-    print(f"Successfully indexed {result['message']}")
-else:
-    print(f"Indexing failed: {result['message']}")
+**Request Body**:
+```json
+{
+  "source": "shopify",            // Required: "shopify" or "google_drive"
+  "namespace": "default",         // Optional: Namespace for organizing content
+  "summarize": true,              // Optional: Whether to summarize content
+  "parameters": {                 // Source-specific parameters
+    "store": "your-store.myshopify.com", // For Shopify
+    // OR
+    "folder_id": "your_folder_id",       // For Google Drive
+    "recursive": true                    // For Google Drive
+  }
+}
 ```
 
-### 6.2 Creating a Google Drive Index
-
-```python
-from app.services.indexing.index_service import IndexService
-
-# Initialize the service
-index_service = IndexService()
-
-# Create an index from Google Drive
-result = await index_service.create_index_from_drive(
-    folder_id="your_folder_id",  # Optional - uses root folder if not specified
-    recursive=True,  # Process subfolders recursively
-    summarize=True  # Use AI to summarize long documents
-)
-
-# Check the result
-if result["status"] == "success":
-    print(f"Google Drive content indexed successfully: {result['count']} documents processed")
-else:
-    print(f"Indexing failed: {result['message']}")
+**Response**:
+```json
+{
+  "status": "success",
+  "message": "Successfully indexed content",
+  "count": 42,
+  "namespace": "default"
+}
 ```
 
-### 6.3 Complete Example with Feature Flags
+#### `GET /api/index/`
+Gets information about the current index.
+
+**Query Parameters**:
+- `source`: (Optional) Filter by source ("shopify" or "google_drive")
+- `namespace`: (Optional) Filter by namespace
+
+**Response**:
+```json
+{
+  "exists": true,
+  "name": "your-index-name",
+  "stats": {
+    "total_vector_count": 1250,
+    "dimension": 1536,
+    "namespaces": {
+      "default": {
+        "vector_count": 750
+      },
+      "client1": {
+        "vector_count": 500
+      }
+    }
+  },
+  "metadata": {
+    "content_types": ["articles", "products"],
+    "last_updated": "2025-04-06T12:34:56Z"
+  }
+}
+```
+
+#### `DELETE /api/index/`
+Deletes the index for the specified source.
+
+**Query Parameters**:
+- `source`: (Optional) Filter by source ("shopify" or "google_drive")
+- `namespace`: (Optional) Filter by namespace
+
+**Response**:
+```json
+{
+  "status": "success",
+  "message": "Successfully deleted index"
+}
+```
+
+#### `GET /api/index/files`
+Gets a list of files indexed from the specified source.
+
+**Query Parameters**:
+- `source`: Required - Source type ("shopify" or "google_drive")
+- `namespace`: (Optional) Filter by namespace
+
+**Response**:
+```json
+{
+  "files": [
+    {
+      "id": "file_id_1",
+      "title": "Document Title",
+      "url": "https://example.com/doc1",
+      "size": 12345,
+      "source": "google_drive",
+      "namespace": "default"
+    },
+    // More files...
+  ],
+  "total": 42
+}
+```
+
+### 6.2 Usage Examples
+
+#### Creating a Shopify Index
 
 ```python
-import asyncio
+import requests
 import json
-from app.services.indexing.index_service import IndexService
 
+# API endpoint
+url = "http://localhost:8005/api/index/"
 
-async def run_indexer():
-    # Load feature flags from config file
-    with open('indexerfeatureflags.json', 'r') as f:
-        feature_flags = json.load(f)
+# Request payload
+payload = {
+    "source": "shopify",
+    "namespace": "client_store",
+    "summarize": True,
+    "parameters": {
+        "store": "your-store.myshopify.com"
+    }
+}
 
-    # Initialize the service with custom configuration
-    index_service = IndexService(
-        pinecone_api_key="your_pinecone_api_key",
-        index_name="your_index_name",
-        dimension=1536
-    )
-
-    # First, check if index exists and delete if needed
-    info = await index_service.get_index_info()
-    if info["exists"]:
-        print(f"Deleting existing index '{info['name']}'")
-        await index_service.delete_index()
-
-    # Enable special features for image processing
-    feature_flags["use_vision_api"] = True
-    feature_flags["extract_slides_images"] = True
-
-    # Set the feature flags
-    index_service.set_feature_flags(feature_flags)
-
-    # Index both Google Drive and Shopify content
-    drive_result = await index_service.create_index_from_drive(
-        folder_id="1ABC123XYZ",
-        recursive=True
-    )
-
-    shopify_result = await index_service.create_index(
-        store="your-store.myshopify.com"
-    )
-
-    # Show final results
-    total_docs = drive_result.get('count', 0) + shopify_result.get('count', 0)
-    print(f"Indexed {total_docs} total documents")
-
-    # Get final index information
-    info = await index_service.get_index_info()
-    print(f"Index contains {info['stats']['total_vector_count']} vectors")
-
-
-# Run the async function
-if __name__ == "__main__":
-    asyncio.run(run_indexer())
-```
-
-### 6.4 Getting Index Information
-
-```python
-from app.services.indexing.index_service import IndexService
-
-# Initialize the service
-index_service = IndexService()
-
-# Get index info
-info = await index_service.get_index_info()
-
-# Check if index exists
-if info["exists"]:
-    print(f"Index '{info['name']}' exists with {info['stats']['total_vector_count']} vectors")
-
-    # Print namespaces
-    for ns_name, ns_info in info["stats"]["namespaces"].items():
-        print(f"Namespace '{ns_name}' has {ns_info['vector_count']} vectors")
-else:
-    print(f"Index '{info['name']}' does not exist")
-```
-
-### 6.5 Deleting an Index
-
-```python
-from app.services.indexing.index_service import IndexService
-
-# Initialize the service
-index_service = IndexService()
-
-# Delete the index
-result = await index_service.delete_index()
+# Send request
+response = requests.post(url, json=payload)
+result = response.json()
 
 # Check the result
 if result["status"] == "success":
-    print(result["message"])
+    print(f"Successfully indexed {result['count']} items in namespace {result['namespace']}")
 else:
-    print(f"Deletion failed: {result['message']}")
+    print(f"Indexing failed: {result['message']}")
+```
+
+#### Creating a Google Drive Index
+
+```python
+import requests
+import json
+
+# API endpoint
+url = "http://localhost:8005/api/index/"
+
+# Request payload
+payload = {
+    "source": "google_drive",
+    "namespace": "marketing_docs",
+    "summarize": True,
+    "parameters": {
+        "folder_id": "your_folder_id",
+        "recursive": True
+    }
+}
+
+# Send request
+response = requests.post(url, json=payload)
+result = response.json()
+
+# Check the result
+if result["status"] == "success":
+    print(f"Google Drive content indexed successfully: {result['count']} documents in namespace {result['namespace']}")
+else:
+    print(f"Indexing failed: {result['message']}")
+```
+
+### 6.3 Frontend JavaScript Examples
+
+#### API Service Integration
+
+```javascript
+// api.js - Unified API service for indexing operations
+
+/**
+ * Create a new index
+ * @param {string} source - The source type ("shopify" or "google_drive")
+ * @param {object} parameters - Source-specific parameters
+ * @param {string} namespace - Optional namespace
+ * @param {boolean} summarize - Whether to summarize content
+ * @returns {Promise<object>} - Result of the operation
+ */
+export const createIndex = async (source, parameters = {}, namespace = "default", summarize = false) => {
+  try {
+    const response = await fetch('/api/index/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        source,
+        namespace,
+        summarize,
+        parameters
+      }),
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || 'Failed to create index');
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error creating index:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get index information
+ * @param {string} source - Optional source filter
+ * @param {string} namespace - Optional namespace filter
+ * @returns {Promise<object>} - Index information
+ */
+export const getIndexInfo = async (source = null, namespace = null) => {
+  try {
+    let url = '/api/index/';
+    const params = new URLSearchParams();
+    
+    if (source) params.append('source', source);
+    if (namespace) params.append('namespace', namespace);
+    
+    if (params.toString()) {
+      url += `?${params.toString()}`;
+    }
+    
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || 'Failed to get index info');
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error getting index info:', error);
+    throw error;
+  }
+};
+
+/**
+ * Delete an index
+ * @param {string} source - Optional source filter
+ * @param {string} namespace - Optional namespace filter
+ * @returns {Promise<object>} - Result of the operation
+ */
+export const deleteIndex = async (source = null, namespace = null) => {
+  try {
+    let url = '/api/index/';
+    const params = new URLSearchParams();
+    
+    if (source) params.append('source', source);
+    if (namespace) params.append('namespace', namespace);
+    
+    if (params.toString()) {
+      url += `?${params.toString()}`;
+    }
+    
+    const response = await fetch(url, {
+      method: 'DELETE',
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || 'Failed to delete index');
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error deleting index:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get files from an index
+ * @param {string} source - The source type ("shopify" or "google_drive")
+ * @param {string} namespace - Optional namespace filter
+ * @returns {Promise<object>} - List of files
+ */
+export const getSourceFiles = async (source, namespace = null) => {
+  try {
+    let url = `/api/index/files?source=${source}`;
+    
+    if (namespace) {
+      url += `&namespace=${namespace}`;
+    }
+    
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || 'Failed to get files');
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error getting files:', error);
+    throw error;
+  }
+};
+```
+
+#### React Hook Example
+
+```javascript
+// useGoogleDriveActions.js - Hook for managing Google Drive indexing
+import { useState, useCallback } from 'react';
+import { createIndex, deleteIndex, getIndexInfo, getSourceFiles } from '../../services/api';
+
+export function useGoogleDriveActions() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [results, setResults] = useState(null);
+  const [files, setFiles] = useState([]);
+  const [indexStats, setIndexStats] = useState(null);
+  
+  // Create Google Drive index
+  const createGoogleDriveIndex = useCallback(async (
+    folder_id, 
+    recursive = true, 
+    summarize = false,
+    namespace = "default"
+  ) => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const result = await createIndex(
+        "google_drive", 
+        { folder_id, recursive }, 
+        namespace,
+        summarize
+      );
+      
+      setResults(result);
+      
+      // Refresh index stats and files after successful indexing
+      await refreshIndexInfo(namespace);
+      await loadIndexedFiles(namespace);
+      
+      return result;
+    } catch (err) {
+      setError(err.message || 'Failed to create Google Drive index');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  
+  // Delete Google Drive index
+  const deleteGoogleDriveIndex = useCallback(async (namespace = null) => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const result = await deleteIndex("google_drive", namespace);
+      setResults(result);
+      
+      // Clear files and refresh stats
+      setFiles([]);
+      await refreshIndexInfo();
+      
+      return result;
+    } catch (err) {
+      setError(err.message || 'Failed to delete Google Drive index');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  
+  // Load indexed files
+  const loadIndexedFiles = useCallback(async (namespace = null) => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const data = await getSourceFiles("google_drive", namespace);
+      setFiles(data.files || []);
+      return data;
+    } catch (err) {
+      setError(err.message || 'Failed to load indexed files');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  
+  // Refresh index information
+  const refreshIndexInfo = useCallback(async (namespace = null) => {
+    try {
+      const info = await getIndexInfo("google_drive", namespace);
+      setIndexStats(info);
+      return info;
+    } catch (err) {
+      setError(err.message || 'Failed to refresh index info');
+      throw err;
+    }
+  }, []);
+  
+  return {
+    loading,
+    error,
+    results,
+    files,
+    indexStats,
+    createGoogleDriveIndex,
+    deleteGoogleDriveIndex,
+    loadIndexedFiles,
+    refreshIndexInfo
+  };
+}
+```
+
+### 6.4 Complete Example with Feature Flags
+
+```javascript
+// Example of using the React hooks in a component
+
+import React, { useState, useEffect } from 'react';
+import { useGoogleDriveActions } from '../hooks/useGoogleDriveActions';
+import { useShopifyActions } from '../hooks/useShopifyActions';
+
+function IndexingPage() {
+  const [namespace, setNamespace] = useState('default');
+  const [folderId, setFolderId] = useState('');
+  const [shopifyStore, setShopifyStore] = useState('');
+  const [summarize, setSummarize] = useState(false);
+  const [recursive, setRecursive] = useState(true);
+  
+  const {
+    loading: gdLoading,
+    error: gdError,
+    results: gdResults,
+    files: gdFiles,
+    indexStats: gdStats,
+    createGoogleDriveIndex,
+    deleteGoogleDriveIndex,
+    loadIndexedFiles: loadGdFiles,
+    refreshIndexInfo: refreshGdInfo
+  } = useGoogleDriveActions();
+  
+  const {
+    loading: shopifyLoading,
+    error: shopifyError,
+    results: shopifyResults,
+    createShopifyIndex,
+    deleteShopifyIndex
+  } = useShopifyActions();
+  
+  useEffect(() => {
+    // Load initial data when component mounts
+    refreshGdInfo();
+    loadGdFiles();
+  }, [refreshGdInfo, loadGdFiles]);
+  
+  const handleCreateGoogleDriveIndex = async () => {
+    try {
+      await createGoogleDriveIndex(folderId, recursive, summarize, namespace);
+      alert('Google Drive indexing completed successfully!');
+    } catch (error) {
+      // Error already handled in the hook
+    }
+  };
+  
+  const handleCreateShopifyIndex = async () => {
+    try {
+      await createShopifyIndex(shopifyStore, summarize, namespace);
+      alert('Shopify indexing completed successfully!');
+    } catch (error) {
+      // Error already handled in the hook
+    }
+  };
+  
+  const handleDeleteAllIndexes = async () => {
+    if (window.confirm('Are you sure you want to delete all indexes?')) {
+      try {
+        // Delete both indexes from the namespace
+        await deleteGoogleDriveIndex(namespace);
+        await deleteShopifyIndex(namespace);
+        alert('All indexes deleted successfully!');
+      } catch (error) {
+        alert(`Error deleting indexes: ${error.message}`);
+      }
+    }
+  };
+  
+  return (
+    <div>
+      <h1>Content Indexing</h1>
+      
+      <div className="form-group">
+        <label>Namespace:</label>
+        <input 
+          type="text" 
+          value={namespace} 
+          onChange={(e) => setNamespace(e.target.value)} 
+          placeholder="default"
+        />
+      </div>
+      
+      <h2>Google Drive Indexing</h2>
+      {gdLoading && <p>Loading...</p>}
+      {gdError && <p className="error">Error: {gdError}</p>}
+      
+      <div className="form-group">
+        <label>Folder ID:</label>
+        <input 
+          type="text" 
+          value={folderId} 
+          onChange={(e) => setFolderId(e.target.value)} 
+          placeholder="Google Drive Folder ID"
+        />
+      </div>
+      
+      <div className="form-group">
+        <label>
+          <input 
+            type="checkbox" 
+            checked={recursive} 
+            onChange={(e) => setRecursive(e.target.checked)} 
+          />
+          Process folders recursively
+        </label>
+      </div>
+      
+      <div className="form-group">
+        <label>
+          <input 
+            type="checkbox" 
+            checked={summarize} 
+            onChange={(e) => setSummarize(e.target.checked)} 
+          />
+          Summarize content
+        </label>
+      </div>
+      
+      <button 
+        onClick={handleCreateGoogleDriveIndex} 
+        disabled={gdLoading || !folderId}
+      >
+        Index Google Drive Content
+      </button>
+      
+      <h2>Shopify Indexing</h2>
+      {shopifyLoading && <p>Loading...</p>}
+      {shopifyError && <p className="error">Error: {shopifyError}</p>}
+      
+      <div className="form-group">
+        <label>Store Domain:</label>
+        <input 
+          type="text" 
+          value={shopifyStore} 
+          onChange={(e) => setShopifyStore(e.target.value)} 
+          placeholder="your-store.myshopify.com"
+        />
+      </div>
+      
+      <button 
+        onClick={handleCreateShopifyIndex} 
+        disabled={shopifyLoading || !shopifyStore}
+      >
+        Index Shopify Content
+      </button>
+      
+      <hr />
+      
+      <button 
+        onClick={handleDeleteAllIndexes} 
+        className="danger"
+      >
+        Delete All Indexes
+      </button>
+      
+      {gdStats && (
+        <div className="stats">
+          <h3>Index Statistics</h3>
+          <p>Total Vectors: {gdStats.stats?.total_vector_count || 0}</p>
+          <p>
+            Vectors in namespace "{namespace}": 
+            {gdStats.stats?.namespaces?.[namespace]?.vector_count || 0}
+          </p>
+        </div>
+      )}
+      
+      {gdFiles.length > 0 && (
+        <div className="files">
+          <h3>Indexed Files ({gdFiles.length})</h3>
+          <ul>
+            {gdFiles.map(file => (
+              <li key={file.id}>
+                <a href={file.url} target="_blank" rel="noopener noreferrer">
+                  {file.title}
+                </a>
+                <span className="file-size">({Math.round(file.size / 1024)} KB)</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default IndexingPage;
+```
+
+### 6.5 Axios API Client Example
+
+```javascript
+// indexApi.js - Axios-based API client for index operations
+import axios from 'axios';
+
+const apiClient = axios.create({
+  baseURL: '/api',
+  timeout: 50000,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+export const indexApi = {
+  /**
+   * Create a new index
+   */
+  createIndex: async (source, parameters = {}, namespace = "default", summarize = false) => {
+    try {
+      const response = await apiClient.post('/index/', {
+        source,
+        namespace,
+        summarize,
+        parameters
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error creating index:', error);
+      throw error.response?.data || error;
+    }
+  },
+  
+  /**
+   * Get index information
+   */
+  getIndexInfo: async (source = null, namespace = null) => {
+    try {
+      const params = {};
+      if (source) params.source = source;
+      if (namespace) params.namespace = namespace;
+      
+      const response = await apiClient.get('/index/', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Error getting index info:', error);
+      throw error.response?.data || error;
+    }
+  },
+  
+  /**
+   * Delete an index
+   */
+  deleteIndex: async (source = null, namespace = null) => {
+    try {
+      const params = {};
+      if (source) params.source = source;
+      if (namespace) params.namespace = namespace;
+      
+      const response = await apiClient.delete('/index/', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Error deleting index:', error);
+      throw error.response?.data || error;
+    }
+  },
+  
+  /**
+   * Get files from a source
+   */
+  getSourceFiles: async (source, namespace = null) => {
+    try {
+      const params = { source };
+      if (namespace) params.namespace = namespace;
+      
+      const response = await apiClient.get('/index/files', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Error getting source files:', error);
+      throw error.response?.data || error;
+    }
+  }
+};
 ```
 
 ## 7. Dependencies
@@ -599,13 +1167,38 @@ The Indexing Service uses standard logging to track progress:
   - Technical term identification with definitions
   - Q&A relationship preservation and context awareness
   - Image content tagging and description metadata
+  - Namespace-based content organization for multi-client or multi-project scenarios
 - **Semantic Filtering**: Add semantic filters to improve response accuracy:
   - Filter by document type (presentation, article, product)
   - Filter by content domain (attribution, tracking, measurement)
   - Filter by technical complexity (beginner, intermediate, advanced)
   - Filter by recency and relevance
+  - Filter by namespace for proper content isolation
 
-### 9.4 Performance and Scaling
+### 9.4 API Design Best Practices
+- **RESTful Interface Design**:
+  - Use standardized endpoints with consistent resource naming
+  - Follow HTTP method semantics (GET for reading, POST for creating, DELETE for removing)
+  - Implement query parameters for filtering and sorting
+  - Use request bodies for complex operations
+  - Return appropriate HTTP status codes and descriptive error messages
+- **Source Parameter Pattern**:
+  - Use a unified `source` parameter approach instead of different endpoint paths
+  - Standardize request and response formats across different sources
+  - Ensure backward compatibility during API transitions
+  - Document source-specific parameters clearly
+- **Namespace Support**:
+  - Implement namespaces for content organization and isolation
+  - Use namespaces for multi-tenant or multi-client scenarios
+  - Allow filtering operations by namespace
+  - Provide default namespace for backward compatibility
+- **Documentation**:
+  - Use Pydantic models with field descriptions and examples
+  - Provide comprehensive docstrings for all API endpoints
+  - Include example requests and responses
+  - Document all parameters and their effects
+
+### 9.5 Performance and Scaling
 - **Batch Processing**: Use efficient batching strategies:
   - Process vectors in batches of 100-200 for optimal performance
   - Implement parallel processing for large document sets

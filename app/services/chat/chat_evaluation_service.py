@@ -764,7 +764,7 @@ class ChatEvaluationService:
         # Compile and return
         return builder.compile()
 
-    async def run_test(self, request: ChatTestRequest) -> ChatTestResponse:
+    async def run_test(self, request: ChatTestRequest) -> ChatTestResponse | None:
         """Run a test on a prompt/expected result pair with RAG comparison"""
         test_id = request.test_id or str(uuid4())
 

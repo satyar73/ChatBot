@@ -155,19 +155,20 @@ class IndexService:
             self.logger.error(f"Error creating index from Google Drive: {str(e)}", exc_info=True)
             return {"status": "error", "message": f"Failed to create index from Google Drive: {str(e)}"}
 
-    async def get_index_info(self, source: Optional[str] = None) -> Dict:
+    async def get_index_info(self, source: Optional[str] = None, namespace: Optional[str] = None) -> Dict:
         """
         Get information about the current vector index.
         
         Args:
             source: Optional source type to filter results ('shopify' or 'google_drive')
+            namespace: Optional namespace to filter results
             
         Returns:
             Dict containing status and index information
         """
         try:
             # Get index info from vector store
-            index_info = self.content_processor.get_index_info()
+            index_info = self.content_processor.get_index_info(namespace=namespace)
             
             # Filter by source if specified
             if source and "info" in index_info:
@@ -177,11 +178,35 @@ class IndexService:
                         # Filter content by source
                         source_content = [item for item in value.get("content", []) 
                                          if item.get("source") == source]
+                        
+                        # Also filter by namespace if specified
+                        if namespace:
+                            source_content = [item for item in source_content
+                                            if item.get("namespace") == namespace]
+                                            
                         if source_content:
                             filtered_info[key] = value.copy()
                             filtered_info[key]["content"] = source_content
                 
                 index_info["info"] = filtered_info
+            # Filter by namespace only if source not specified
+            elif namespace and "info" in index_info:
+                filtered_info = {}
+                for key, value in index_info["info"].items():
+                    if isinstance(value, dict) and "content" in value:
+                        # Filter content by namespace
+                        namespace_content = [item for item in value.get("content", []) 
+                                           if item.get("namespace") == namespace]
+                                            
+                        if namespace_content:
+                            filtered_info[key] = value.copy()
+                            filtered_info[key]["content"] = namespace_content
+                
+                index_info["info"] = filtered_info
+            
+            # Add namespace information to the response
+            if namespace:
+                index_info["namespace"] = namespace
             
             return {
                 "status": "success",
@@ -191,14 +216,22 @@ class IndexService:
             self.logger.error(f"Error getting index info: {str(e)}")
             return {"status": "error", "message": str(e)}
 
-    async def get_google_drive_files(self) -> Dict[str, Any]:
-        """Get list of indexed Google Drive files"""
+    async def get_google_drive_files(self, namespace: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get list of indexed Google Drive files.
+        
+        Args:
+            namespace: Optional namespace to filter files
+            
+        Returns:
+            Dictionary with file information
+        """
         try:
             # Create Google Drive indexer
             indexer = GoogleDriveIndexer(self.gdrive_indexer.config)
             
-            # Use the indexer's method to get file information
-            return indexer.get_google_drive_files()
+            # Use the indexer's method to get file information with namespace
+            return indexer.get_google_drive_files(namespace=namespace)
             
         except Exception as e:
             self.logger.error(f"Error retrieving Google Drive files: {str(e)}")

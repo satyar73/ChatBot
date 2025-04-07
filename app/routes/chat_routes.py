@@ -32,7 +32,7 @@ from app.services.chat.chat_evaluation_service import ChatEvaluationService
 from app.services.chat.chat_cache_service import chat_cache
 
 # Initialize router
-router = APIRouter(prefix="/chat", tags=["chat", "cache"])
+router = APIRouter(prefix="/chat", tags=["chat"])  # Using single primary tag
 
 # Dependency to get the chat service
 def get_chat_service():
@@ -192,7 +192,7 @@ async def get_cache_stats():
     """
     return chat_cache.get_cache_stats()
     
-@router.get("/test-slides-connection")
+@router.get("/test-slides-connection", tags=["slides"])
 async def test_slides_connection():
     """
     Test endpoint to verify connectivity to the slides service.
@@ -202,7 +202,7 @@ async def test_slides_connection():
     """
     return {"status": "ok", "message": "Connection to slides service is working"}
 
-@router.post("/test-slides-upload")
+@router.post("/test-slides-upload", tags=["slides"])
 async def test_slides_upload(
     file: UploadFile = File(...),
 ):
@@ -262,7 +262,7 @@ async def clear_cache(older_than_days: Optional[int] = None):
             "entries_cleared": entries_cleared
         }
 
-@router.post("/create-slides", deprecated=True)
+@router.post("/create-slides", deprecated=True, tags=["slides"])
 async def create_slides(
     file: UploadFile = File(...),
     title: str = Form("Q&A Presentation"),
@@ -293,7 +293,7 @@ async def create_slides(
         document_type="slides"
     )
 
-@router.post("/create-document")
+@router.post("/create-document", tags=["document"])
 async def create_document(
     file: UploadFile = File(...),
     title: str = Form("Generated Document"),

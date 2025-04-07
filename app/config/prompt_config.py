@@ -19,7 +19,7 @@ class PromptConfig:
         
     def _validate_prompt_structure(self, prompts_data: Dict) -> None:
         """
-        Validate the structure of the prompts data.
+        Validate the structure of the prompt's data.
         
         Args:
             prompts_data: The loaded prompts data from JSON

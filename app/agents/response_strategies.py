@@ -218,14 +218,19 @@ class ResponseStrategy:
 
         for source in raw_sources:
             if isinstance(source, dict):
+                # Ensure all required fields have default values
                 formatted_sources.append(Source(
-                    title=source.get("title", ""),
+                    title=source.get("title", "Unknown Source"),
                     url=source.get("url", ""),
                     content=source.get("content", "")
                 ))
             else:
-                # Handle string or other non-dict sources
-                formatted_sources.append(Source(content=str(source)))
+                # Handle string or other non-dict sources by providing defaults for all required fields
+                formatted_sources.append(Source(
+                    title="Unknown Source",
+                    url="",
+                    content=str(source)
+                ))
 
         return formatted_sources
         

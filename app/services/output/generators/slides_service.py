@@ -596,7 +596,7 @@ class SlidesService(DocumentService):
                     processed_paragraph = self._process_inline_formatting_v2(paragraph)
                     
                     result.append({
-                        'type': 'paragraph',  # Still treat as paragraph but we'll process it as heading later
+                        'type': 'paragraph',  # Still treat as paragraph, but we'll process it as heading later
                         'text': paragraph,    # Keep the # markers for later detection
                         'formats': processed_paragraph.get('formats', []),
                         'links': processed_paragraph.get('links', [])
@@ -706,7 +706,7 @@ class SlidesService(DocumentService):
 
         # We'll use a two-pass approach:
         # 1. First scan: identify all markdown patterns and their positions
-        # 2. Second pass: remove markdown syntax and track position changes
+        # 2. Second pass: remove Markdown syntax and track position changes
 
         # Track all formatting elements we find
         formats = []
@@ -759,7 +759,7 @@ class SlidesService(DocumentService):
         formats.sort(key=lambda x: x['start'], reverse=True)
         self.logger.info(f"Sorted {len(formats)} formatting elements for processing")
 
-        # Now process the text, removing markdown syntax
+        # Now process the text, removing Markdown syntax
         clean_text = text
 
         # These will track the final formatting positions after markup removal
@@ -799,7 +799,7 @@ class SlidesService(DocumentService):
             # Text before modification
             self.logger.info(f"Text before modification: '{clean_text[:50]}...'")
 
-            # Remove the markdown syntax
+            # Remove the Markdown syntax
             if fmt['type'] == 'link':
                 # For links, replace [text](url) with just text
                 link_markup_before = fmt['inner_start'] - fmt['start']  # Length of "["
@@ -1522,7 +1522,7 @@ class SlidesService(DocumentService):
                         if isinstance(item_text, str):
                             stripped_text = item_text.lstrip()
                             
-                            # First check: Explicit markdown heading pattern with # symbols
+                            # First check: Explicit Markdown heading pattern with # symbols
                             if stripped_text.startswith('#') or '\n#' in item_text or '\r\n#' in item_text:
                                 is_heading = True
                                 self.logger.info(f"EXPLICIT HEADING FOUND - Text contains # pattern: '{stripped_text[:40]}...'")

@@ -975,8 +975,16 @@ class GoogleDriveIndexer:
             self.logger.error(f"Error initializing Google Drive API: {str(e)}")
             return {"status": "error", "message": str(e)}
 
-    def get_google_drive_files(self) -> Dict[str, Any]:
-        """Get list of indexed Google Drive files"""
+    def get_google_drive_files(self, namespace: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get list of indexed Google Drive files.
+        
+        Args:
+            namespace: Optional namespace to filter files
+            
+        Returns:
+            Dictionary with file information
+        """
         try:
             # Try to load the Google Drive processed files
             drive_path = os.path.join(self.config.OUTPUT_DIR, "drive_processed.json")
@@ -985,13 +993,19 @@ class GoogleDriveIndexer:
                 with open(drive_path, "r") as f:
                     files = json.load(f)
                     
+                # Filter by namespace if specified
+                if namespace:
+                    self.logger.info(f"Filtering files by namespace: {namespace}")
+                    files = [file for file in files if file.get("namespace") == namespace]
+                    
                 # Extract basic file information
                 file_list = [
                     {
                         "id": idx,
                         "title": file.get("title", "Unknown"),
                         "url": file.get("url", ""),
-                        "size": len(file.get("markdown", "")) if "markdown" in file else 0
+                        "size": len(file.get("markdown", "")) if "markdown" in file else 0,
+                        "namespace": file.get("namespace", "default")
                     }
                     for idx, file in enumerate(files)
                 ]
@@ -999,35 +1013,58 @@ class GoogleDriveIndexer:
                 return {
                     "status": "success",
                     "files": file_list,
-                    "count": len(file_list)
+                    "count": len(file_list),
+                    "namespace": namespace
                 }
             else:
                 # Check if we can query the vector store directly
                 try:
-                    total_vector_count = 0
+                    # Get vector store config and initialize client
+                    vector_store_configs = []
                     for chat_model_config in chat_config.chat_model_configs.values():
                         vector_store_config = chat_model_config.vector_store_config
-                        vector_store_client: VectorStoreClient = VectorStoreClient.get_vector_store_client(vector_store_config)
-                        total_vector_count += vector_store_client.get_vector_count()
+                        
+                        # If namespace filter specified, only include matching configs
+                        if namespace and hasattr(vector_store_config, 'namespace'):
+                            if vector_store_config.namespace == namespace:
+                                vector_store_configs.append(vector_store_config)
+                        else:
+                            vector_store_configs.append(vector_store_config)
                     
-                    #TODO we should not sum the vector count across two different indexes; UI need to pass the index_name
+                    # Get vector counts from all selected configs
+                    total_vector_count = 0
+                    for config in vector_store_configs:
+                        vector_store_client: VectorStoreClient = VectorStoreClient.get_vector_store_client(config)
+                        # If client supports namespace-specific count, use it
+                        if hasattr(vector_store_client, 'get_vector_count_by_namespace'):
+                            namespace_to_check = namespace or (config.namespace if hasattr(config, 'namespace') else "default")
+                            total_vector_count += vector_store_client.get_vector_count_by_namespace(namespace_to_check)
+                        else:
+                            # Otherwise just get total count
+                            total_vector_count += vector_store_client.get_vector_count()
+                    
+                    # Return vector count information
+                    namespace_info = f" in namespace '{namespace}'" if namespace else ""
                     if total_vector_count > 0:
                         return {
                             "status": "success",
                             "files": [],
                             "count": 0,
                             "vector_count": total_vector_count,
-                            "message": "Drive file list not available, but vectors are in the index"
+                            "namespace": namespace,
+                            "message": f"Drive file list not available, but {total_vector_count} vectors are in the index{namespace_info}"
                         }
                 except Exception as e:
-                    self.logger.error(f"Error querying Pinecone for Google Drive files: {str(e)}")
+                    self.logger.error(f"Error querying vector store for Google Drive files: {str(e)}")
                 
                 # No processed files available
+                namespace_msg = f" in namespace '{namespace}'" if namespace else ""
                 return {
                     "status": "success",
                     "files": [],
                     "count": 0,
-                    "message": "No Google Drive files indexed or file list not available"
+                    "namespace": namespace,
+                    "message": f"No Google Drive files indexed{namespace_msg} or file list not available"
                 }
                 
         except Exception as e:

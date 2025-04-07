@@ -7,12 +7,11 @@ It uses the test_routes API endpoints rather than directly instantiating the Cha
 import asyncio
 import sys
 import os
-import json
 import time
 import pandas as pd
 import aiohttp
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 from uuid import uuid4
 
 from app.utils.logging_utils import get_logger
@@ -341,7 +340,7 @@ class ChatTesterCLI:
                 # Only print if there's a change in progress or message
                 if progress != last_progress or message != last_message:
                     # If this is a progress update, show it on the same line
-                    if progress > 0 and progress < 100 and last_progress > 0:
+                    if 0 < progress < 100 and last_progress > 0:
                         print(f"\rProgress: {progress}% - {message}", end="", flush=True)
                     else:
                         # For status changes, print on a new line

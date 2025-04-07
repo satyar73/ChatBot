@@ -34,25 +34,77 @@ class ContentProcessor:
         # Create output directory if needed
         os.makedirs(self.config.OUTPUT_DIR, exist_ok=True)
 
-    def get_index_info(self) -> Dict[str, Any]:
+    def get_index_info(self, namespace: Optional[str] = None) -> Dict[str, Any]:
         """
         Get information about the current vector index.
         
+        Args:
+            namespace: Optional namespace to filter results
+            
         Returns:
             Dictionary containing index information
         """
         try:
-            # Get index info from vector store
-            vector_store = VectorStoreClient()
-            index_info = vector_store.get_index_info()
+            # Initialize vector store clients from all configurations
+            all_info = {}
+            total_documents = 0
+            total_chunks = 0
+            namespaces = set()
             
-            return {
-                "total_documents": index_info.get("total_documents", 0),
-                "total_chunks": index_info.get("total_chunks", 0),
-                "index_name": index_info.get("index_name", ""),
-                "last_updated": index_info.get("last_updated", ""),
-                "dimension": index_info.get("dimension", 0)
+            # Process each vector store config
+            for name, chat_model_config in self.config.chat_model_configs.items():
+                vector_store_config = chat_model_config.vector_store_config
+                
+                # Skip if namespace doesn't match (when filter is specified)
+                if namespace and hasattr(vector_store_config, 'namespace'):
+                    if vector_store_config.namespace != namespace:
+                        continue
+                
+                # Get client and info
+                vector_store = VectorStoreClient.get_vector_store_client(vector_store_config)
+                
+                # If client supports namespace parameter, use it
+                if hasattr(vector_store, 'get_index_info_by_namespace'):
+                    # Get info filtered by namespace
+                    namespace_to_check = namespace or vector_store_config.namespace
+                    index_info = vector_store.get_index_info_by_namespace(namespace_to_check)
+                else:
+                    # Just get general info
+                    index_info = vector_store.get_index_info()
+                
+                # Extract general stats
+                total_documents += index_info.get("total_documents", 0)
+                total_chunks += index_info.get("total_chunks", 0)
+                
+                # Get namespaces (if available)
+                if "namespaces" in index_info:
+                    for ns in index_info["namespaces"]:
+                        namespaces.add(ns)
+                        
+                # Store individual config info
+                all_info[name] = index_info
+                
+                # Store namespace info
+                if namespace and "namespace" not in index_info:
+                    index_info["namespace"] = namespace
+            
+            # Build consolidated result
+            result = {
+                "total_documents": total_documents,
+                "total_chunks": total_chunks,
+                "index_name": next(iter(all_info.values()), {}).get("index_name", ""),
+                "last_updated": next(iter(all_info.values()), {}).get("last_updated", ""),
+                "dimension": next(iter(all_info.values()), {}).get("dimension", 0),
+                "namespaces": list(namespaces),
+                "configs": all_info
             }
+            
+            # Add namespace to result if specified
+            if namespace:
+                result["namespace"] = namespace
+                
+            return result
+            
         except Exception as e:
             self.logger.error(f"Error getting index info: {str(e)}")
             return {
@@ -61,6 +113,7 @@ class ContentProcessor:
                 "index_name": "",
                 "last_updated": "",
                 "dimension": 0,
+                "namespaces": [],
                 "error": str(e)
             }
 

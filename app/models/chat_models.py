@@ -80,9 +80,9 @@ class ResponseContent(BaseModel):
 
 class Source(BaseModel):
     """Model for source information from retrieved documents"""
-    title: Optional[str] = Field(None, description="Title of the source document")
-    url: Optional[str] = Field(None, description="URL or reference to the source document")
-    content: Optional[str] = Field(None, description="Relevant excerpt from the source document")
+    title: str = Field(default="Unknown Source", description="Title of the source document")
+    url: str = Field(default="", description="URL or reference to the source document")
+    content: str = Field(default="", description="Relevant excerpt from the source document")
 
 class ResponseMessage(BaseModel):
     """Model for a complete response message with sources."""

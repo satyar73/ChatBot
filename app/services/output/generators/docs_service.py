@@ -96,7 +96,7 @@ class DocsService(DocumentService):
         
         Args:
             document_id: ID of the document
-            index: Index at which to insert the text
+            index: Index at which to insert
             text: Text to insert
         """
         self._service.documents().batchUpdate(
