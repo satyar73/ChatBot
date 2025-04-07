@@ -20,7 +20,7 @@ class VectorStoreClient:
     VectorStoreClient is an interface class for performing CURL operations on various vector stores such as Pinecone, Neon, etc
     """
     def __init__(self):
-        self.logger = get_logger(__name__, "DEBUG")
+        self.logger = get_logger(__name__)
         self.config = chat_config
         self.enhancement_service = enhancement_service
 

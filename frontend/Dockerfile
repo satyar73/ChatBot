@@ -38,11 +38,11 @@ EXPOSE 80
 
 CMD ["nginx", "-g", "daemon off;"]
 
-COPY docker-entrypoint-custom.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint-custom.sh
+COPY docker-endpoint-custom.sh /usr/local/bin/docker-endpoint-custom.sh
+RUN chmod +x /usr/local/bin/docker-endpoint-custom.sh
 
 # Install netcat for backend checking
 RUN apk add --no-cache netcat-openbsd
 
 # Use our custom entrypoint
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint-custom.sh"]
+ENTRYPOINT ["/usr/local/bin/docker-endpoint-custom.sh"]

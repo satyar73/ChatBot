@@ -27,7 +27,7 @@ services:
       # Exclude from debug profile to avoid port conflicts
       # This prevents backend and backend-debug from starting together
     healthcheck:
-      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8005/health')"]
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -60,7 +60,7 @@ services:
     ports:
       - "8005:8005"
     healthcheck:
-      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8005/health')"]
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -79,11 +79,12 @@ services:
         condition: service_healthy
     networks:
       - chatbot-network
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    restart: unless-stopped
+    # extra_hosts not needed for AWS ECS deployment
+    # Define environment variable for backend service discovery
     environment:
+      - BACKEND_SERVICE_HOST=backend
       - REACT_APP_COMPANY_NAME=${COMPANY_NAME:-SVV}
+    restart: unless-stopped
     # When using debug profile, make sure we depend on backend-debug instead
     profiles:
       - default
@@ -101,11 +102,12 @@ services:
         condition: service_healthy
     networks:
       - chatbot-network
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    restart: unless-stopped
+    # extra_hosts not needed for AWS ECS deployment
+    # Define environment variable for backend service discovery
     environment:
+      - BACKEND_SERVICE_HOST=backend-debug
       - REACT_APP_COMPANY_NAME=${COMPANY_NAME:-SVV}
+    restart: unless-stopped
     profiles:
       - debug
 
