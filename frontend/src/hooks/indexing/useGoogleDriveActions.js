@@ -70,6 +70,13 @@ const useGoogleDriveActions = () => {
   }, [dispatch]);
   
   /**
+   * Set namespace
+   */
+  const setNamespace = useCallback((value) => {
+    dispatch({ type: ACTIONS.SET_NAMESPACE, payload: value });
+  }, [dispatch]);
+  
+  /**
    * Clear error message
    */
   const clearError = useCallback(() => {
@@ -85,8 +92,9 @@ const useGoogleDriveActions = () => {
   
   /**
    * Index a Google Drive folder
+   * @param {string} namespace - Optional namespace for the index
    */
-  const handleIndexFolder = useCallback(async () => {
+  const handleIndexFolder = useCallback(async (namespace = null) => {
     dispatch({ type: ACTIONS.SET_INDEXING, payload: true });
     dispatch({ type: ACTIONS.SET_ERROR, payload: null });
     dispatch({ type: ACTIONS.SET_SUCCESS, payload: null });
@@ -95,13 +103,22 @@ const useGoogleDriveActions = () => {
       const response = await indexApi.indexGoogleDrive(
         state.folderId || null, 
         state.recursive,
-        state.enhancedSlides
+        state.enhancedSlides,
+        namespace
       );
       const fileCount = response.files_processed || 0;
       const chunkCount = response.chunks_indexed || 0;
+      
+      // Format the success message including namespace info if present
+      let successMessage = `Successfully indexed ${fileCount} files (${chunkCount} chunks) from Google Drive`;
+      if (namespace) {
+        successMessage += ` in namespace '${namespace}'`;
+      }
+      successMessage += ".";
+      
       dispatch({ 
         type: ACTIONS.SET_SUCCESS, 
-        payload: `Successfully indexed ${fileCount} files (${chunkCount} chunks) from Google Drive.` 
+        payload: successMessage
       });
       // Refresh the file list
       fetchFiles();
@@ -144,6 +161,7 @@ const useGoogleDriveActions = () => {
     setFolderId,
     setRecursive,
     setEnhancedSlides,
+    setNamespace,
     clearError,
     clearSuccess,
     handleIndexFolder,

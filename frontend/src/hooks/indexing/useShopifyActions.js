@@ -52,6 +52,13 @@ const useShopifyActions = () => {
   }, [dispatch]);
   
   /**
+   * Set namespace
+   */
+  const setNamespace = useCallback((value) => {
+    dispatch({ type: ACTIONS.SET_NAMESPACE, payload: value });
+  }, [dispatch]);
+  
+  /**
    * Set the active tab
    */
   const setTab = useCallback((tabIndex) => {
@@ -74,8 +81,9 @@ const useShopifyActions = () => {
   
   /**
    * Index a Shopify store
+   * @param {string} namespace - Optional namespace for the index
    */
-  const handleIndexShopify = useCallback(async () => {
+  const handleIndexShopify = useCallback(async (namespace = null) => {
     if (!state.shopifyDomain && !state.shopifyDomain.includes('.')) {
       dispatch({ 
         type: ACTIONS.SET_ERROR, 
@@ -89,22 +97,32 @@ const useShopifyActions = () => {
     dispatch({ type: ACTIONS.SET_SUCCESS, payload: null });
     
     try {
-      const response = await indexApi.indexShopify(state.shopifyDomain);
+      const response = await indexApi.indexShopify(state.shopifyDomain, namespace);
+      
       // Extract product and article counts from the success message if available
       // Otherwise, use the message directly
       if (response.status === "success") {
+        let successMessage = '';
+        
         if (response.message && response.message.includes("Successfully indexed")) {
-          dispatch({ 
-            type: ACTIONS.SET_SUCCESS, 
-            payload: response.message 
-          });
+          successMessage = response.message;
         } else {
-          dispatch({ 
-            type: ACTIONS.SET_SUCCESS, 
-            payload: `Successfully indexed Shopify content.` 
-          });
+          successMessage = `Successfully indexed Shopify content`;
+          
+          // Add namespace to the success message if present
+          if (namespace) {
+            successMessage += ` in namespace '${namespace}'`;
+          }
+          
+          successMessage += ".";
         }
+        
+        dispatch({ 
+          type: ACTIONS.SET_SUCCESS, 
+          payload: successMessage
+        });
       }
+      
       // Refresh the content list
       fetchContent();
     } catch (err) {
@@ -161,6 +179,7 @@ const useShopifyActions = () => {
   return {
     fetchContent,
     setShopifyDomain,
+    setNamespace,
     setTab,
     clearError,
     clearSuccess,

@@ -51,18 +51,29 @@ def get_test_service():
 @router.post("/", response_model=ResponseMessage)
 async def chat(data: Message, chat_service: ChatService = Depends(get_chat_service)) -> ResponseMessage:
     """
-    Process chat message and return responses based on the specified mode.
-
-    Args:
-        data: Message object containing user input, session ID, and Mode.
-              Mode can be "rag", "no_rag", or "compare"
-        chat_service: ChatService instance from dependency
-
-    Returns:
-        ResponseMessage containing responses based on the specified mode:
-        - "rag": Only RAG-based response
-        - "no_rag": Only standard (non-RAG) response
-        - "compare": Both RAG and non-RAG responses
+    Process a chat message and return an AI response with optional sources.
+    
+    ## Request Parameters
+    - **message**: The user's question or message
+    - **session_id**: Unique ID for maintaining conversation context
+    - **mode**: Response mode
+        - `rag` (default): Knowledge-enhanced responses with sources
+        - `no_rag`: General knowledge only without sources
+        - `compare`: Return both RAG and non-RAG responses
+    - **system_prompt**: Optional custom prompt to override default behavior
+    - **prompt_style**: Response style preference
+        - `default`: Standard balanced response
+        - `detailed`: Comprehensive, thorough response
+        - `concise`: Brief, to-the-point response
+    - **metadata**: Additional context parameters
+        - `client_name`: Retrieve client-specific information (e.g., "LaserAway")
+        - `content_type`: Filter by content type ("article", "blog", "product")
+        - `topic`: Topic-specific information ("attribution", "facebook", "geo_testing")
+    
+    ## Response Fields
+    - **response.output**: The AI's answer
+    - **response.no_rag_output**: Non-RAG response (if mode is "compare")
+    - **sources**: Referenced documents with title, URL, and content excerpt
     """
     return await chat_service.chat(data)
 

@@ -6,6 +6,7 @@ const initialState = {
   indexing: false,
   content: [],
   shopifyDomain: '',
+  namespace: '',  // New field for namespace
   error: null,
   success: null,
   tab: 0, // 0: All, 1: Products, 2: Articles
@@ -22,6 +23,7 @@ export const ACTIONS = {
   SET_INDEXING: 'SET_INDEXING',
   SET_CONTENT: 'SET_CONTENT',
   SET_SHOPIFY_DOMAIN: 'SET_SHOPIFY_DOMAIN',
+  SET_NAMESPACE: 'SET_NAMESPACE',  // New action for namespace
   SET_ERROR: 'SET_ERROR',
   SET_SUCCESS: 'SET_SUCCESS',
   SET_TAB: 'SET_TAB',
@@ -43,6 +45,9 @@ const shopifyReducer = (state, action) => {
     
     case ACTIONS.SET_SHOPIFY_DOMAIN:
       return { ...state, shopifyDomain: action.payload };
+    
+    case ACTIONS.SET_NAMESPACE:
+      return { ...state, namespace: action.payload };
     
     case ACTIONS.SET_ERROR:
       return { ...state, error: action.payload };

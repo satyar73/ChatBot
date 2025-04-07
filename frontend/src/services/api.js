@@ -158,16 +158,78 @@ export const indexApi = {
     }
   },
   
-  // Google Drive Indexing
-  indexGoogleDrive: async (folderId = null, recursive = true, enhancedSlides = false) => {
+  // Unified index API
+  createIndex: async (source, options = {}, namespace = null) => {
     try {
-      // Send folder_id as a query parameter instead of in the request body
-      const params = {};
-      if (folderId) params.folder_id = folderId;
-      if (recursive !== undefined) params.recursive = recursive;
-      if (enhancedSlides !== undefined) params.enhanced_slides = enhancedSlides;
+      const data = {
+        source,
+        options,
+      };
       
-      const response = await api.post('/index/google-drive', {}, { params });
+      if (namespace) {
+        data.namespace = namespace;
+      }
+      
+      const response = await api.post('/index', data);
+      return response.data;
+    } catch (error) {
+      console.error(`Error creating ${source} index:`, error);
+      throw error;
+    }
+  },
+  
+  getIndexInfo: async (source = null) => {
+    try {
+      const params = source ? { source } : {};
+      const response = await api.get('/index', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Error getting index info:', error);
+      throw error;
+    }
+  },
+  
+  deleteIndex: async (source = null, namespace = null) => {
+    try {
+      const params = {};
+      if (source) params.source = source;
+      if (namespace) params.namespace = namespace;
+      
+      const response = await api.delete('/index', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Error deleting index:', error);
+      throw error;
+    }
+  },
+  
+  getSourceFiles: async (source) => {
+    try {
+      const response = await api.get('/index/files', { params: { source } });
+      return response.data;
+    } catch (error) {
+      console.error(`Error getting ${source} files:`, error);
+      throw error;
+    }
+  },
+  
+  // Legacy API methods for backward compatibility
+  
+  // Google Drive Indexing
+  indexGoogleDrive: async (folderId = null, recursive = true, enhancedSlides = false, namespace = null) => {
+    try {
+      const options = {
+        folder_id: folderId,
+        recursive: recursive,
+        enhanced_slides: enhancedSlides
+      };
+      
+      // Call the unified API directly
+      const response = await api.post('/index', {
+        source: 'google_drive',
+        options,
+        namespace
+      });
       return response.data;
     } catch (error) {
       console.error('Error indexing Google Drive:', error);
@@ -177,7 +239,7 @@ export const indexApi = {
   
   listGoogleDriveFiles: async () => {
     try {
-      const response = await api.get('/index/google-drive/files');
+      const response = await api.get('/index/files', { params: { source: 'google_drive' } });
       return response.data;
     } catch (error) {
       console.error('Error listing Google Drive files:', error);
@@ -186,10 +248,18 @@ export const indexApi = {
   },
   
   // Shopify Indexing
-  indexShopify: async (shopifyDomain = null) => {
+  indexShopify: async (shopifyDomain = null, namespace = null) => {
     try {
-      // Using the correct endpoint based on routes.py - it's just /index/
-      const response = await api.post('/index/', { store: shopifyDomain });
+      const options = {
+        store: shopifyDomain
+      };
+      
+      // Call the unified API directly
+      const response = await api.post('/index', {
+        source: 'shopify',
+        options,
+        namespace
+      });
       return response.data;
     } catch (error) {
       console.error('Error indexing Shopify:', error);
@@ -199,8 +269,7 @@ export const indexApi = {
   
   listShopifyContent: async () => {
     try {
-      // Using the general index info endpoint
-      const response = await api.get('/index/');
+      const response = await api.get('/index', { params: { source: 'shopify' } });
       return response.data;
     } catch (error) {
       console.error('Error listing Shopify content:', error);

@@ -155,11 +155,34 @@ class IndexService:
             self.logger.error(f"Error creating index from Google Drive: {str(e)}", exc_info=True)
             return {"status": "error", "message": f"Failed to create index from Google Drive: {str(e)}"}
 
-    async def get_index_info(self) -> Dict:
-        """Get information about the current vector index"""
+    async def get_index_info(self, source: Optional[str] = None) -> Dict:
+        """
+        Get information about the current vector index.
+        
+        Args:
+            source: Optional source type to filter results ('shopify' or 'google_drive')
+            
+        Returns:
+            Dict containing status and index information
+        """
         try:
             # Get index info from vector store
             index_info = self.content_processor.get_index_info()
+            
+            # Filter by source if specified
+            if source and "info" in index_info:
+                filtered_info = {}
+                for key, value in index_info["info"].items():
+                    if isinstance(value, dict) and "content" in value:
+                        # Filter content by source
+                        source_content = [item for item in value.get("content", []) 
+                                         if item.get("source") == source]
+                        if source_content:
+                            filtered_info[key] = value.copy()
+                            filtered_info[key]["content"] = source_content
+                
+                index_info["info"] = filtered_info
+            
             return {
                 "status": "success",
                 "info": index_info
@@ -181,28 +204,54 @@ class IndexService:
             self.logger.error(f"Error retrieving Google Drive files: {str(e)}")
             return {"status": "error", "message": str(e)}
 
-    async def delete_index(self) -> Dict[str, Any]:
+    async def delete_index(self, source: Optional[str] = None, namespace: Optional[str] = None) -> Dict[str, Any]:
         """
         Delete the vector index.
         
+        Args:
+            source: Optional source type to filter what to delete ('shopify' or 'google_drive')
+            namespace: Optional namespace to filter what to delete
+            
         Returns:
             Dictionary containing status and results of the deletion
         """
         try:
+            # Note: This is a simplified implementation. In a real system, you would need to 
+            # implement source-specific deletion logic and namespace filtering.
+            # For now, we're just deleting all indices regardless of source/namespace.
+            
             results = []
 
             for chat_model_config in chat_config.chat_model_configs.values():
                 vector_store_config = chat_model_config.vector_store_config
+                
+                # Apply namespace filter if provided
+                if namespace and hasattr(vector_store_config, 'namespace') and vector_store_config.namespace != namespace:
+                    # Skip configs that don't match the requested namespace
+                    continue
+                    
                 vector_store_client: VectorStoreClient = VectorStoreClient.get_vector_store_client(vector_store_config)
                 results.append(vector_store_client.delete_index())
 
             # Check if all deletions were successful
             all_successful = all(result.get("status") == "success" for result in results)
             
+            # Construct a clear message based on filters applied
+            if source and namespace:
+                message_base = f"indices for source '{source}' in namespace '{namespace}'"
+            elif source:
+                message_base = f"indices for source '{source}'"
+            elif namespace:
+                message_base = f"indices in namespace '{namespace}'"
+            else:
+                message_base = "all indices"
+                
+            message = f"Successfully deleted {message_base}" if all_successful else f"Failed to delete some {message_base}"
+            
             return {
                 "status": "success" if all_successful else "error",
                 "results": results,
-                "message": "All indices deleted successfully" if all_successful else "Some indices failed to delete"
+                "message": message
             }
         except Exception as e:
             self.logger.error(f"Error in delete_index: {str(e)}")

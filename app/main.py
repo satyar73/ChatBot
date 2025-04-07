@@ -73,7 +73,16 @@ logger.setLevel("INFO")
 app = FastAPI(
     title="AttributionGPT Backend",
     version="1.0",
-    description="Backend for AttributionGPT with chat and index management",
+    description="""
+    Backend for AttributionGPT with chat, indexing, and document generation capabilities.
+    
+    ## Key Endpoints:
+    - `/api/chat/`: Send questions and receive AI responses with sources
+    - `/api/index/`: Manage content indexing (Google Drive & Shopify)
+    - `/api/create-document`: Generate Google Docs or Slides from chat responses
+    
+    For detailed usage examples, refer to the schema sections below.
+    """,
     lifespan=lifespan,
 )
 

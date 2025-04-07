@@ -8,6 +8,7 @@ const initialState = {
   folderId: '',
   recursive: true,
   enhancedSlides: false,
+  namespace: '',  // New field for namespace
   error: null,
   success: null,
   stats: {
@@ -24,6 +25,7 @@ export const ACTIONS = {
   SET_FOLDER_ID: 'SET_FOLDER_ID',
   SET_RECURSIVE: 'SET_RECURSIVE',
   SET_ENHANCED_SLIDES: 'SET_ENHANCED_SLIDES',
+  SET_NAMESPACE: 'SET_NAMESPACE',  // New action for namespace
   SET_ERROR: 'SET_ERROR',
   SET_SUCCESS: 'SET_SUCCESS',
   SET_STATS: 'SET_STATS',
@@ -50,6 +52,9 @@ const googleDriveReducer = (state, action) => {
     
     case ACTIONS.SET_ENHANCED_SLIDES:
       return { ...state, enhancedSlides: action.payload };
+    
+    case ACTIONS.SET_NAMESPACE:
+      return { ...state, namespace: action.payload };
     
     case ACTIONS.SET_ERROR:
       return { ...state, error: action.payload };
