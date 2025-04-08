@@ -16,7 +16,6 @@ from dotenv import load_dotenv
 
 from app.config.chat_model_config import ChatModelConfig
 from app.config.llm_proxy_config import LlmProxyType
-from app.config.vector_store_config import PineconeConfig
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)

@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Dict
 
 from app.config.llm_proxy_config import LlmProxyConfig
 from app.config.vector_store_config import VectorStoreConfig
@@ -47,5 +48,21 @@ class ChatModelConfig:
         return self._embedding_context_length
         
     def get_embedding_dimensions(self)->int:
-        """Get the dimensions for a specific embedding model"""
-        return self.vector_store_config.get_embedding_dimensions(self.embedding_model)
+        """
+        Get the dimensions for configured embedding model.
+        This is a base implementation that can be overridden by specific vector store configs.
+        
+        Args:
+            model_name: Name of the embedding model
+            
+        Returns:
+            Number of dimensions for the embedding model
+        """
+        # Common OpenAI embedding model dimensions
+        model_dimensions: Dict[str, int] = {
+            "text-embedding-3-small": 1536,
+            "text-embedding-3-large": 3072,
+            "text-embedding-ada-002": 1536,
+            # Add more models as needed
+        }
+        return model_dimensions.get(self.embedding_model, 1536)  # Default to 1536 if unknown

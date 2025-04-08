@@ -2,6 +2,6 @@
 /frontend/node_modules
 /logs
 /.vscode
-/data/cache
+/data/*
 frontend/package-lock.json
 .DS_Store

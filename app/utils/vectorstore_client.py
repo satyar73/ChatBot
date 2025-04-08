@@ -12,6 +12,7 @@ from app.config.chat_config import chat_config
 from app.config.chat_model_config import ChatModelConfig, CloudProvider
 from app.config.vector_store_config import NeonConfig, PineconeConfig, VectorStoreConfig
 from app.services.common.enhancement_service import enhancement_service
+from app.utils.llm_client import LLMClientManager
 from app.utils.logging_utils import get_logger
 from app.utils.ollama_client import OllamaClientManager
 

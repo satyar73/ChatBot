@@ -5,6 +5,7 @@ import os
 import copy
 from typing import List, Dict, Any, Optional
 
+from app.config.chat_model_config import ChatModelConfig
 from app.utils.logging_utils import get_logger
 from app.config.chat_config import ChatConfig, chat_config
 from app.services.common.enhancement_service import enhancement_service
@@ -90,8 +91,7 @@ class ContentProcessor:
         self.logger.info(f"Saved {len(all_chunks)} chunks to {output_path}")
         return output_path
 
-    def prepare_documents_for_indexing(self, records: List[Dict[str, Any]]) \
-                                                -> List[Document]:
+    def prepare_documents_for_indexing(self, chat_model_config: ChatModelConfig, records: List[Dict[str, Any]]) -> List[Document]:
         """
         Prepare documents for indexing by splitting content into chunks and adding metadata.
         
@@ -101,7 +101,7 @@ class ContentProcessor:
         Returns:
             List of Document objects ready for indexing
         """
-        docs = []
+        docs: List[Document] = []
 
         # Create a list to store all chunks for debugging/logging
         all_chunks = []

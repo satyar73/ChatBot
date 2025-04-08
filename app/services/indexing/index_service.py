@@ -127,12 +127,12 @@ class IndexService:
                     "message": "No records found in Google Drive"
                 }
             
-            docs = List[Document]
+            docs: List[Document] = []
             success = True
             for chat_model_config in chat_config.chat_model_configs.values():
                 # Prepare documents for indexing
                 self.logger.debug("Preparing documents for indexing")
-                docs.append(self.content_processor.prepare_documents_for_indexing(chat_model_config, records))
+                docs += self.content_processor.prepare_documents_for_indexing(chat_model_config, records)
                 self.logger.info(f"Prepared {len(docs)} documents for indexing")
                 
                 # Index the documents in vector store
