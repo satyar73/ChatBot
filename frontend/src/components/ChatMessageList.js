@@ -34,12 +34,21 @@ const messageStyle = {
     color: 'white',
     alignSelf: 'flex-start',
     borderRadius: '18px 18px 18px 0',
+  },
+  needl: {
+    bgcolor: 'warning.light',
+    color: 'white',
+    alignSelf: 'flex-start',
+    borderRadius: '18px 18px 18px 0',
   }
 };
 
 const ChatMessageList = () => {
   const { state, chatEndRef } = useChatContext();
-  const { messages, loading } = state;
+  const { messages, loading, responseMode } = state;
+  
+  console.log("CHAT MESSAGE LIST - Current messages:", messages);
+  console.log("CHAT MESSAGE LIST - Current response mode:", responseMode);
 
   return (
     <Paper 
@@ -62,46 +71,77 @@ const ChatMessageList = () => {
         </Box>
       )}
       
-      {messages.map((msg, index) => (
-        <Box 
-          key={index} 
-          sx={{ 
-            display: 'flex',
-            flexDirection: 'row',
-            gap: 1,
-            justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
-          }}
-        >
-          {msg.role !== 'user' && (
-            <Avatar 
-              sx={{ bgcolor: msg.type === 'rag' ? 'success.main' : msg.type === 'standard' ? 'info.main' : 'grey.500' }}
-            >
-              {msg.type === 'rag' ? 'R' : msg.type === 'standard' ? 'S' : 'A'}
-            </Avatar>
-          )}
-          
-          <Paper
-            elevation={1}
-            sx={{
-              p: 2,
-              maxWidth: '70%',
-              ...messageStyle[msg.type || msg.role]
+      {messages.map((msg, index) => {
+        // Log each message for debugging
+        console.log(`Message ${index}:`, JSON.stringify(msg));
+        
+        // Assign the message type for styling and labels
+        let messageType = msg.type || msg.role;
+        
+        // Check for Needl messages - look for specific flags
+        if (msg.role === 'assistant') {
+          if (msg.type === 'needl' || msg.originalMode === 'needl' || msg.isNeedlResponse) {
+            console.log(`Message ${index} identified as Needl response`);
+            messageType = 'needl';
+          } else if (responseMode === 'needl') {
+            console.log(`Message ${index} assigned Needl mode from current responseMode`);
+            messageType = 'needl';
+          }
+        }
+
+        return (
+          <Box 
+            key={index} 
+            sx={{ 
+              display: 'flex',
+              flexDirection: 'row',
+              gap: 1,
+              justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
             }}
-            className="markdown-content"
           >
-            {msg.type && (
-              <Typography variant="caption" sx={{ fontWeight: 'bold' }}>
-                {msg.type === 'rag' ? 'RAG Response' : 'Standard Response'}
-              </Typography>
+            {msg.role !== 'user' && (
+              <Avatar 
+                sx={{ 
+                  bgcolor: 
+                    messageType === 'rag' ? 'success.main' : 
+                    messageType === 'standard' ? 'info.main' : 
+                    messageType === 'needl' ? 'warning.main' :
+                    'grey.500' 
+                }}
+              >
+                {messageType === 'rag' ? 'R' : 
+                 messageType === 'standard' ? 'S' : 
+                 messageType === 'needl' ? 'N' : 'A'}
+              </Avatar>
             )}
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}</ReactMarkdown>
-          </Paper>
-          
-          {msg.role === 'user' && (
-            <Avatar sx={{ bgcolor: 'primary.main' }}>U</Avatar>
-          )}
-        </Box>
-      ))}
+            
+            <Paper
+              elevation={1}
+              sx={{
+                p: 2,
+                maxWidth: '70%',
+                ...messageStyle[messageType]
+              }}
+              className="markdown-content"
+            >
+              {/* Always show message type label for AI responses */}
+              {msg.role === 'assistant' && (
+                <Typography variant="caption" sx={{ fontWeight: 'bold', display: 'block', mb: 1 }}>
+                  {messageType === 'rag' ? 'RAG Response' : 
+                   messageType === 'standard' ? 'Standard Response' :
+                   messageType === 'needl' ? 'Needl Response' : 
+                   'AI Response'}
+                </Typography>
+              )}
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}</ReactMarkdown>
+            </Paper>
+            
+            {msg.role === 'user' && (
+              <Avatar sx={{ bgcolor: 'primary.main' }}>U</Avatar>
+            )}
+          </Box>
+        );
+      })}
       
       {loading && (
         <Box sx={{ display: 'flex', justifyContent: 'center', my: 2 }}>

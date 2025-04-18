@@ -34,7 +34,7 @@ class ResponseStrategy:
         
         Args:
             query: The user's query
-            mode: The response mode (rag, no_rag, or dual)
+            mode: The response mode (rag, no_rag, both, needl)
             chat_service: The chat service instance
             agent_manager: The agent manager instance
             
@@ -45,6 +45,8 @@ class ResponseStrategy:
             return NonRAGResponseStrategy(chat_service, agent_manager)
         elif mode == "both":
             return DualResponseStrategy(chat_service, agent_manager)
+        elif mode == "needl":
+            return NeedlResponseStrategy(chat_service, agent_manager)
         elif query.lower().startswith("database:"):
             return DatabaseResponseStrategy(chat_service, agent_manager)
         else:
@@ -548,3 +550,48 @@ class DatabaseResponseStrategy(ResponseStrategy):
         # Return the database response as the RAG response (since it's the primary response)
         # and None as the non-RAG response
         return db_response, None, [query]
+        
+class NeedlResponseStrategy(ResponseStrategy):
+    """Strategy for handling queries using the Needl.ai API."""
+    
+    async def execute(self, 
+                    chat_model_config: ChatModelConfig, 
+                    query: str, 
+                    chat_history: ChatHistory, 
+                    custom_system_prompt: str = None,
+                    prompt_style: str = "default",
+                    client_name: str = None) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], List[str]]:
+        """
+        Execute the Needl response strategy.
+        
+        Args:
+            chat_model_config: Configuration for the chat model (not used for Needl)
+            query: The user's query to send to Needl
+            chat_history: Chat history (not used for Needl)
+            custom_system_prompt: Not used for Needl
+            prompt_style: Not used for Needl
+            client_name: Not used for Needl
+            
+        Returns:
+            Tuple of (needl_response, None, [query])
+            The needl_response is formatted to match the expected RAG response format
+        """
+        from app.services.needl_service import needl_service
+        
+        self.logger.info(f"Executing Needl query: {query[:100]}...")
+        
+        # Query the Needl API
+        needl_response = await needl_service.query(query)
+        
+        # Format the response to match the expected format
+        formatted_response = needl_service.format_response_as_chat_message(needl_response)
+        
+        # Add the raw Needl response for debugging/reference
+        if isinstance(formatted_response, dict) and "response" in formatted_response:
+            formatted_response["response"]["needl_raw_response"] = needl_response
+        
+        self.logger.info("Needl query executed successfully")
+        
+        # Return the Needl response as the RAG response (since it's the primary response)
+        # and None as the non-RAG response
+        return formatted_response, None, [query]

@@ -78,6 +78,15 @@ const ChatHeader = () => {
           >
             Compare
           </Button>
+          <Button 
+            size="small"
+            onClick={() => setResponseMode("needl")}
+            variant={responseMode === "needl" ? "contained" : "text"}
+            color="warning"
+            sx={{ borderRadius: 0 }}
+          >
+            Needl
+          </Button>
         </Box>
         
         {/* Prompt Style Selector with badge showing current style */}

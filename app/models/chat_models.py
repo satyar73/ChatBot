@@ -27,7 +27,12 @@ class ChatHistory(BaseChatMessageHistory):
             self.messages.append(HumanMessage(content=message))
 
     def add_ai_message(self, message: str):
-        self.messages.append(AIMessage(content=message))
+        if message is None:
+            # Handle None message by using an empty string instead
+            self.messages.append(AIMessage(content=""))
+        else:
+            # Normal case - append the message
+            self.messages.append(AIMessage(content=message))
 
     def get_messages(self) -> list:
         return self.messages
@@ -40,7 +45,7 @@ class Message(BaseModel):
     """Model for user message with session identification."""
     message: str = Field(..., description="The user's message or question")
     session_id: str = Field(..., description="Unique identifier for the chat session")
-    mode: str = Field("rag", description="Query mode: 'rag' (knowledge-enhanced), 'no_rag' (general knowledge only), or 'compare' (both responses)")
+    mode: str = Field("rag", description="Query mode: 'rag' (knowledge-enhanced), 'no_rag' (general knowledge only), 'both' (compare responses), or 'needl' (use Needl.ai API)")
     system_prompt: Optional[str] = Field(None, description="Custom system prompt to override the default behavior")
     prompt_style: Optional[str] = Field("default", description="Response style: 'default', 'detailed' (comprehensive), or 'concise' (brief)")
     metadata: Optional[Dict[str, Any]] = Field(
@@ -65,6 +70,12 @@ class Message(BaseModel):
                         "client_name": "LaserAway",
                         "topic": "facebook"
                     }
+                },
+                {
+                    "message": "Do platforms typically over credit themselves in self attribution frameworks?",
+                    "session_id": "user789",
+                    "mode": "needl",
+                    "prompt_style": "default"
                 }
             ]
         }

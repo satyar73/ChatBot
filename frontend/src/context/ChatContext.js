@@ -5,7 +5,7 @@ const initialState = {
   messages: [],
   input: '',
   loading: false,
-  responseMode: 'rag', // Three modes: "rag", "standard", "compare"
+  responseMode: 'rag', // Four modes: "rag", "standard", "compare", "needl" (needl uses direct API responses)
   promptStyle: 'default', // Three styles: "default", "detailed", "concise"
   sessionId: null,
   error: null,
@@ -163,8 +163,15 @@ export const ChatProvider = ({ children }) => {
             continue;
           }
           
-          // CASE 2: RAG mode
-          if (state.responseMode === 'rag') {
+          // CASE 2: RAG mode or Needl mode
+          if (state.responseMode === 'rag' || state.responseMode === 'needl') {
+            // Special handling for Needl mode - just pass it through 
+            if (state.responseMode === 'needl' && (msg.originalMode === 'needl' || msg.isNeedlResponse)) {
+              console.log("CONTEXT: Preserving Needl message as-is", msg);
+              newMessages.push(msg);
+              continue;
+            }
+
             if (msg.type) {
               // If it's a typed message in compare mode, only keep RAG messages
               if (msg.type === 'rag') {
@@ -202,7 +209,6 @@ export const ChatProvider = ({ children }) => {
               continue;
             }
 
-            console.assert(false, 'Message should have hidden content');
             // No type or hidden content, keep as is
             newMessages.push(msg);
             continue;

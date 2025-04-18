@@ -28,6 +28,8 @@ export const chatApi = {
         mode = "no_rag";
       } else if (responseMode === "compare") {
         mode = "compare";
+      } else if (responseMode === "needl") {
+        mode = "needl";
       }
       
       // Prepare request payload, including system_prompt if provided

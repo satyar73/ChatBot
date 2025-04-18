@@ -95,29 +95,49 @@ class ChatService:
             if cache_hit:
                 self.logger.info(f"Cache hit for query_hash={query_hash}")
                 
-                # Extract cached data
-                rag_output = cached_response["rag_response"]
-                no_rag_output = cached_response["no_rag_response"]
-                sources = cached_response.get("sources", [])
-                
-                # Add the user message and the cached response to chat history
+                # Add the user message to chat history
                 chat_history.add_user_message(user_input)
                 
-                # Determine which response to add to history based on mode
-                primary_output = no_rag_output if mode == "no_rag" else rag_output
-                chat_history.add_ai_message(primary_output)
+                # Extract cached data based on mode
+                if mode == "needl":
+                    # For Needl mode, we might have a different response format
+                    needl_output = cached_response.get("needl_response")
+                    chat_history.add_ai_message(needl_output)
+                    primary_output = needl_output
+                    sources = cached_response.get("sources", [])
+                else:
+                    # Standard modes (rag, no_rag, both)
+                    rag_output = cached_response.get("rag_response")
+                    no_rag_output = cached_response.get("no_rag_response")
+                    sources = cached_response.get("sources", [])
+                    
+                    # Determine which response to add to history based on mode
+                    primary_output = no_rag_output if mode == "no_rag" else rag_output
+                    chat_history.add_ai_message(primary_output)
                 
                 # Format message history
                 formatted_history = self._format_history(chat_history.get_messages())
                 
                 # Create response content with cached data
-                response_content = ResponseContent(
-                                        input=user_input,
-                                        history=formatted_history,
-                                        output=rag_output if mode != "no_rag" else no_rag_output,
-                                        no_rag_output=no_rag_output if mode != "rag" else None,
-                                        intermediate_steps=[]  # No intermediate steps for cached responses
-                                    )
+                if mode == "needl":
+                    # For Needl mode, use needl_response as the output
+                    needl_output = cached_response.get("needl_response", "")
+                    response_content = ResponseContent(
+                                            input=user_input,
+                                            history=formatted_history,
+                                            output=needl_output,  # Use Needl response as the primary output
+                                            no_rag_output=None,   # No secondary output for Needl mode
+                                            intermediate_steps=[]  # No intermediate steps for cached responses
+                                        )
+                else:
+                    # Standard modes (rag, no_rag, both)
+                    response_content = ResponseContent(
+                                            input=user_input,
+                                            history=formatted_history,
+                                            output=rag_output if mode != "no_rag" else no_rag_output,
+                                            no_rag_output=no_rag_output if mode != "rag" else None,
+                                            intermediate_steps=[]  # No intermediate steps for cached responses
+                                        )
                 
                 # Log cache hit stats
                 response_time = time.time() - start_time
@@ -160,10 +180,15 @@ class ChatService:
             document_question = data.metadata['document_question']
             self.logger.info(f"Document question found in metadata: {document_question}")
         
-        # Determine which mode/strategy to use, for now handling only three modes
-        mode = "both" if mode == "dual" or mode == "compare" else mode
-
-        mode = "no_rag" if mode != "both" and mode != "rag" else mode
+        # Determine which mode/strategy to use
+        # Map 'dual' and 'compare' to 'both'
+        if mode in ["dual", "compare"]:
+            mode = "both"
+            
+        # Keep special modes like 'needl' as is
+        # Only remap other modes to standard options
+        if mode not in ["both", "rag", "needl"]:
+            mode = "no_rag"
 
         # Get the appropriate strategy
         strategy = ResponseStrategy.get_strategy(actual_query, mode, chat_service, chat_service.agent_manager)
@@ -242,7 +267,15 @@ class ChatService:
         
         # Determine which response to add to the chat history based on mode.
         # While redundant to the above, it is easier to have the logic separate
-        if mode == "no_rag" and no_rag_response is not None:
+        if mode == "needl" and rag_response is not None:
+            self.logger.debug("Using needl_response as primary response (mode=needl)")
+            # For Needl mode, use the rag_response but access it differently since it's formatted from Needl API
+            if isinstance(rag_response, dict) and "response" in rag_response:
+                primary_output = rag_response["response"].get("output", "")
+                primary_response = {"output": primary_output}
+            else:
+                primary_response = {"output": "Could not parse Needl response correctly"}
+        elif mode == "no_rag" and no_rag_response is not None:
             self.logger.debug("Using no_rag_response as primary response (mode=no_rag)")
             primary_response = no_rag_response
         elif rag_response is not None:
@@ -257,17 +290,23 @@ class ChatService:
         
         # Add the primary response to chat history
         if isinstance(primary_response, dict):
-            chat_history.add_ai_message(primary_response['output'])
+            # Make sure 'output' key exists
+            if 'output' in primary_response:
+                chat_history.add_ai_message(primary_response['output'])
+            else:
+                self.logger.error(f"Primary response missing 'output' key: {primary_response}")
+                chat_history.add_ai_message("Error: Could not extract response output")
         else:
             chat_history.add_ai_message(primary_response)
         
         # Format message history for response
         formatted_history = self._format_history(chat_history.get_messages())
 
-        
         # Determine intermediate steps
         intermediate_steps = []
-        if mode != "no_rag" and isinstance(rag_response, dict):
+        if mode == "needl":
+                intermediate_steps = []
+        elif mode != "no_rag" and isinstance(rag_response, dict):
             intermediate_steps = rag_response.get('intermediate_steps', [])
         
         response_content = ResponseContent(
@@ -300,16 +339,35 @@ class ChatService:
             response_content.intermediate_steps.append(feature_info)
         
         # Cache the generated response
-        chat_cache.cache_response(
-                            query_hash=query_hash,
-                            user_input=user_input,
-                            rag_response=rag_output,
-                            no_rag_response=no_rag_output,
-                            sources=sources,
-                            system_prompt=custom_system_prompt,
-                            prompt_style=prompt_style,
-                            mode=mode
-                        )
+        if mode == "needl":
+            # For Needl mode, we store the response in the needl_response field
+            needl_output = primary_output  # Use the primary output as the Needl response
+            
+            chat_cache.cache_response(
+                                query_hash=query_hash,
+                                user_input=user_input,
+                                rag_response=None,
+                                no_rag_response=None,
+                                needl_response=needl_output,
+                                sources=sources,
+                                system_prompt=custom_system_prompt,
+                                prompt_style=prompt_style,
+                                mode=mode,
+                                client_name=client_name
+                            )
+        else:
+            # For standard modes, use the regular fields
+            chat_cache.cache_response(
+                                query_hash=query_hash,
+                                user_input=user_input,
+                                rag_response=rag_output,
+                                no_rag_response=no_rag_output,
+                                sources=sources,
+                                system_prompt=custom_system_prompt,
+                                prompt_style=prompt_style,
+                                mode=mode,
+                                client_name=client_name
+                            )
         
         # Log cache miss stats
         response_time = time.time() - start_time

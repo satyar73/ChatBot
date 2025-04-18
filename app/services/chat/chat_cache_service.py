@@ -179,21 +179,21 @@ class ChatCacheService:
         try:
             conn = sqlite3.connect(str(cache_config.CACHE_DB_PATH))
             cursor = conn.cursor()
-            
-            # Get cached response
+
+            # Get cached response with appropriate columns
             cursor.execute(
-                "SELECT rag_response, no_rag_response, sources, timestamp,"
-                            " hit_count, system_prompt, prompt_style, mode, client_name"
-                            " FROM chat_cache"
-                            " WHERE query_hash = ?",
-                (query_hash,)
-            )
+            "SELECT rag_response, no_rag_response, needl_response, sources, timestamp,"
+                                    " hit_count, system_prompt, prompt_style, mode, client_name"
+                                    " FROM chat_cache"
+                                    " WHERE query_hash = ?",
+                        (query_hash,)
+                    )
             result = cursor.fetchone()
-            
+
             if result:
-                (rag_response, no_rag_response, sources_json, timestamp,
-                 hit_count, system_prompt, prompt_style, mode, client_name) = result
-                
+                (rag_response, no_rag_response, needl_response, sources_json, timestamp,
+                        hit_count, system_prompt, prompt_style, mode, client_name) = result
+                # Use old schema if needl_response column doesn't exist
                 # Check if cache entry has expired
                 age_in_seconds = time.time() - timestamp
                 if age_in_seconds > cache_config.CACHE_TTL:
@@ -207,7 +207,7 @@ class ChatCacheService:
                 
                 # Update hit count
                 cursor.execute(
-                    "UPDATE chat_cache SET hit_count = hit_count + 1 WHERE query_hash = ?", 
+                    "UPDATE chat_cache SET hit_count = hit_count + 1 WHERE query_hash = ?",
                     (query_hash,)
                 )
                 conn.commit()
@@ -216,31 +216,34 @@ class ChatCacheService:
                 sources = json.loads(sources_json) if sources_json else []
                 
                 cached_response = {
-                    "rag_response": rag_response,
-                    "no_rag_response": no_rag_response,
-                    "sources": sources,
-                    "system_prompt": system_prompt,
-                    "prompt_style": prompt_style,
-                    "mode": mode
+                        "rag_response": rag_response,
+                        "no_rag_response": no_rag_response,
+                        "sources": sources,
+                        "system_prompt": system_prompt,
+                        "needl_response": needl_response,
+                        "prompt_style": prompt_style,
+                        "mode": mode
                 }
                 
                 self.logger.info(f"Cache hit for {query_hash}, hit count: {hit_count + 1}")
                 conn.close()
                 return cached_response, True
-            
+
             conn.close()
             self.logger.info(f"Cache miss for {query_hash}")
             return None, False
-            
+
         except Exception as e:
             self.logger.error(f"Error retrieving from cache: {e}")
             return None, False
-    
+
+
     def cache_response(self, 
                       query_hash: str, 
                       user_input: str, 
-                      rag_response: str, 
-                      no_rag_response: str, 
+                      rag_response: str = None, 
+                      no_rag_response: str = None,
+                      needl_response: str = None,
                       sources: List = None,
                       system_prompt: str = None,
                       prompt_style: str = "default",
@@ -254,6 +257,7 @@ class ChatCacheService:
             user_input: Original user input
             rag_response: Response with RAG
             no_rag_response: Response without RAG
+            needl_response: Response with Needl
             sources: Optional list of sources
             system_prompt: Optional custom system prompt
             prompt_style: Optional prompt style (default, detailed, concise)
@@ -270,7 +274,48 @@ class ChatCacheService:
             cursor = conn.cursor()
             
             # Convert sources to JSON string
-            sources_json = json.dumps(sources) if sources else None
+            # Handle Pydantic objects by converting them to dictionaries first
+            if sources:
+                try:
+                    # Check if the sources are Pydantic objects
+                    if hasattr(sources[0], 'dict') and callable(sources[0].dict):
+                        # Convert Pydantic objects to dictionaries
+                        sources_dicts = [source.dict() for source in sources]
+                        sources_json = json.dumps(sources_dicts)
+                    else:
+                        # If not Pydantic objects, try regular JSON serialization
+                        sources_json = json.dumps(sources)
+                except Exception as e:
+                    self.logger.error(f"Error serializing sources to JSON: {e}")
+                    # Fallback: extract key attributes manually
+                    try:
+                        sources_dicts = []
+                        for source in sources:
+                            source_dict = {
+                                "title": getattr(source, "title", "Unknown"),
+                                "url": getattr(source, "url", ""),
+                                "content": getattr(source, "content", "")
+                            }
+                            sources_dicts.append(source_dict)
+                        sources_json = json.dumps(sources_dicts)
+                    except Exception as e2:
+                        self.logger.error(f"Fallback serialization also failed: {e2}")
+                        sources_json = None
+            else:
+                sources_json = None
+            
+            # Make sure we have at least one non-null response
+            if rag_response is None and no_rag_response is None and needl_response is None:
+                self.logger.error(f"Cannot cache response: all response types are None")
+                return False
+                
+            # Check if we need to alter the table to add the needl_response column
+            try:
+                cursor.execute("SELECT needl_response FROM chat_cache LIMIT 1")
+            except sqlite3.OperationalError:
+                # Column doesn't exist, add it
+                self.logger.info("Adding needl_response column to chat_cache table")
+                cursor.execute("ALTER TABLE chat_cache ADD COLUMN needl_response TEXT")
             
             # Store response with all fields
             cursor.execute(
@@ -278,11 +323,11 @@ class ChatCacheService:
                 INSERT OR REPLACE 
                     INTO
                 chat_cache 
-                (query_hash, user_input, rag_response, no_rag_response, sources,
+                (query_hash, user_input, rag_response, no_rag_response, needl_response, sources,
                 system_prompt, prompt_style, mode, client_name, timestamp, hit_count) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 """, 
-                (query_hash, user_input, rag_response, no_rag_response,
+                (query_hash, user_input, rag_response, no_rag_response, needl_response,
                  sources_json, system_prompt, prompt_style, mode, client_name, time.time())
             )
             

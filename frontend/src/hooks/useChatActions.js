@@ -116,7 +116,26 @@ const useChatActions = () => {
       const { ragResponse, standardResponse } = processResponses(response);
       
       // Add responses based on the current display mode
-      if (state.responseMode === "compare") {
+
+      // Just use role: 'assistant' and add the text, no other flags or data
+      if (state.responseMode === "needl") {
+        // For Needl mode, display both the response and sources
+        const content = ragResponse || "No Needl response available";
+        
+        // Include sources in the message if available
+        const sources = response.sources || [];
+        const sourceText = sources.length > 0 ? 
+          "\n\n**Sources:**\n" + sources.map(s => `- [${s.title}](${s.url})`).join("\n") : 
+          "";
+          
+        dispatch({
+          type: ACTIONS.ADD_ASSISTANT_MESSAGE,
+          payload: {
+            role: 'assistant',
+            content: content + sourceText
+          }
+        });
+      } else if (state.responseMode === "compare") {
         // Show both responses side by side
         const assistantMessages = [];
         
