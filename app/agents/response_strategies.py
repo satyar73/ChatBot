@@ -576,7 +576,7 @@ class NeedlResponseStrategy(ResponseStrategy):
             Tuple of (needl_response, None, [query])
             The needl_response is formatted to match the expected RAG response format
         """
-        from app.services.needl_service import needl_service
+        from app.services.chat.needl_service import needl_service
         
         self.logger.info(f"Executing Needl query: {query[:100]}...")
         
