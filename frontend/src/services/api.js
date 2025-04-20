@@ -14,8 +14,13 @@ const api = axios.create({
 export const chatApi = {
   sendMessage: async (message, responseMode = "rag", sessionId = null, systemPrompt = null, promptStyle = "default") => {
     try {
-      // Generate a random session ID if not provided
-      const session_id = sessionId || `session_${Math.random().toString(36).substring(2, 15)}`;
+      // Use the provided session ID or get it from localStorage
+      const session_id = sessionId || localStorage.getItem('chatSessionId') || `session_${Math.random().toString(36).substring(2, 15)}`;
+      
+      // Save the session ID if it was generated
+      if (!sessionId && !localStorage.getItem('chatSessionId')) {
+        localStorage.setItem('chatSessionId', session_id);
+      }
       
       console.log(`Sending chat request with session_id: ${session_id}, mode: ${responseMode}, promptStyle: ${promptStyle}`);
       if (systemPrompt) {
@@ -54,6 +59,84 @@ export const chatApi = {
       };
     } catch (error) {
       console.error('Error sending message:', error);
+      throw error;
+    }
+  },
+  
+  // Session management
+  listSessions: async (page = 1, pageSize = 20) => {
+    try {
+      const response = await api.get(`/chat/sessions?page=${page}&page_size=${pageSize}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error listing sessions:', error);
+      throw error;
+    }
+  },
+  
+  getSession: async (sessionId, mode = null) => {
+    try {
+      // Build query parameters if mode is specified
+      const params = new URLSearchParams();
+      if (mode) {
+        // Map UI mode names to API mode names if needed
+        let apiMode = mode;
+        if (mode === 'standard') apiMode = 'no_rag';
+        
+        params.append('mode', apiMode);
+      }
+      
+      const queryString = params.toString() ? `?${params.toString()}` : '';
+      console.log(`Fetching session: /chat/sessions/${sessionId}${queryString}`);
+      const response = await api.get(`/chat/sessions/${sessionId}${queryString}`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching session ${sessionId}:`, error);
+      throw error;
+    }
+  },
+  
+  deleteSession: async (sessionId) => {
+    try {
+      const response = await api.delete(`/chat/sessions/${sessionId}`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error deleting session ${sessionId}:`, error);
+      throw error;
+    }
+  },
+  
+  addSessionTag: async (sessionId, tag) => {
+    try {
+      const response = await api.post(`/chat/sessions/${sessionId}/tags/${tag}`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error adding tag to session ${sessionId}:`, error);
+      throw error;
+    }
+  },
+  
+  removeSessionTag: async (sessionId, tag) => {
+    try {
+      const response = await api.delete(`/chat/sessions/${sessionId}/tags/${tag}`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error removing tag from session ${sessionId}:`, error);
+      throw error;
+    }
+  },
+  
+  filterSessions: async (filters = {}) => {
+    try {
+      const params = new URLSearchParams();
+      if (filters.tags) params.append('tags', filters.tags.join(','));
+      if (filters.mode) params.append('mode', filters.mode);
+      if (filters.client) params.append('client', filters.client);
+      
+      const response = await api.get(`/chat/sessions/filter?${params.toString()}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error filtering sessions:', error);
       throw error;
     }
   },

@@ -10,10 +10,13 @@ from fastapi import (
     UploadFile,
     File,
     Form,
+    Path,
 )
-from typing import Optional
-
+from typing import Optional, List
 from typing import Dict, Any
+from datetime import datetime
+
+from app.models.session_models import SessionListResponse, SessionMetadata, SessionFilterOptions
 import os
 import tempfile
 
@@ -78,8 +81,8 @@ async def chat(data: Message, chat_service: ChatService = Depends(get_chat_servi
     return await chat_service.chat(data)
 
 
-@router.delete("/session/{session_id}", status_code=204)
-async def delete_chat(session_id: str, chat_service: ChatService = Depends(get_chat_service)):
+@router.delete("/sessions/{session_id}", status_code=204)
+async def delete_session(session_id: str, chat_service: ChatService = Depends(get_chat_service)):
     """
     Delete chat history for a session.
 
@@ -95,22 +98,112 @@ async def delete_chat(session_id: str, chat_service: ChatService = Depends(get_c
     raise HTTPException(status_code=404, detail="session_id does not exist")
 
 
-@router.get("/session/{session_id}")
-async def get_chat(session_id: str, chat_service: ChatService = Depends(get_chat_service)):
+@router.get("/sessions", response_model=SessionListResponse)
+async def list_sessions(
+    page: int = Query(1, description="Page number (1-indexed)", ge=1),
+    page_size: int = Query(20, description="Number of sessions per page", ge=1, le=100),
+    chat_service: ChatService = Depends(get_chat_service)
+):
     """
-    Get chat history for a session.
-
-    Args:
-        session_id: Session ID to retrieve, or "ALL_CHATS" to get all
-        chat_service: ChatService instance from dependency
-
-    Returns:
-        Dictionary containing chat history, 404 Not Found if session doesn't exist
+    List available chat sessions with pagination.
+    
+    ## Response Format
+    - **sessions**: List of session metadata
+    - **total_count**: Total number of available sessions
+    - **page**: Current page number
+    - **page_size**: Number of sessions per page
     """
-    chat_history = chat_service.get_chat(session_id)
-    if chat_history:
-        return chat_history
-    raise HTTPException(status_code=404, detail="session_id does not exist")
+    # Calculate offset from page and page_size
+    offset = (page - 1) * page_size
+    
+    # Get sessions from service
+    result = chat_service.list_sessions(limit=page_size, offset=offset)
+    
+    # Return formatted result
+    return {
+        "sessions": result["sessions"],
+        "total_count": result["total_count"],
+        "page": page,
+        "page_size": page_size
+    }
+
+@router.get("/sessions/filter", response_model=Dict[str, Any])
+async def filter_sessions(
+    tags: Optional[List[str]] = Query(None, description="Filter by tags (comma-separated)"),
+    mode: Optional[str] = Query(None, description="Filter by mode (rag, no_rag, needl, etc.)"),
+    client: Optional[str] = Query(None, description="Filter by client name"),
+    chat_service: ChatService = Depends(get_chat_service)
+):
+    """
+    Filter sessions by various criteria.
+    
+    ## Filter Parameters
+    - **tags**: Optional list of tags to filter by (comma-separated)
+    - **mode**: Optional mode to filter by (e.g., 'rag', 'no_rag', 'needl')
+    - **client**: Optional client name to filter by
+    
+    ## Response Format
+    - **session_ids**: List of matching session IDs
+    - **count**: Number of matching sessions
+    - **filters_applied**: Summary of filters that were applied
+    """
+    matching_sessions = []
+    filters_applied = []
+    
+    # Apply tag filter if provided
+    if tags:
+        tag_list = [tag.strip() for tag in tags.split(",")]
+        for tag in tag_list:
+            result = chat_service.find_sessions_by_tag(tag)
+            matching_sessions.extend(result["session_ids"])
+            filters_applied.append(f"tag:{tag}")
+    
+    # Apply mode filter if provided
+    if mode:
+        result = chat_service.find_sessions_by_mode(mode)
+        # If we already have results from tags, filter them
+        if matching_sessions:
+            matching_sessions = [s for s in matching_sessions if s in result["session_ids"]]
+        else:
+            matching_sessions = result["session_ids"]
+        filters_applied.append(f"mode:{mode}")
+    
+    # Remove duplicates
+    matching_sessions = list(set(matching_sessions))
+    
+    return {
+        "session_ids": matching_sessions,
+        "count": len(matching_sessions),
+        "filters_applied": filters_applied
+    }
+
+@router.get("/sessions/{session_id}", response_model=Dict[str, Any])
+async def get_session(
+    session_id: str = Path(..., description="The session ID to retrieve"),
+    mode: Optional[str] = Query("all", description="Filter messages by mode (rag, no_rag, standard, needl, compare, all)"),
+    chat_service: ChatService = Depends(get_chat_service)
+):
+    """
+    Get detailed information about a specific chat session.
+    
+    ## Path Parameters
+    - **session_id**: Unique identifier for the chat session
+    
+    ## Query Parameters
+    - **mode**: Optional mode to filter messages by (rag, no_rag, standard, needl, compare)
+    
+    ## Response Format
+    - **session_id**: The session ID
+    - **metadata**: Session metadata including creation time, tags, etc.
+    - **messages**: List of messages in the session
+    """
+    result = chat_service.get_session_by_id(session_id, mode=mode)
+    
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+        
+    return result
+
 
 
 # Test routes
@@ -180,6 +273,131 @@ async def run_batch_test(
             status_code=500,
             detail=f"Batch test execution failed: {str(e)}"
         )
+
+# Session management routes
+@router.post("/sessions/{session_id}/tags/{tag}")
+async def add_tag_to_session(
+    session_id: str = Path(..., description="The session ID to tag"),
+    tag: str = Path(..., description="The tag to add"),
+    chat_service: ChatService = Depends(get_chat_service)
+):
+    """
+    Add a tag to a specific session.
+    
+    ## Path Parameters
+    - **session_id**: The session ID to tag
+    - **tag**: The tag to add
+    
+    ## Response
+    - HTTP 200 OK with success message
+    - HTTP 404 Not Found if session doesn't exist
+    """
+    try:
+        # Get the session
+        session = chat_service.session_manager.get_session(session_id)
+        
+        # Add the tag
+        session.add_tag(tag)
+        
+        # Save the session
+        chat_service.session_manager.save_session(session)
+        
+        return {"message": f"Tag '{tag}' added to session '{session_id}'"}
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Error adding tag: {str(e)}")
+
+@router.delete("/sessions/{session_id}/tags/{tag}")
+async def remove_tag_from_session(
+    session_id: str = Path(..., description="The session ID to modify"),
+    tag: str = Path(..., description="The tag to remove"),
+    chat_service: ChatService = Depends(get_chat_service)
+):
+    """
+    Remove a tag from a specific session.
+    
+    ## Path Parameters
+    - **session_id**: The session ID to modify
+    - **tag**: The tag to remove
+    
+    ## Response
+    - HTTP 200 OK with success message
+    - HTTP 404 Not Found if session or tag doesn't exist
+    """
+    try:
+        # Get the session
+        session = chat_service.session_manager.get_session(session_id)
+        
+        # Remove the tag
+        success = session.remove_tag(tag)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Tag '{tag}' not found in session '{session_id}'")
+        
+        # Save the session
+        chat_service.session_manager.save_session(session)
+        
+        return {"message": f"Tag '{tag}' removed from session '{session_id}'"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Error removing tag: {str(e)}")
+
+@router.post("/sessions/backup", response_model=Dict[str, Any])
+async def create_backup(
+    custom_path: Optional[str] = Query(None, description="Optional custom backup path"),
+    chat_service: ChatService = Depends(get_chat_service)
+):
+    """
+    Create a backup of all sessions.
+    
+    ## Query Parameters
+    - **custom_path**: Optional custom backup path
+    
+    ## Response
+    - HTTP 200 OK with backup path information
+    - HTTP 500 Internal Server Error if backup creation fails
+    """
+    backup_path = chat_service.session_manager.create_backup(custom_path)
+    
+    if backup_path:
+        return {
+            "message": "Backup created successfully",
+            "backup_path": backup_path,
+            "timestamp": datetime.now().isoformat()
+        }
+    else:
+        raise HTTPException(status_code=500, detail="Failed to create backup")
+
+@router.post("/sessions/restore", response_model=Dict[str, Any])
+async def restore_backup(
+    backup_path: str = Query(..., description="Path to the backup file to restore"),
+    chat_service: ChatService = Depends(get_chat_service)
+):
+    """
+    Restore sessions from a backup.
+    
+    ## Query Parameters
+    - **backup_path**: Path to the backup file to restore
+    
+    ## Response
+    - HTTP 200 OK with restoration information
+    - HTTP 400 Bad Request if the backup file doesn't exist
+    - HTTP 500 Internal Server Error if restoration fails
+    """
+    if not os.path.exists(backup_path):
+        raise HTTPException(status_code=400, detail=f"Backup file not found: {backup_path}")
+    
+    session_count = chat_service.session_manager.restore_backup(backup_path)
+    
+    if session_count > 0:
+        return {
+            "message": "Backup restored successfully",
+            "sessions_restored": session_count,
+            "backup_path": backup_path,
+            "timestamp": datetime.now().isoformat()
+        }
+    else:
+        raise HTTPException(status_code=500, detail="Failed to restore backup or no sessions in backup")
 
 # Cache management routes
 @router.get("/cache/stats", tags=["cache"])

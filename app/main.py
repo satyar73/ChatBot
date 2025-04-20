@@ -108,6 +108,62 @@ app.include_router(api_router)
 async def health_endpoint():
     logger.debug("Health endpoint called")
     return {"message": "Up and running!"}
+    
+@app.get("/debug/check-session-response-types")
+async def check_session_response_types():
+    """Debug endpoint to check response type integrity across all sessions."""
+    logger.info("Running session response type integrity check...")
+    from app.services.chat.session_adapter import session_adapter
+    
+    try:
+        # Run the check - will output detailed logs
+        session_adapter.check_session_response_types()
+        return {"status": "Success", "message": "Session response type integrity check complete. See logs for details."}
+    except Exception as e:
+        logger.error(f"Error during session response type check: {e}")
+        return {"status": "Error", "message": str(e)}
+
+@app.get("/debug/check-session/{session_id}")
+async def check_specific_session(session_id: str):
+    """Debug endpoint to check a specific session's message types."""
+    logger.info(f"Checking session {session_id}...")
+    from app.services.chat.session_service import session_manager
+    
+    try:
+        # Get the session
+        session = session_manager.get_session(session_id)
+        
+        # Summarize message info
+        message_info = []
+        for msg in session.messages:
+            if msg.get("role") == "assistant":
+                msg_info = {
+                    "id": msg.get("id", "unknown"),
+                    "role": msg.get("role", "unknown"),
+                    "response_type": msg.get("response_type", "missing"),
+                    "originalResponseType": msg.get("originalResponseType", "missing"),
+                    "has_additional_data": "additional_data" in msg
+                }
+                
+                # Check additional_data if available
+                if "additional_data" in msg and isinstance(msg["additional_data"], dict):
+                    add_data = msg["additional_data"]
+                    if "originalResponseType" in add_data:
+                        msg_info["additional_data_originalResponseType"] = add_data["originalResponseType"]
+                    if "originalMode" in add_data:
+                        msg_info["originalMode"] = add_data["originalMode"]
+                        
+                message_info.append(msg_info)
+                
+        return {
+            "session_id": session_id,
+            "message_count": len(session.messages),
+            "assistant_messages": message_info,
+            "metadata": session.metadata
+        }
+    except Exception as e:
+        logger.error(f"Error checking session {session_id}: {e}")
+        return {"status": "Error", "message": str(e)}
 
 if __name__ == "__main__":
     import uvicorn

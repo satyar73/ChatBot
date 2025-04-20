@@ -1,4 +1,6 @@
-import React, { createContext, useReducer, useEffect, useRef, useContext } from 'react';
+import React, { createContext, useReducer, useEffect, useRef, useContext, useState } from 'react';
+import { getSessionId, loadSessionHistory } from '../services/sessionService';
+import { chatApi } from '../services/api';
 
 // Initial state for the chat context
 const initialState = {
@@ -10,7 +12,10 @@ const initialState = {
   sessionId: null,
   error: null,
   systemPrompt: '',  // Store custom system prompt
-  showSystemPrompt: false  // Control visibility of system prompt editor
+  showSystemPrompt: false,  // Control visibility of system prompt editor
+  isLoadingHistory: false,  // Flag for session history loading
+  availableSessions: [],   // List of available sessions
+  sessionMetadata: {}      // Metadata for the current session
 };
 
 // Action types
@@ -27,7 +32,14 @@ export const ACTIONS = {
   CLEAR_CHAT: 'CLEAR_CHAT',
   REFRESH_MESSAGES: 'REFRESH_MESSAGES',
   SET_SYSTEM_PROMPT: 'SET_SYSTEM_PROMPT',
-  TOGGLE_SYSTEM_PROMPT: 'TOGGLE_SYSTEM_PROMPT'
+  TOGGLE_SYSTEM_PROMPT: 'TOGGLE_SYSTEM_PROMPT',
+  
+  // Session management actions
+  SET_LOADING_HISTORY: 'SET_LOADING_HISTORY',
+  SET_AVAILABLE_SESSIONS: 'SET_AVAILABLE_SESSIONS',
+  SET_SESSION_METADATA: 'SET_SESSION_METADATA',
+  ADD_SESSION_TAG: 'ADD_SESSION_TAG',
+  REMOVE_SESSION_TAG: 'REMOVE_SESSION_TAG'
 };
 
 // Reducer for handling state updates
@@ -80,6 +92,34 @@ const chatReducer = (state, action) => {
       
     case ACTIONS.TOGGLE_SYSTEM_PROMPT:
       return { ...state, showSystemPrompt: !state.showSystemPrompt };
+      
+    // Session management actions
+    case ACTIONS.SET_LOADING_HISTORY:
+      return { ...state, isLoadingHistory: action.payload };
+      
+    case ACTIONS.SET_AVAILABLE_SESSIONS:
+      return { ...state, availableSessions: action.payload };
+      
+    case ACTIONS.SET_SESSION_METADATA:
+      return { ...state, sessionMetadata: action.payload };
+      
+    case ACTIONS.ADD_SESSION_TAG:
+      return {
+        ...state,
+        sessionMetadata: {
+          ...state.sessionMetadata,
+          tags: [...(state.sessionMetadata.tags || []), action.payload]
+        }
+      };
+      
+    case ACTIONS.REMOVE_SESSION_TAG:
+      return {
+        ...state,
+        sessionMetadata: {
+          ...state.sessionMetadata,
+          tags: (state.sessionMetadata.tags || []).filter(tag => tag !== action.payload)
+        }
+      };
     
     default:
       return state;
@@ -98,9 +138,120 @@ export const ChatProvider = ({ children }) => {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [state.messages]);
-
-  // Reformat message display when response mode changes
+  
+  // Initialize session ID and load session history
   useEffect(() => {
+    const initializeSession = async () => {
+      try {
+        // Get session ID from URL/localStorage or generate new one
+        const sessionId = getSessionId();
+        dispatch({ type: ACTIONS.SET_SESSION_ID, payload: sessionId });
+        
+        // Set loading state
+        dispatch({ type: ACTIONS.SET_LOADING_HISTORY, payload: true });
+        
+        // Load session history if there's a session ID
+        if (sessionId) {
+          try {
+            const sessionData = await loadSessionHistory(sessionId);
+            
+            // Update messages if there are any
+            if (sessionData.messages && sessionData.messages.length > 0) {
+              dispatch({ type: ACTIONS.REFRESH_MESSAGES, payload: sessionData.messages });
+            }
+            
+            // Update session metadata
+            if (sessionData.metadata) {
+              dispatch({ type: ACTIONS.SET_SESSION_METADATA, payload: sessionData.metadata });
+            }
+          } catch (error) {
+            console.error('Error loading session history:', error);
+            dispatch({ type: ACTIONS.SET_ERROR, payload: 'Failed to load session history' });
+          }
+        }
+      } catch (error) {
+        console.error('Error initializing session:', error);
+      } finally {
+        dispatch({ type: ACTIONS.SET_LOADING_HISTORY, payload: false });
+      }
+    };
+
+    initializeSession();
+  }, []);
+  
+  // Load available sessions
+  useEffect(() => {
+    const loadAvailableSessions = async () => {
+      try {
+        const result = await chatApi.listSessions(1, 10);
+        if (result && result.sessions) {
+          dispatch({ type: ACTIONS.SET_AVAILABLE_SESSIONS, payload: result.sessions });
+        }
+      } catch (error) {
+        console.error('Error loading available sessions:', error);
+      }
+    };
+    
+    loadAvailableSessions();
+  }, []);
+
+  // Load mode-specific messages when the response mode changes
+  useEffect(() => {
+    console.log('responseMode useEffect triggered:', { 
+      mode: state.responseMode, 
+      sessionId: state.sessionId, 
+      isLoading: state.isLoadingHistory 
+    });
+    
+    // Don't reload if we don't have a session ID yet or if we're already loading
+    if (!state.sessionId || state.isLoadingHistory) return;
+    
+    const loadModeSpecificMessages = async () => {
+      // Set loading state
+      dispatch({ type: ACTIONS.SET_LOADING_HISTORY, payload: true });
+      
+      try {
+        console.log('Loading session history for mode:', state.responseMode);
+        // Load session with the current mode
+        const sessionData = await loadSessionHistory(state.sessionId, state.responseMode);
+        console.log('Session data loaded:', sessionData);
+        
+        // Always update messages, even with empty array
+        // This ensures we clear messages when there aren't any for the current mode
+        const messages = sessionData.messages || [];
+        console.log(`Mode ${state.responseMode} returned ${messages.length} messages`);
+        dispatch({ type: ACTIONS.REFRESH_MESSAGES, payload: messages });
+      } catch (error) {
+        console.error('Error loading mode-specific messages:', error);
+      } finally {
+        dispatch({ type: ACTIONS.SET_LOADING_HISTORY, payload: false });
+      }
+    };
+    
+    // Load mode-filtered messages
+    loadModeSpecificMessages();
+  }, [state.responseMode, state.sessionId, dispatch]);
+  
+  // Legacy reformatting (for backward compatibility)
+  // This effect should only run for client-side format changes AFTER server-side filtering
+  useEffect(() => {
+    // Skip if we're loading history from the server
+    if (state.isLoadingHistory) return;
+    
+    // Don't run the reformatting if we don't have messages yet
+    if (!state.messages || state.messages.length === 0) return;
+    
+    console.log('Format/filter messages for display, mode:', state.responseMode);
+    
+    // Client-side reformatting mostly needed for compare mode; otherwise server filtering handles it
+    // Only perform reformatting for compare mode or if we need to convert message formats
+    if (state.responseMode !== 'compare') {
+      console.log('Skipping client-side reformatting for mode:', state.responseMode);
+      return;
+    }
+    
+    console.log('Performing client-side reformatting for compare mode');
+    
     const reformatMessages = () => {
       // Create a new message array to avoid mutation
       const newMessages = [];
@@ -267,11 +418,116 @@ export const ChatProvider = ({ children }) => {
       dispatch({ type: ACTIONS.REFRESH_MESSAGES, payload: newMessages });
     };
 
-    reformatMessages();
-  }, [state.responseMode]);
+    // Only run client-side reformatting for compare mode
+    if (state.responseMode === 'compare') {
+      reformatMessages();
+    }
+  }, [state.responseMode, state.messages, state.isLoadingHistory, dispatch]);
+
+  // Add session management functions
+  const switchSession = async (newSessionId) => {
+    try {
+      // Set loading state
+      dispatch({ type: ACTIONS.SET_LOADING_HISTORY, payload: true });
+      dispatch({ type: ACTIONS.SET_ERROR, payload: null });
+      
+      // Update localStorage
+      localStorage.setItem('chatSessionId', newSessionId);
+      
+      // Update session ID in state
+      dispatch({ type: ACTIONS.SET_SESSION_ID, payload: newSessionId });
+      
+      // Clear existing messages
+      dispatch({ type: ACTIONS.REFRESH_MESSAGES, payload: [] });
+      
+      // Load new session data
+      try {
+        const sessionData = await loadSessionHistory(newSessionId);
+        
+        // Update messages if there are any
+        if (sessionData.messages && sessionData.messages.length > 0) {
+          dispatch({ type: ACTIONS.REFRESH_MESSAGES, payload: sessionData.messages });
+        }
+        
+        // Update session metadata
+        if (sessionData.metadata) {
+          dispatch({ type: ACTIONS.SET_SESSION_METADATA, payload: sessionData.metadata });
+        }
+      } catch (error) {
+        console.error(`Error loading session ${newSessionId}:`, error);
+        dispatch({ type: ACTIONS.SET_ERROR, payload: 'Failed to load session' });
+      }
+    } finally {
+      dispatch({ type: ACTIONS.SET_LOADING_HISTORY, payload: false });
+    }
+  };
+  
+  const createNewSession = () => {
+    // Generate a new session ID
+    const newSessionId = getSessionId();
+    
+    // Clear the existing chat
+    dispatch({ type: ACTIONS.CLEAR_CHAT });
+    
+    // Set the new session ID
+    dispatch({ type: ACTIONS.SET_SESSION_ID, payload: newSessionId });
+    
+    // Update localStorage
+    localStorage.setItem('chatSessionId', newSessionId);
+    
+    return newSessionId;
+  };
+  
+  const addSessionTag = async (tag) => {
+    if (!state.sessionId) return;
+    
+    try {
+      await chatApi.addSessionTag(state.sessionId, tag);
+      dispatch({ type: ACTIONS.ADD_SESSION_TAG, payload: tag });
+    } catch (error) {
+      console.error(`Error adding tag to session ${state.sessionId}:`, error);
+      dispatch({ type: ACTIONS.SET_ERROR, payload: 'Failed to add tag' });
+    }
+  };
+  
+  const removeSessionTag = async (tag) => {
+    if (!state.sessionId) return;
+    
+    try {
+      await chatApi.removeSessionTag(state.sessionId, tag);
+      dispatch({ type: ACTIONS.REMOVE_SESSION_TAG, payload: tag });
+    } catch (error) {
+      console.error(`Error removing tag from session ${state.sessionId}:`, error);
+      dispatch({ type: ACTIONS.SET_ERROR, payload: 'Failed to remove tag' });
+    }
+  };
+  
+  const refreshSessionList = async () => {
+    try {
+      const result = await chatApi.listSessions(1, 10);
+      if (result && result.sessions) {
+        dispatch({ type: ACTIONS.SET_AVAILABLE_SESSIONS, payload: result.sessions });
+      }
+    } catch (error) {
+      console.error('Error refreshing session list:', error);
+    }
+  };
 
   return (
-    <ChatContext.Provider value={{ state, dispatch, chatEndRef }}>
+    <ChatContext.Provider 
+      value={{ 
+        state, 
+        dispatch, 
+        chatEndRef,
+        sessionManagement: {
+          switchSession,
+          createNewSession,
+          addSessionTag,
+          removeSessionTag,
+          refreshSessionList
+        }
+      }}
+    >
       {children}
     </ChatContext.Provider>
   );

@@ -19,8 +19,14 @@ const useChatActions = () => {
    * Set the response mode (rag, standard, compare)
    */
   const setResponseMode = useCallback((mode) => {
-    dispatch({ type: ACTIONS.SET_RESPONSE_MODE, payload: mode });
-  }, [dispatch]);
+    console.log('Mode switching to:', mode);
+    // Only change mode if it's different from current mode
+    if (state.responseMode !== mode) {
+      dispatch({ type: ACTIONS.SET_RESPONSE_MODE, payload: mode });
+    } else {
+      console.log('Mode already set to', mode, '- skipping update');
+    }
+  }, [dispatch, state.responseMode]);
   
   /**
    * Set the prompt style (default, detailed, concise)
@@ -51,10 +57,12 @@ const useChatActions = () => {
   }, [dispatch]);
   
   /**
-   * Clear the chat history and session ID
+   * Clear the chat history while preserving the session ID
    */
   const clearChat = useCallback(() => {
-    dispatch({ type: ACTIONS.CLEAR_CHAT });
+    if (window.confirm('Clear the current conversation? The session will remain available but messages will be cleared.')) {
+      dispatch({ type: ACTIONS.REFRESH_MESSAGES, payload: [] });
+    }
   }, [dispatch]);
   
   /**
@@ -132,7 +140,9 @@ const useChatActions = () => {
           type: ACTIONS.ADD_ASSISTANT_MESSAGE,
           payload: {
             role: 'assistant',
-            content: content + sourceText
+            content: content + sourceText,
+            response_type: 'needl',  // Explicitly tag with response_type
+            isNeedlResponse: true
           }
         });
       } else if (state.responseMode === "compare") {
@@ -143,14 +153,16 @@ const useChatActions = () => {
             role: 'assistant', 
             content: ragResponse || "No RAG response available",
             hiddenContent: standardResponse || "No standard response available",
-            type: 'rag' 
+            type: 'rag',
+            response_type: 'rag'  // Explicitly tag with response_type for filtering
         });
 
        assistantMessages.push({
             role: 'assistant', 
             content: standardResponse || "No standard response available",
             hiddenContent: ragResponse || "No RAG response available",
-            type: 'standard'
+            type: 'standard',
+            response_type: 'no_rag'  // Explicitly tag with response_type for filtering
         });
 
        dispatch({
@@ -165,7 +177,8 @@ const useChatActions = () => {
             role: 'assistant', 
             content: ragResponse || "No RAG response available",
             hiddenContent: standardResponse,
-            originalMode: state.responseMode 
+            originalMode: state.responseMode,
+            response_type: "rag"  // Explicitly tag with response_type for filtering
           }
         });
       } else {
@@ -176,7 +189,8 @@ const useChatActions = () => {
             role: 'assistant', 
             content: standardResponse || "No standard response available",
             hiddenContent: ragResponse,
-            originalMode: state.responseMode
+            originalMode: state.responseMode,
+            response_type: "no_rag"  // Explicitly tag with response_type for filtering
           }
         });
       }

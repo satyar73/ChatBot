@@ -2,13 +2,17 @@
 Service layer for handling agent queries and responses with enhanced RAG query rewriting.
 """
 import time
-from typing import List, Any
+import sqlite3
+from pathlib import Path
+from typing import List, Dict, Any, Optional, Union
 
 from app.agents.chat_agents import AgentManager
 from app.agents.response_strategies import ResponseStrategy
 from app.config.chat_config import chat_config
 from app.models.chat_models import ChatHistory, ResponseContent, ResponseMessage, Message
 from app.services.chat.chat_cache_service import chat_cache
+from app.services.chat.session_adapter import session_adapter
+from app.services.chat.session_service import session_manager
 from app.services.common.enhancement_service import enhancement_service
 from app.utils.logging_utils import get_logger
 
@@ -16,15 +20,14 @@ class ChatService:
     """Service for managing chat interactions with agents."""
 
     def __init__(self):
-        # Create a dictionary to store chat histories for different sessions
-        self.chat_histories = {}
         self.logger = get_logger(__name__)
         self.logger.info("ChatService initialized")
-        # Explicit print to check if output is working at all
-
+        
         # Using singletons
         self.config = chat_config
         self.enhancement_service = enhancement_service
+        self.session_adapter = session_adapter
+        self.session_manager = session_manager
 
         self.agent_manager = AgentManager()
 
@@ -58,10 +61,8 @@ class ChatService:
         # Log the incoming request
         self.logger.info(f"Chat request: session={session_id}, input_length={len(user_input)}")
 
-        # Get or create chat history for the session
-        if session_id not in self.chat_histories:
-            self.chat_histories[session_id] = ChatHistory()
-        chat_history = self.chat_histories[session_id]
+        # Get chat history from session manager via adapter
+        chat_history = self.session_adapter.get_chat_history(session_id)
 
         # Extract directives including test mode and client name
         query_directives = self.enhancement_service.extract_query_directives(user_input)
@@ -102,7 +103,21 @@ class ChatService:
                 if mode == "needl":
                     # For Needl mode, we might have a different response format
                     needl_output = cached_response.get("needl_response")
-                    chat_history.add_ai_message(needl_output)
+                    # For Needl responses, ensure we preserve the response type
+                    needl_metadata = {
+                        "isNeedlResponse": True, 
+                        "originalMode": "needl",
+                        "actualResponseType": "needl",
+                        "cachedResponse": True
+                    }
+                    
+                    self.logger.info(f"Adding cached Needl message with response_type=needl")
+                    
+                    chat_history.add_ai_message(
+                        message=needl_output, 
+                        response_type="needl",
+                        additional_metadata=needl_metadata
+                    )
                     primary_output = needl_output
                     sources = cached_response.get("sources", [])
                 else:
@@ -111,9 +126,37 @@ class ChatService:
                     no_rag_output = cached_response.get("no_rag_response")
                     sources = cached_response.get("sources", [])
                     
-                    # Determine which response to add to history based on mode
-                    primary_output = no_rag_output if mode == "no_rag" else rag_output
-                    chat_history.add_ai_message(primary_output)
+                    # Determine which response to add to history based on the ACTUAL RESPONSE
+                    # Not just the mode - respect what's actually in the cache
+                    if mode == "no_rag" or (mode == "both" and no_rag_output):
+                        primary_output = no_rag_output
+                        response_type = "no_rag"
+                        additional_metadata = {
+                            "originalMode": mode, 
+                            "type": "standard",
+                            "actualResponseType": "no_rag",
+                            "cachedResponse": True
+                        }
+                        self.logger.info(f"Cache hit: Using no_rag response, setting response_type=no_rag")
+                    else:
+                        primary_output = rag_output
+                        response_type = "rag"
+                        additional_metadata = {
+                            "originalMode": mode, 
+                            "type": "rag",
+                            "actualResponseType": "rag",
+                            "cachedResponse": True
+                        }
+                        self.logger.info(f"Cache hit: Using rag response, setting response_type=rag")
+                        
+                    # Add enhanced debug logging
+                    self.logger.info(f"Adding cached AI message with response_type={response_type}, originalMode={mode}")
+                    
+                    chat_history.add_ai_message(
+                        message=primary_output,
+                        response_type=response_type,
+                        additional_metadata=additional_metadata
+                    )
                 
                 # Format message history
                 formatted_history = self._format_history(chat_history.get_messages())
@@ -148,6 +191,22 @@ class ChatService:
                                     cache_hit=True,
                                     response_time=response_time
                                 )
+                
+                # Save the updated chat history to the session even for cached responses
+                self.logger.debug(f"Saving chat history with cached response to session {session_id}")
+                self.session_adapter.save_from_chat_history(
+                    session_id=session_id,
+                    chat_history=chat_history,
+                    mode=mode,
+                    system_prompt=custom_system_prompt,
+                    prompt_style=prompt_style,
+                    additional_metadata={
+                        "last_query": user_input,
+                        "last_response_time": response_time,
+                        "cache_hit": True,
+                        "client_info": {"name": client_name} if client_name else {}
+                    }
+                )
                 
                 return ResponseMessage(
                     response=response_content,
@@ -288,16 +347,55 @@ class ChatService:
             self.logger.error("No valid response generated from any agent")
             primary_response = {"output": "I'm sorry, I couldn't generate a response at this time."}
         
-        # Add the primary response to chat history
+        # Add the primary response to chat history with proper response_type
+        # Determine the appropriate response type based on the ACTUAL RESPONSE being used
+        # Not just the current mode
+        
+        # First determine which response we're actually using
+        using_needl = (mode == "needl")
+        using_norag = (mode == "no_rag" or (mode == "both" and primary_response == no_rag_response))
+        using_rag = not (using_needl or using_norag)
+        
+        self.logger.info(f"Response determination: using_needl={using_needl}, using_norag={using_norag}, using_rag={using_rag}")
+        
+        if using_needl:
+            response_type = "needl"
+            additional_metadata = {"isNeedlResponse": True, "originalMode": "needl"}
+            self.logger.info(f"Setting response_type=needl")
+        elif using_norag:
+            response_type = "no_rag"
+            additional_metadata = {"originalMode": mode, "type": "standard"}
+            self.logger.info(f"Setting response_type=no_rag")
+        else:
+            response_type = "rag"
+            additional_metadata = {"originalMode": mode, "type": "rag"}
+            self.logger.info(f"Setting response_type=rag")
+            
+        # Extract the content based on response format
         if isinstance(primary_response, dict):
             # Make sure 'output' key exists
             if 'output' in primary_response:
-                chat_history.add_ai_message(primary_response['output'])
+                content = primary_response['output']
             else:
                 self.logger.error(f"Primary response missing 'output' key: {primary_response}")
-                chat_history.add_ai_message("Error: Could not extract response output")
+                content = "Error: Could not extract response output"
         else:
-            chat_history.add_ai_message(primary_response)
+            content = primary_response
+            
+        # Add the message with proper metadata
+        # Ensure we're setting the correct response_type that will be preserved
+        # Add extra data to track both the original mode and the actual response type used
+        enhanced_metadata = additional_metadata.copy() if additional_metadata else {}
+        enhanced_metadata["actualResponseType"] = response_type
+        enhanced_metadata["originalMode"] = mode
+        
+        self.logger.info(f"Adding AI message with response_type={response_type}, originalMode={mode}")
+        
+        chat_history.add_ai_message(
+            message=content,
+            response_type=response_type,
+            additional_metadata=enhanced_metadata
+        )
         
         # Format message history for response
         formatted_history = self._format_history(chat_history.get_messages())
@@ -379,7 +477,30 @@ class ChatService:
                                 response_time=response_time
                             )
         
-        self.logger.info(f"Response generated and cached in {response_time:.2f}s")
+        # Save the updated chat history to the session
+        self.logger.debug(f"Saving updated chat history to session {session_id}")
+        
+        # Combine all additional metadata
+        additional_metadata = {
+            "last_query": user_input,
+            "last_response_time": response_time,
+            "client_info": {"name": client_name} if client_name else {}
+        }
+        
+        # Save the session with all the metadata
+        success = self.session_adapter.save_from_chat_history(
+            session_id=session_id,
+            chat_history=chat_history,
+            mode=mode,
+            system_prompt=custom_system_prompt,
+            prompt_style=prompt_style,
+            additional_metadata=additional_metadata
+        )
+        
+        if success:
+            self.logger.info(f"Response generated and chat history saved in {response_time:.2f}s")
+        else:
+            self.logger.error(f"Failed to save chat history for session {session_id}")
         
         return ResponseMessage(
             response=response_content,
@@ -398,14 +519,16 @@ class ChatService:
         """
         self.logger.info(f"delete_chat called with {session_id}")
         if session_id == "ALL_CHATS":
-            self.chat_histories = {}
+            # Delete all persistent sessions
+            deleted_count = self.session_manager.delete_all_sessions()
+            self.logger.info(f"Deleted {deleted_count} persistent sessions")
             return True
-        elif session_id in self.chat_histories:
-            del self.chat_histories[session_id]
-            return True
-        return False
+        else:
+            # Delete from persistent storage
+            success = self.session_manager.delete_session(session_id)
+            return success
 
-    def get_chat(self, session_id: str) -> dict[Any, Any] | None:
+    def get_chat(self, session_id: str) -> Dict[str, Any]:
         """
         Get chat history for a session.
 
@@ -413,14 +536,161 @@ class ChatService:
             session_id: The session ID to retrieve, or "ALL_CHATS" to get all sessions
 
         Returns:
-            Dictionary containing chat history or None if not found
+            Dictionary containing chat history or empty dict if not found
         """
         self.logger.info(f"get_chat called with {session_id}")
+        
         if session_id == "ALL_CHATS":
-            return self.chat_histories
-        if session_id in self.chat_histories:
-            return {session_id: self.chat_histories[session_id]}
-        return None
+            # Get paginated list of available sessions with metadata
+            sessions = self.session_manager.list_sessions(limit=100)
+            return {"sessions": sessions, "total_count": len(sessions)}
+        
+        try:
+            # Get the session through adapter
+            messages = self.session_adapter.get_messages_for_api(
+                session_id=session_id,
+                include_sources=True
+            )
+            
+            # Get session metadata
+            session = self.session_manager.get_session(session_id)
+            
+            return {
+                "session_id": session_id,
+                "messages": messages,
+                "metadata": session.metadata
+            }
+        except Exception as e:
+            self.logger.error(f"Error retrieving session {session_id}: {e}")
+            return {"error": f"Session not found or error retrieving session: {str(e)}"}
+            
+    def list_sessions(self, limit: Optional[int] = 100, offset: int = 0) -> Dict[str, Any]:
+        """
+        List available sessions with pagination.
+        
+        Args:
+            limit: Maximum number of sessions to return
+            offset: Starting offset for pagination
+            
+        Returns:
+            Dictionary with sessions list and metadata
+        """
+        sessions = self.session_manager.list_sessions(limit=limit, offset=offset)
+        
+        return {
+            "sessions": sessions,
+            "total_count": len(sessions) + offset,  # Approximate if paginated
+            "page": offset // limit + 1 if limit > 0 else 1,
+            "page_size": limit
+        }
+        
+    def get_session_by_id(self, session_id: str, mode: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get detailed information about a specific session.
+        
+        Args:
+            session_id: Session ID to retrieve
+            mode: Optional mode to filter messages by (rag, no_rag, needl, compare)
+            
+        Returns:
+            Dictionary with session data
+        """
+        try:
+            session = self.session_manager.get_session(session_id)
+            
+            return {
+                "session_id": session_id,
+                "metadata": session.metadata,
+                "messages": self.session_adapter.get_messages_for_api(
+                    session_id=session_id,
+                    include_sources=True,
+                    mode=mode
+                )
+            }
+        except Exception as e:
+            self.logger.error(f"Error retrieving session {session_id}: {e}")
+            return {"error": f"Error retrieving session: {str(e)}"}
+            
+    def find_sessions_by_tag(self, tag: str) -> Dict[str, Any]:
+        """
+        Find sessions with a specific tag.
+        
+        Args:
+            tag: Tag to search for
+            
+        Returns:
+            Dictionary with matching session IDs
+        """
+        session_ids = self.session_manager.find_sessions_by_tag(tag)
+        
+        return {
+            "tag": tag,
+            "session_ids": session_ids,
+            "count": len(session_ids)
+        }
+        
+    def find_sessions_by_mode(self, mode: str) -> Dict[str, Any]:
+        """
+        Find sessions containing prompts with a specific mode.
+        
+        Args:
+            mode: Mode to search for (rag, standard, needl, compare)
+            
+        Returns:
+            Dictionary with matching session IDs
+        """
+        session_ids = self.session_manager.find_sessions_by_mode(mode)
+        
+        return {
+            "mode": mode,
+            "session_ids": session_ids,
+            "count": len(session_ids)
+        }
+        
+    def list_sessions(self, limit: Optional[int] = None, offset: int = 0) -> Dict[str, Any]:
+        """
+        List available sessions with pagination.
+        
+        Args:
+            limit: Maximum number of sessions to return
+            offset: Starting offset for pagination
+            
+        Returns:
+            Dictionary with sessions and total count
+        """
+        try:
+            # Get sessions from session manager
+            sessions = self.session_manager.list_sessions(limit=limit, offset=offset)
+            
+            # Count total sessions with a more efficient approach for SQLite
+            # Get a separate count without limits to avoid loading all sessions
+            if self.session_manager.storage_type == "sqlite":
+                try:
+                    db_path = self.session_manager.storage_path / "sessions.db"
+                    conn = sqlite3.connect(str(db_path))
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT COUNT(*) FROM sessions")
+                    total_count = cursor.fetchone()[0]
+                    conn.close()
+                except Exception as e:
+                    self.logger.error(f"Error counting sessions: {e}")
+                    # Fallback to estimating from returned results
+                    total_count = len(sessions) + offset
+            else:
+                # For other storage types, get all sessions (could be inefficient for large sets)
+                total_count = len(self.session_manager.list_sessions())
+            
+            return {
+                "sessions": sessions,
+                "total_count": total_count
+            }
+        except Exception as e:
+            self.logger.error(f"Error listing sessions: {e}")
+            return {
+                "sessions": [],
+                "total_count": 0,
+                "error": str(e)
+            }
 
     # Removed _format_sources method - now implemented in ResponseStrategy class
 

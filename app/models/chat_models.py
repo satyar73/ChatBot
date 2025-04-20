@@ -26,13 +26,33 @@ class ChatHistory(BaseChatMessageHistory):
         if not self.messages or not isinstance(self.messages[-1], HumanMessage):
             self.messages.append(HumanMessage(content=message))
 
-    def add_ai_message(self, message: str):
+    def add_ai_message(self, message: str, response_type: str = None, additional_metadata: dict = None):
+        """
+        Add an AI message to the chat history with optional metadata.
+        
+        Args:
+            message: The message content
+            response_type: The type of response (rag, no_rag, needl, etc.)
+            additional_metadata: Any additional metadata to store
+        """
         if message is None:
             # Handle None message by using an empty string instead
-            self.messages.append(AIMessage(content=""))
+            ai_message = AIMessage(content="")
         else:
-            # Normal case - append the message
-            self.messages.append(AIMessage(content=message))
+            # Normal case - create the message
+            ai_message = AIMessage(content=message)
+            
+        # Add response_type as an immutable attribute
+        if response_type:
+            # Set response_type once and treat it as immutable going forward
+            ai_message.response_type = response_type
+            
+        if additional_metadata:
+            for key, value in additional_metadata.items():
+                setattr(ai_message, key, value)
+                
+        # Add the message to history
+        self.messages.append(ai_message)
 
     def get_messages(self) -> list:
         return self.messages
