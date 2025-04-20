@@ -224,19 +224,6 @@ const ChatHeader = () => {
           <Button 
             size="small"
             onClick={() => {
-              console.log('Compare button clicked');
-              setResponseMode("compare");
-            }}
-            variant={responseMode === "compare" ? "contained" : "text"}
-            color="secondary"
-            sx={{ borderRadius: 0 }}
-            disabled={isLoadingHistory}
-          >
-            Compare {responseMode === "compare" && isLoadingHistory && "..."}
-          </Button>
-          <Button 
-            size="small"
-            onClick={() => {
               console.log('Needl button clicked');
               setResponseMode("needl");
             }}

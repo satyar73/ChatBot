@@ -323,17 +323,12 @@ class SessionAdapter:
                         # Get response_type from various possible locations
                         response_type = msg.get("response_type") 
                         
-                        # Special case for 'both' mode - always include all messages
-                        if mode == "both" or mode == "compare" or mode == "dual":
-                            # For compare mode, include all messages
-                            mode_match = True
-                        else:
-                            # Simple mode matching - treat response_type as immutable
-                            mode_match = (
-                                response_type == mode or  # Direct match
-                                (response_type in mode_mapping and mode_mapping[response_type] == mode) or  # Mapped match
-                                (mode in mode_mapping and mode_mapping[mode] == response_type)  # Reverse mapped match
-                            )
+                        # Simple mode matching - treat response_type as immutable
+                        mode_match = (
+                            response_type == mode or  # Direct match
+                            (response_type in mode_mapping and mode_mapping[response_type] == mode) or  # Mapped match
+                            (mode in mode_mapping and mode_mapping[mode] == response_type)  # Reverse mapped match
+                        )
                         
                         if mode_match:
                             # Find the preceding user message if any
@@ -351,28 +346,21 @@ class SessionAdapter:
                         # Get the response_type - treat it as immutable
                         response_type = msg.get("response_type")
                         
-                        # Special case for 'both' mode - always include all messages
-                        if mode == "both" or mode == "compare" or mode == "dual":
-                            # For compare mode, include all messages
-                            self.logger.info(f"Requested mode is {mode}, including all messages")
-                            # Skip the filtering for this message
-                            pass
-                        else:
-                            # Log for detailed debugging
-                            self.logger.info(f"Filtering message - requested mode={mode}, " +
-                                           f"message response_type={response_type}")
-                            
-                            # Simple strict mode matching logic
-                            # Only match exact response type to avoid mixing modes
-                            mode_match = (
-                                response_type == mode or  # Direct match - this is the main one we care about
-                                (response_type in mode_mapping and mode_mapping[response_type] == mode) or  # Mapped match for compatibility
-                                (mode in mode_mapping and mode_mapping[mode] == response_type)  # Reverse mapped match
-                            )
-                            
-                            if not mode_match:
-                                self.logger.info(f"Filtering out message with response_type={response_type}, no match for mode={mode}")
-                                continue
+                        # Log for detailed debugging
+                        self.logger.info(f"Filtering message - requested mode={mode}, " +
+                                      f"message response_type={response_type}")
+                        
+                        # Simple strict mode matching logic
+                        # Only match exact response type to avoid mixing modes
+                        mode_match = (
+                            response_type == mode or  # Direct match - this is the main one we care about
+                            (response_type in mode_mapping and mode_mapping[response_type] == mode) or  # Mapped match for compatibility
+                            (mode in mode_mapping and mode_mapping[mode] == response_type)  # Reverse mapped match
+                        )
+                        
+                        if not mode_match:
+                            self.logger.info(f"Filtering out message with response_type={response_type}, no match for mode={mode}")
+                            continue
                     
                     # For user messages, only include ones that have a matching response
                     # or are at the end of the conversation (waiting for a response)

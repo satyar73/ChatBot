@@ -239,14 +239,9 @@ class ChatService:
             document_question = data.metadata['document_question']
             self.logger.info(f"Document question found in metadata: {document_question}")
         
-        # Determine which mode/strategy to use
-        # Map 'dual' and 'compare' to 'both'
-        if mode in ["dual", "compare"]:
-            mode = "both"
-            
-        # Keep special modes like 'needl' as is
-        # Only remap other modes to standard options
-        if mode not in ["both", "rag", "needl"]:
+        # We support only three modes. However the no_rag can be called by other names (Standard, ...)
+        # always call such modes as no_rag
+        if mode not in ["rag", "needl"]:
             mode = "no_rag"
 
         # Get the appropriate strategy
@@ -287,37 +282,42 @@ class ChatService:
                           f"no_rag_response: {type(no_rag_response)}, "
                           f"queries_tried: {type(queries_tried)}")
 
+        # needl and rag responses are stored in rag_response, while no_rag is sent as a separate
+        # response
         # Get the principal outputs
-        if rag_response is None:
+        if rag_response is not None:
+            if isinstance(rag_response, dict):
+                rag_output = rag_response.get('output', "No output available in RAG response")
+                self.logger.debug(f"rag_response is dict, extracted output: {rag_output[:30]}...")
+            else:
+                rag_output = str(rag_response)
+                self.logger.debug(f"rag_response is {type(rag_response)}, converted to string: {rag_output[:30]}...")
+        else:
             rag_output = None
             self.logger.debug("rag_response is None")
-        elif isinstance(rag_response, dict):
-            rag_output = rag_response.get('output', "No output available in RAG response")
-            self.logger.debug(f"rag_response is dict, extracted output: {rag_output[:30]}...")
-        else:
-            rag_output = str(rag_response)
-            self.logger.debug(f"rag_response is {type(rag_response)}, converted to string: {rag_output[:30]}...")
 
-        if no_rag_response is None:
+        if no_rag_response is not None:
+            if isinstance(no_rag_response, dict):
+                no_rag_output = no_rag_response.get('output', "No output available in non-RAG response")
+                self.logger.debug(f"no_rag_response is dict, extracted output: {no_rag_output[:30]}...")
+            else:
+                no_rag_output = str(no_rag_response)
+                self.logger.debug(
+                    f"no_rag_response is {type(no_rag_response)}, converted to string: {no_rag_output[:30]}...")
+        else:
             no_rag_output = None
             self.logger.debug("no_rag_response is None")
-        elif isinstance(no_rag_response, dict):
-            no_rag_output = no_rag_response.get('output', "No output available in non-RAG response")
-            self.logger.debug(f"no_rag_response is dict, extracted output: {no_rag_output[:30]}...")
-        else:
-            no_rag_output = str(no_rag_response)
-            self.logger.debug(
-                f"no_rag_response is {type(no_rag_response)}, converted to string: {no_rag_output[:30]}...")
 
-
-        # Create the response content
+        # Create the response content.
         primary_output = rag_output if mode != "no_rag" else no_rag_output
         secondary_output = no_rag_output if mode != "rag" else None
 
         self.logger.debug(
-            f"primary_output type: {type(primary_output)}, content: {primary_output[:50] if primary_output else 'None'}")
+            f"primary_output type: {type(primary_output)}, "
+            f"content: {primary_output[:50] if primary_output else 'None'}")
         self.logger.debug(
-            f"secondary_output type: {type(secondary_output)}, content: {secondary_output[:50] if secondary_output else 'None'}")
+            f"secondary_output type: {type(secondary_output)}, "
+            f"content: {secondary_output[:50] if secondary_output else 'None'}")
 
         # Create a temporary strategy just to format sources
         temp_strategy = ResponseStrategy(self, self.agent_manager)
@@ -325,15 +325,22 @@ class ChatService:
         sources = temp_strategy.format_sources(rag_response)
         
         # Determine which response to add to the chat history based on mode.
-        # While redundant to the above, it is easier to have the logic separate
-        if mode == "needl" and rag_response is not None:
-            self.logger.debug("Using needl_response as primary response (mode=needl)")
-            # For Needl mode, use the rag_response but access it differently since it's formatted from Needl API
-            if isinstance(rag_response, dict) and "response" in rag_response:
-                primary_output = rag_response["response"].get("output", "")
-                primary_response = {"output": primary_output}
+        # the logic tries to have a primary response filled to the best
+        # extent possible
+        if mode == "needl":
+            if rag_response is not None:
+                self.logger.debug("Using needl_response as primary response (mode=needl)")
+                # For Needl mode, use the rag_response but access it differently
+                # since it's formatted from Needl API
+                if isinstance(rag_response, dict) and "response" in rag_response:
+                    primary_output = rag_response["response"].get("output", "")
+                    primary_response = {"output": primary_output}
+                else:
+                    primary_response = {"output": "Could not parse Needl response correctly"}
             else:
-                primary_response = {"output": "Could not parse Needl response correctly"}
+                self.logger.debug("rag_response is None (mode=needl)")
+                primary_response = {"output": "No response available"}
+                primary_output = ""
         elif mode == "no_rag" and no_rag_response is not None:
             self.logger.debug("Using no_rag_response as primary response (mode=no_rag)")
             primary_response = no_rag_response
@@ -351,22 +358,16 @@ class ChatService:
         # Determine the appropriate response type based on the ACTUAL RESPONSE being used
         # Not just the current mode
         
-        # First determine which response we're actually using
-        using_needl = (mode == "needl")
-        using_norag = (mode == "no_rag" or (mode == "both" and primary_response == no_rag_response))
-        using_rag = not (using_needl or using_norag)
-        
-        self.logger.info(f"Response determination: using_needl={using_needl}, using_norag={using_norag}, using_rag={using_rag}")
-        
-        if using_needl:
+        if mode == "needl":
             response_type = "needl"
             additional_metadata = {"isNeedlResponse": True, "originalMode": "needl"}
             self.logger.info(f"Setting response_type=needl")
-        elif using_norag:
+        elif mode == "no_rag":
             response_type = "no_rag"
             additional_metadata = {"originalMode": mode, "type": "standard"}
             self.logger.info(f"Setting response_type=no_rag")
         else:
+            assert mode == "rag"
             response_type = "rag"
             additional_metadata = {"originalMode": mode, "type": "rag"}
             self.logger.info(f"Setting response_type=rag")

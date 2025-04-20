@@ -34,7 +34,7 @@ class ResponseStrategy:
         
         Args:
             query: The user's query
-            mode: The response mode (rag, no_rag, both, needl)
+            mode: The response mode (rag, no_rag, needl)
             chat_service: The chat service instance
             agent_manager: The agent manager instance
             
@@ -43,8 +43,6 @@ class ResponseStrategy:
         """
         if mode == "no_rag":
             return NonRAGResponseStrategy(chat_service, agent_manager)
-        elif mode == "both":
-            return DualResponseStrategy(chat_service, agent_manager)
         elif mode == "needl":
             return NeedlResponseStrategy(chat_service, agent_manager)
         elif query.lower().startswith("database:"):
@@ -457,57 +455,6 @@ class NonRAGResponseStrategy(ResponseStrategy):
         
         return None, non_rag_response, [query]
 
-class DualResponseStrategy(ResponseStrategy):
-    """Strategy for generating both RAG and non-RAG responses."""
-
-    async def execute(self, 
-                    chat_model_config: ChatModelConfig, 
-                    query: str, 
-                    chat_history: ChatHistory, 
-                    custom_system_prompt: str = None,
-                    prompt_style: str = "default",
-                    client_name: str = None) -> Tuple[Dict[str, Any], Dict[str, Any], List[str]]:
-        """
-        Execute both RAG and non-RAG response strategies.
-        
-        Args:
-            chat_model_config: Configuration for the chat model
-            query: The user's query
-            chat_history: Chat history
-            custom_system_prompt: Optional custom system prompt
-            prompt_style: The prompt style to use
-            client_name: Optional client name for namespace-specific retrieval
-            
-        Returns:
-            Tuple of (rag_response, no_rag_response, queries_tried)
-        """
-        # Get RAG response
-        rag_response, queries_tried = await self.execute_rag_with_retry(
-            chat_model_config=chat_model_config,
-            query=query,
-            history=chat_history.get_messages(),
-            custom_system_prompt=custom_system_prompt,
-            prompt_style=prompt_style,
-            client_name=client_name
-        )
-        
-        # Create a temporary strategy just to format sources
-        temp_strategy = ResponseStrategy(self.chat_service, self.agent_manager)
-        # Extract sources from the RAG response if available
-        sources = temp_strategy.format_sources(rag_response)
-
-        # Get non-RAG response
-        non_rag_agent = self.agent_manager.get_agent(
-            chat_model_config=chat_model_config,
-            agent_type="standard",
-            custom_system_prompt=custom_system_prompt
-        )
-        non_rag_response = await non_rag_agent.ainvoke(
-            {"input": query, "history": chat_history.get_messages()},
-            include_run_info=True
-        )
-        
-        return rag_response, non_rag_response, queries_tried
 
 class DatabaseResponseStrategy(ResponseStrategy):
     """Strategy for handling database-related queries."""

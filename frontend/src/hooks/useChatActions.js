@@ -145,30 +145,6 @@ const useChatActions = () => {
             isNeedlResponse: true
           }
         });
-      } else if (state.responseMode === "compare") {
-        // Show both responses side by side
-        const assistantMessages = [];
-        
-        assistantMessages.push({
-            role: 'assistant', 
-            content: ragResponse || "No RAG response available",
-            hiddenContent: standardResponse || "No standard response available",
-            type: 'rag',
-            response_type: 'rag'  // Explicitly tag with response_type for filtering
-        });
-
-       assistantMessages.push({
-            role: 'assistant', 
-            content: standardResponse || "No standard response available",
-            hiddenContent: ragResponse || "No RAG response available",
-            type: 'standard',
-            response_type: 'no_rag'  // Explicitly tag with response_type for filtering
-        });
-
-       dispatch({
-            type: ACTIONS.ADD_ASSISTANT_MESSAGES, 
-            payload: assistantMessages 
-        });
       } else if (state.responseMode === "rag") {
         // Only show RAG response but store both if available
         dispatch({ 

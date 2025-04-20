@@ -62,7 +62,6 @@ async def chat(data: Message, chat_service: ChatService = Depends(get_chat_servi
     - **mode**: Response mode
         - `rag` (default): Knowledge-enhanced responses with sources
         - `no_rag`: General knowledge only without sources
-        - `compare`: Return both RAG and non-RAG responses
     - **system_prompt**: Optional custom prompt to override default behavior
     - **prompt_style**: Response style preference
         - `default`: Standard balanced response

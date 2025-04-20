@@ -31,8 +31,6 @@ export const chatApi = {
       let mode = "rag";
       if (responseMode === "standard") {
         mode = "no_rag";
-      } else if (responseMode === "compare") {
-        mode = "compare";
       } else if (responseMode === "needl") {
         mode = "needl";
       }

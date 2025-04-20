@@ -65,7 +65,7 @@ class Message(BaseModel):
     """Model for user message with session identification."""
     message: str = Field(..., description="The user's message or question")
     session_id: str = Field(..., description="Unique identifier for the chat session")
-    mode: str = Field("rag", description="Query mode: 'rag' (knowledge-enhanced), 'no_rag' (general knowledge only), 'both' (compare responses), or 'needl' (use Needl.ai API)")
+    mode: str = Field("rag", description="Query mode: 'rag' (knowledge-enhanced), 'no_rag' (general knowledge only), or 'needl' (use Needl.ai API)")
     system_prompt: Optional[str] = Field(None, description="Custom system prompt to override the default behavior")
     prompt_style: Optional[str] = Field("default", description="Response style: 'default', 'detailed' (comprehensive), or 'concise' (brief)")
     metadata: Optional[Dict[str, Any]] = Field(
