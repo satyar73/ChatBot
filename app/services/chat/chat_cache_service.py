@@ -39,8 +39,7 @@ class ChatCacheService:
             CREATE TABLE IF NOT EXISTS chat_cache (
                 query_hash TEXT PRIMARY KEY,
                 user_input TEXT,
-                rag_response TEXT,
-                no_rag_response TEXT,
+                response TEXT,
                 sources TEXT,
                 system_prompt TEXT,
                 prompt_style TEXT DEFAULT 'default',
@@ -79,9 +78,9 @@ class ChatCacheService:
             
             # Define all required columns for the chat_cache table
             required_columns = [
-                "query_hash", "user_input", "rag_response", 
-                "no_rag_response", "sources", "system_prompt", 
-                "prompt_style", "mode", "client_name", "timestamp", "hit_count"
+                "query_hash", "user_input", "response", "sources", 
+                "system_prompt", "prompt_style", "mode", "client_name", 
+                "timestamp", "hit_count"
             ]
             
             # Check which columns exist in the current schema
@@ -95,6 +94,9 @@ class ChatCacheService:
             # Check if any required column is missing
             missing_columns = [col for col in required_columns if col not in existing_columns]
             
+            # rebuild If the old schema with separate response fields is detected,
+            old_schema = any(col in existing_columns for col in ["rag_response", "no_rag_response", "needl_response"])
+            
             conn.close()
             
             if missing_columns:
@@ -103,6 +105,10 @@ class ChatCacheService:
                 
             if not cache_logs_exists:
                 self.logger.warning("Database missing cache_logs table")
+                return True
+                
+            if old_schema:
+                self.logger.warning("Old schema with separate response fields detected - rebuilding")
                 return True
                 
             return False
@@ -123,7 +129,7 @@ class ChatCacheService:
             session_id: Optional session ID
             system_prompt: Optional custom system prompt
             prompt_style: The prompt style (default, detailed, concise)
-            mode: The response mode (rag, no_rag, both)
+            mode: The response mode (rag, no_rag, needl)
             client_name: Optional client name for namespace-specific caching
             
         Returns:
@@ -148,13 +154,13 @@ class ChatCacheService:
         if system_prompt:
             hash_content += "system_prompt:" + system_prompt.strip()
             
-        # Always include prompt style in hash (critical for proper caching with different styles)
+        # Always include prompt style in hash
         hash_content += "prompt_style:" + (prompt_style or "default").strip().lower()
         
-        # Always include mode in hash (critical for proper caching with different modes)
+        # Always include mode in hash
         hash_content += "mode:" + (mode or "rag").strip().lower()
         
-        # Include client name in hash if provided (critical for namespace-specific caching)
+        # Include client name in hash if provided
         if client_name:
             hash_content += "client:" + client_name
             
@@ -180,20 +186,20 @@ class ChatCacheService:
             conn = sqlite3.connect(str(cache_config.CACHE_DB_PATH))
             cursor = conn.cursor()
 
-            # Get cached response with appropriate columns
+            # Get cached response
             cursor.execute(
-            "SELECT rag_response, no_rag_response, needl_response, sources, timestamp,"
-                                    " hit_count, system_prompt, prompt_style, mode, client_name"
-                                    " FROM chat_cache"
-                                    " WHERE query_hash = ?",
-                        (query_hash,)
-                    )
+            "SELECT response, sources, timestamp, hit_count, system_prompt,"
+                                " prompt_style, mode, client_name"
+                                " FROM chat_cache"
+                                " WHERE query_hash = ?",
+                (query_hash,)
+            )
             result = cursor.fetchone()
 
             if result:
-                (rag_response, no_rag_response, needl_response, sources_json, timestamp,
+                (response, sources_json, timestamp,
                         hit_count, system_prompt, prompt_style, mode, client_name) = result
-                # Use old schema if needl_response column doesn't exist
+                
                 # Check if cache entry has expired
                 age_in_seconds = time.time() - timestamp
                 if age_in_seconds > cache_config.CACHE_TTL:
@@ -216,11 +222,9 @@ class ChatCacheService:
                 sources = json.loads(sources_json) if sources_json else []
                 
                 cached_response = {
-                        "rag_response": rag_response,
-                        "no_rag_response": no_rag_response,
+                        "rag_response": response,  # Keep the same key for compatibility
                         "sources": sources,
                         "system_prompt": system_prompt,
-                        "needl_response": needl_response,
                         "prompt_style": prompt_style,
                         "mode": mode
                 }
@@ -250,18 +254,18 @@ class ChatCacheService:
                       client_name: str = None,
                       mode: str = "rag") -> bool:
         """
-        Cache a response for future retrieval.
+        Cache a response for future retrieval. Uses a single response field based on mode.
         
         Args:
             query_hash: Hash identifying the query
             user_input: Original user input
-            rag_response: Response with RAG
-            no_rag_response: Response without RAG
-            needl_response: Response with Needl
+            rag_response: Response with RAG (used for rag mode)
+            no_rag_response: Response without RAG (used for no_rag mode)
+            needl_response: Response with Needl (used for needl mode)
             sources: Optional list of sources
             system_prompt: Optional custom system prompt
             prompt_style: Optional prompt style (default, detailed, concise)
-            mode: Optional response mode (rag, no_rag, both)
+            mode: Response mode (rag, no_rag, needl)
             client_name: Optional client name for namespace-specific caching
         Returns:
             Boolean indicating success/failure
@@ -304,31 +308,25 @@ class ChatCacheService:
             else:
                 sources_json = None
             
-            # Make sure we have at least one non-null response
-            if rag_response is None and no_rag_response is None and needl_response is None:
-                self.logger.error(f"Cannot cache response: all response types are None")
+            # Choose the appropriate response based on the mode
+            response = rag_response
+            # Make sure we have a non-null response
+            if response is None:
+                self.logger.error(f"Cannot cache response: no response available for mode {mode}")
                 return False
-                
-            # Check if we need to alter the table to add the needl_response column
-            try:
-                cursor.execute("SELECT needl_response FROM chat_cache LIMIT 1")
-            except sqlite3.OperationalError:
-                # Column doesn't exist, add it
-                self.logger.info("Adding needl_response column to chat_cache table")
-                cursor.execute("ALTER TABLE chat_cache ADD COLUMN needl_response TEXT")
             
-            # Store response with all fields
+            # Store response
             cursor.execute(
                 """
                 INSERT OR REPLACE 
                     INTO
                 chat_cache 
-                (query_hash, user_input, rag_response, no_rag_response, needl_response, sources,
+                (query_hash, user_input, response, sources,
                 system_prompt, prompt_style, mode, client_name, timestamp, hit_count) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 """, 
-                (query_hash, user_input, rag_response, no_rag_response, needl_response,
-                 sources_json, system_prompt, prompt_style, mode, client_name, time.time())
+                (query_hash, user_input, response, sources_json,
+                 system_prompt, prompt_style, mode, client_name, time.time())
             )
             
             # Ensure cache size doesn't exceed limit
@@ -498,7 +496,7 @@ class ChatCacheService:
                         "MIN(time() - timestamp) / 3600,"
                         "MAX(time() - timestamp) / 3600,"
                         "AVG(hit_count) " +
-                    "FROM chat_cache"
+                    "FROM chat_cache "
                     "WHERE timestamp < ?",
                     (threshold_time,)
                 )

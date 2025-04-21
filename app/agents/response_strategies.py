@@ -56,7 +56,7 @@ class ResponseStrategy:
                     chat_history: ChatHistory, 
                     custom_system_prompt: str = None, 
                     prompt_style: str = "default",
-                    client_name: str = None) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], List[str]]:
+                    client_name: str = None) -> Tuple[Optional[Dict[str, Any]], List[str]]:
         """
         Execute the strategy to generate a response.
         
@@ -388,7 +388,7 @@ class RAGResponseStrategy(ResponseStrategy):
                     chat_history: ChatHistory, 
                     custom_system_prompt: str = None,
                     prompt_style: str = "default",
-                    client_name: str = None) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], List[str]]:
+                    client_name: str = None) -> Tuple[Optional[Dict[str, Any]], List[str]]:
         """
         Execute the RAG response strategy.
         
@@ -413,7 +413,7 @@ class RAGResponseStrategy(ResponseStrategy):
                                                         prompt_style=prompt_style,
                                                         client_name=client_name
                                                     )
-        return rag_response, None, queries_tried
+        return rag_response, queries_tried
 
 class NonRAGResponseStrategy(ResponseStrategy):
     """Strategy for generating responses without using RAG."""
@@ -424,7 +424,7 @@ class NonRAGResponseStrategy(ResponseStrategy):
                     chat_history: ChatHistory, 
                     custom_system_prompt: str = None,
                     prompt_style: str = "default",
-                    client_name: str = None) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], List[str]]:
+                    client_name: str = None) -> Tuple[Optional[Dict[str, Any]], List[str]]:
         """
         Execute the non-RAG response strategy.
         
@@ -453,7 +453,7 @@ class NonRAGResponseStrategy(ResponseStrategy):
             include_run_info=True
         )
         
-        return None, non_rag_response, [query]
+        return non_rag_response, [query]
 
 
 class DatabaseResponseStrategy(ResponseStrategy):
@@ -465,7 +465,7 @@ class DatabaseResponseStrategy(ResponseStrategy):
                     chat_history: ChatHistory, 
                     custom_system_prompt: str = None,
                     prompt_style: str = "default",
-                    client_name: str = None) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], List[str]]:
+                    client_name: str = None) -> Tuple[Optional[Dict[str, Any]], List[str]]:
         """
         Execute the database response strategy.
         
@@ -496,7 +496,7 @@ class DatabaseResponseStrategy(ResponseStrategy):
         
         # Return the database response as the RAG response (since it's the primary response)
         # and None as the non-RAG response
-        return db_response, None, [query]
+        return db_response, [query]
         
 class NeedlResponseStrategy(ResponseStrategy):
     """Strategy for handling queries using the Needl.ai API."""
@@ -507,7 +507,7 @@ class NeedlResponseStrategy(ResponseStrategy):
                     chat_history: ChatHistory, 
                     custom_system_prompt: str = None,
                     prompt_style: str = "default",
-                    client_name: str = None) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], List[str]]:
+                    client_name: str = None) -> Tuple[Optional[Dict[str, Any]], List[str]]:
         """
         Execute the Needl response strategy.
         
@@ -541,4 +541,4 @@ class NeedlResponseStrategy(ResponseStrategy):
         
         # Return the Needl response as the RAG response (since it's the primary response)
         # and None as the non-RAG response
-        return formatted_response, None, [query]
+        return formatted_response, [query]

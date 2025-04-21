@@ -690,7 +690,8 @@ class ChatEvaluationService:
         return state_graph
 
     def build_test_graph(self):
-        """Build a testing workflow graph with dual evaluation"""
+        """Build a testing workflow graph with dual evaluation.
+        The implementation is a more advanced implementation"""
         # Create the graph
         builder = StateGraph(DualState)
 

@@ -66,30 +66,25 @@ const useChatActions = () => {
   }, [dispatch]);
   
   /**
-   * Process responses from the API - guaranteed to be in the format:
-   * response.response.output for RAG
-   * response.response.no_rag_output for non-RAG/standard
+   * Process responses from the API - simplified to work with just the output field.
+   * The backend now returns a single response in the output field based on the mode.
    */
   const processResponses = useCallback((response) => {
-    let ragResponse = null;
-    let standardResponse = null;
+    let output = null;
+    let mode = null;
     
     if (response.response) {
-      ragResponse = response.response.output || null;
-      standardResponse = response.response.no_rag_output || null;
+      output = response.response.output || null;
+      mode = response.response.mode || state.responseMode;
     }
     
-    // Ensure we have strings for display
-    if (ragResponse && typeof ragResponse !== 'string') {
-      ragResponse = JSON.stringify(ragResponse, null, 2);
+    // Ensure we have a string for display
+    if (output && typeof output !== 'string') {
+      output = JSON.stringify(output, null, 2);
     }
     
-    if (standardResponse && typeof standardResponse !== 'string') {
-      standardResponse = JSON.stringify(standardResponse, null, 2);
-    }
-    
-    return { ragResponse, standardResponse };
-  }, []);
+    return { output, mode };
+  }, [state.responseMode]);
   
   /**
    * Send a message to the chat API
@@ -121,14 +116,14 @@ const useChatActions = () => {
       }
       
       // Process the response data
-      const { ragResponse, standardResponse } = processResponses(response);
+      const { output, mode } = processResponses(response);
       
       // Add responses based on the current display mode
 
       // Just use role: 'assistant' and add the text, no other flags or data
       if (state.responseMode === "needl") {
         // For Needl mode, display both the response and sources
-        const content = ragResponse || "No Needl response available";
+        const content = output || "No Needl response available";
         
         // Include sources in the message if available
         const sources = response.sources || [];
@@ -146,25 +141,23 @@ const useChatActions = () => {
           }
         });
       } else if (state.responseMode === "rag") {
-        // Only show RAG response but store both if available
+        // Show RAG response
         dispatch({ 
           type: ACTIONS.ADD_ASSISTANT_MESSAGE, 
           payload: { 
             role: 'assistant', 
-            content: ragResponse || "No RAG response available",
-            hiddenContent: standardResponse,
+            content: output || "No RAG response available",
             originalMode: state.responseMode,
             response_type: "rag"  // Explicitly tag with response_type for filtering
           }
         });
       } else {
-        // Only show standard response but store both if available
+        // Show standard response
         dispatch({ 
           type: ACTIONS.ADD_ASSISTANT_MESSAGE, 
           payload: { 
             role: 'assistant', 
-            content: standardResponse || "No standard response available",
-            hiddenContent: ragResponse,
+            content: output || "No standard response available",
             originalMode: state.responseMode,
             response_type: "no_rag"  // Explicitly tag with response_type for filtering
           }
