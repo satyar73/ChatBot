@@ -3,13 +3,12 @@ Service layer for handling agent queries and responses with enhanced RAG query r
 """
 import time
 import sqlite3
-from pathlib import Path
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional
 
 from app.agents.chat_agents import AgentManager
 from app.agents.response_strategies import ResponseStrategy
 from app.config.chat_config import chat_config
-from app.models.chat_models import ChatHistory, ResponseContent, ResponseMessage, Message
+from app.models.chat_models import ResponseContent, ResponseMessage, Message
 from app.services.chat.chat_cache_service import chat_cache
 from app.services.chat.session_adapter import session_adapter
 from app.services.chat.session_service import session_manager
@@ -428,26 +427,6 @@ class ChatService:
             self.logger.error(f"Error retrieving session {session_id}: {e}")
             return {"error": f"Session not found or error retrieving session: {str(e)}"}
             
-    def list_sessions(self, limit: Optional[int] = 100, offset: int = 0) -> Dict[str, Any]:
-        """
-        List available sessions with pagination.
-        
-        Args:
-            limit: Maximum number of sessions to return
-            offset: Starting offset for pagination
-            
-        Returns:
-            Dictionary with sessions list and metadata
-        """
-        sessions = self.session_manager.list_sessions(limit=limit, offset=offset)
-        
-        return {
-            "sessions": sessions,
-            "total_count": len(sessions) + offset,  # Approximate if paginated
-            "page": offset // limit + 1 if limit > 0 else 1,
-            "page_size": limit
-        }
-        
     def get_session_by_id(self, session_id: str, mode: Optional[str] = None) -> Dict[str, Any]:
         """
         Get detailed information about a specific session.
@@ -514,18 +493,18 @@ class ChatService:
     def list_sessions(self, limit: Optional[int] = None, offset: int = 0) -> Dict[str, Any]:
         """
         List available sessions with pagination.
-        
+
         Args:
             limit: Maximum number of sessions to return
             offset: Starting offset for pagination
-            
+
         Returns:
             Dictionary with sessions and total count
         """
         try:
             # Get sessions from session manager
             sessions = self.session_manager.list_sessions(limit=limit, offset=offset)
-            
+
             # Count total sessions with a more efficient approach for SQLite
             # Get a separate count without limits to avoid loading all sessions
             if self.session_manager.storage_type == "sqlite":
@@ -543,7 +522,7 @@ class ChatService:
             else:
                 # For other storage types, get all sessions (could be inefficient for large sets)
                 total_count = len(self.session_manager.list_sessions())
-            
+
             return {
                 "sessions": sessions,
                 "total_count": total_count
@@ -555,8 +534,6 @@ class ChatService:
                 "total_count": 0,
                 "error": str(e)
             }
-
-    # Removed _format_sources method - now implemented in ResponseStrategy class
 
     def _format_history(self, messages: List) -> List:
         """
@@ -626,7 +603,7 @@ class AgentService:
         strategy = ResponseStrategy.get_strategy(query, mode, chat_service, chat_service.agent_manager)
         
         # Execute the strategy
-        rag_response, no_rag_response, queries_tried = await strategy.execute(
+        response, queries_tried = await strategy.execute(
             chat_model_config,
             query, 
             chat_history,
@@ -635,25 +612,20 @@ class AgentService:
         )
         
         # Extract sources from the RAG response if available
-        sources = strategy.format_sources(rag_response)
+        sources = strategy.format_sources(response)
         
         # Get the appropriate outputs
-        rag_output = rag_response.get('output', '') if rag_response else None
-        non_rag_output = no_rag_response.get('output', '') if no_rag_response else None
-        
-        # Determine primary output based on the mode
-        primary_output = rag_output if use_rag else non_rag_output
-        secondary_output = non_rag_output if use_rag and use_dual_response else None
-        
+        output = response.get('output', '') if response else None
+
         # Get intermediate steps if available
-        intermediate_steps = rag_response.get('intermediate_steps', []) if rag_response else []
+        intermediate_steps = response.get('intermediate_steps', []) if response else []
         
         # Create response content
         response_content = ResponseContent(
             input=query,
             history=history or [],
-            output=primary_output,
-            no_rag_output=secondary_output,
+            output=output,
+            no_rag_output=None,
             intermediate_steps=intermediate_steps
         )
 
